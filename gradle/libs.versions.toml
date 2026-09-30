@@ -4,7 +4,7 @@
 # Entries are grouped by concern; the comment on each group says the phase that first uses it.
 
 [versions]
-kotlin = "2.4.0"
+kotlin = "2.4.20"
 coroutines = "1.11.0"
 serialization = "1.11.0"
 koin = "4.2.2"
