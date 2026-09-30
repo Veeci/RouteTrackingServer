@@ -1,4 +1,4 @@
-package veeci.practicing
+package veeci.practicing.rts
 
 import io.ktor.client.request.get
 import io.ktor.http.HttpStatusCode

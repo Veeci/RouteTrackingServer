@@ -1,4 +1,4 @@
-package veeci.practicing
+package veeci.practicing.rts
 
 import io.ktor.http.*
 import io.ktor.server.application.*
