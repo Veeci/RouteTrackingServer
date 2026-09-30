@@ -104,6 +104,8 @@ Konsist rules defined now, trivially passing until contexts exist; they become m
 | TC-0-ARCH-01 | Architecture | Nothing under `..domain..` imports `io.ktor`, `org.jetbrains.exposed`, `java.sql`, `org.koin` | P0 |
 | TC-0-ARCH-02 | Architecture | `shared..` imports no context package | P0 |
 | TC-0-ARCH-03 | Architecture | A context imports another context only via `..application.api..` or `..domain.event..` | P0 |
+| TC-0-ARCH-04 | Architecture | Inside a context, dependencies point inward (adapter → application → domain); the context's wiring module may see all layers | P0 |
+| TC-0-ARCH-05 | Architecture | Each rule reports exactly the planted violations in `app/src/test/resources/architecture-fixtures` (rules can't pass vacuously) | P0 |
 | TC-0-CI-01 | CI | PR with a failing test shows a red `build` check and cannot be merged | P0 |
 | TC-0-CI-02 | CI | Merge to `main` publishes an image tagged with the commit SHA to GHCR | P1 |
 

@@ -44,6 +44,7 @@ testing {
             useJUnitJupiter(libs.versions.junit)
             dependencies {
                 implementation(testFixtures(project()))
+                implementation(libs.konsist)
             }
         }
 
