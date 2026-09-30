@@ -120,4 +120,6 @@
 - Trunk-based: short-lived branches `feat/<phase>-<topic>`, squash-merge to `main`; `main` is always deployable.
 - Conventional Commits (`feat(trip): add accept endpoint`); changelog generated from them.
 - PR checklist: tests (case IDs), OpenAPI/AsyncAPI updated, migration reviewed, docs updated, no new warnings.
-- CI on every PR: build, lint, all tests (Testcontainers), Docker image build. On `main`: push image to GHCR tagged with the git SHA.
+- CI on every PR: build, lint, all tests (Testcontainers), Docker image build. On `main`: push image to GHCR tagged with the git SHA
+  and **deploy to staging automatically** (phase 1.5); production is promoted from staging with approval (phase 10).
+- Migrations must be backward compatible with the previous release (expand/contract), because they run before the new code starts.

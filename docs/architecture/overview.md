@@ -23,6 +23,7 @@ and lets any of them be extracted later (e.g. routing as its own service) withou
 | `devicecontrol` | Commands to devices, delivery and acknowledgement, command policies | `device_commands` | – | `TripStatusChanged`, `GuestSubscriptionChanged` |
 | `live` | Real-time fan-out to guest sockets, presence | none (in-memory, Redis in phase 10) | `GuestSubscriptionChanged` | `TripEventRaised`, `FixesAccepted`, `RouteUpdated` |
 | `telemetry` | Session health metrics, provider comparison reports | `session_health` | – | `SessionClosed` (reads `tracking` data through its query interface) |
+| `fleet` | Admin read model across contexts, live fleet map, audit log queries | `fleet_drivers`, `audit_log` | – | `FixesAccepted`, `DeviceStatusReported`, `SessionClosed`, `TripStatusChanged`, `DriverDisabled` |
 
 ## Layers inside a context
 
@@ -66,7 +67,7 @@ route-tracking-server/
 │       │   ├── jobs/                 scheduler, distributed lock (Postgres advisory lock)
 │       │   └── observability/        logging (JSON), metrics (Micrometer), health checks, tracing hooks
 │       ├── shared/                   shared kernel
-│       ├── identity/  tracking/  trip/  routing/  devicecontrol/  live/  telemetry/
+│       ├── identity/  tracking/  trip/  routing/  devicecontrol/  live/  telemetry/  fleet/
 │       └── ...
 │   └── src/main/resources/           application.conf, db/migration (Flyway), openapi/, asyncapi/
 ├── protocol/                         wire contract library (kotlinx.serialization DTOs), published for the SDK

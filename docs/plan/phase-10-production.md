@@ -5,8 +5,9 @@ Branch: `feat/p10-production` · Depends on: 3, 4, 5 (best after all feature pha
 ## Goal
 
 Run two or more instances behind a load balancer with no behaviour change: live updates, presence,
-commands and jobs work regardless of which instance holds which socket. Deploy the service to a real
-environment with migrations, secrets, monitoring and a rollback path, and prove capacity with load tests.
+commands and jobs work regardless of which instance holds which socket. Promote the staging
+pipeline from phase 1.5 to a production environment with rolling deploys, monitoring, alerts and
+backups, and prove capacity with load tests.
 
 ## Scope
 
@@ -28,6 +29,7 @@ dashboards and alerts; backup/restore drill; data-retention job; capacity test.
 | `ProgressStateStore` / matcher state | 3, 7 | Driver reconnecting to another instance loses EWMA/cursor | Redis hash per trip with TTL; loss is tolerable (re-initialises) |
 | `ConnectedDevices` | 5 | Command issued on A, driver socket on B | `CommandIssued` fanned out on channel `device:{sessionId}`; instance holding the socket delivers |
 | Scheduled jobs | 4, 5 | Duplicate runs | Already solved: Postgres advisory locks |
+| `FleetPositionCache` + fleet subscribers | 11 | Dashboard on B misses drivers ingested on A | Redis hash of latest markers + pub/sub of changes; each instance runs ticks for its own subscribers |
 | Rate limiting (Ktor in-memory) | 1 | Limits per instance, not global | Acceptable (limit × instances); document it. Redis-backed limiter only if abuse appears |
 
 The ports introduced in earlier phases make each replacement an adapter swap selected by config
@@ -41,10 +43,13 @@ The ports introduced in earlier phases make each replacement an adapter swap sel
   reconnect with jittered exponential backoff (1 s → 30 s) to avoid reconnect storms after a deploy.
 - Rolling deploy: new instance becomes ready (`/health/ready`) before the old one drains.
 
-### Deployment pipeline
+### Deployment pipeline (extends phase 1.5)
+
+Phase 1.5 already deploys `main` to staging with migrations, health checks, smoke test and rollback.
+This phase adds a `prod` environment promoted from staging:
 
 ```
-PR → CI (check + image) → merge → image :sha pushed → deploy job:
+PR → CI → merge → staging deploy + smoke (phase 1.5) → manual approval (GitHub environment protection) → prod deploy job:
    1. run migrations: container `flyway migrate` against prod DB (expand/contract migrations only)
    2. rolling update app instances to :sha
    3. smoke test: /health/ready + one synthetic trip via the simulator against prod-like env
@@ -71,7 +76,7 @@ Secrets: platform secret store → env vars (`DB_PASSWORD`, `JWT_SECRET`, `REDIS
 - [ ] T10.2 Redis adapters: live bus, presence, progress state, device command routing; config switch.
 - [ ] T10.3 Contract tests for each port run against the Redis adapter too.
 - [ ] T10.4 Multi-instance E2E harness: two app instances + Postgres + Redis in Testcontainers (or compose).
-- [ ] T10.5 Deployment target, pipeline job, migration step, secrets.
+- [ ] T10.5 `prod` environment: app, managed Postgres with backups, secrets, promotion job with approval, rolling strategy.
 - [ ] T10.6 Dashboards, alerts, runbook; retention job.
 - [ ] T10.7 Capacity test and report (`docs/ops/capacity.md`).
 

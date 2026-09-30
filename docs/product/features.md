@@ -46,6 +46,7 @@ Rule of thumb: **WebSocket for anything live** (fixes in, events and commands ou
 | I13 | Driver simulator | Replays a recorded route through the driver socket | Dev tooling | 2 |
 | I14 | Horizontal scale | Multi-instance live fan-out, presence and command routing via Redis | Platform | 10 |
 | I15 | Delivery & operations | Container image, deploy pipeline, dashboards, alerts, backups, retention | Platform | 0, 1, 10 |
+| I16 | Admin API & live fleet | Fleet-wide driver list, live map channel, trip oversight, audit log for the admin dashboard | Data + Realtime | 11 |
 
 ## What the SDK already produces
 

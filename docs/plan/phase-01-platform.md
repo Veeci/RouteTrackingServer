@@ -1,6 +1,6 @@
 # Phase 1 — Platform Skeleton
 
-Branch: `feat/p1-platform` · Depends on: 0 · Unlocks: 2
+Branch: `feat/p1-platform` · Depends on: 0 · Unlocks: 1.5, 2
 
 ## Goal
 
@@ -92,7 +92,7 @@ the `Problem` schema, and the health endpoints. Swagger UI at `/docs` when `APP_
 | TC-1-WS-01 | API | `/ws/v1/echo` echoes text frames | P0 |
 | TC-1-WS-02 | API | Frame larger than `maxFrameBytes` → close 1009 | P0 |
 | TC-1-WS-03 | API | Invalid JSON on a `WsSessionRunner` endpoint → `error{code=MALFORMED_MESSAGE}`, session stays open | P0 |
-| TC-1-WS-04 | API | `/ws/v1/echo` is not mounted when `APP_ENV=prod` (upgrade → 404) | P1 |
+| TC-1-WS-04 | API | `/ws/v1/echo` is mounted in `dev`, `test`, `staging` and not in `prod` (upgrade → 404) | P1 |
 | TC-1-API-01 | Contract | Health responses conform to `rts-v1.yaml` (validator in harness) | P0 |
 | TC-1-SHD-01 | Integration | Application stop closes an open socket with 1001 within the grace period | P2 |
 
