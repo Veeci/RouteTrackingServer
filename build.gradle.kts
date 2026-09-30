@@ -7,6 +7,7 @@ plugins {
     alias(ktorLibs.plugins.ktor) apply false
     alias(libs.plugins.detekt) apply false
     alias(libs.plugins.spotless)
+    alias(libs.plugins.kover)
 }
 
 // Formatting: ktlint via Spotless for every Kotlin source and build script in the repo.
@@ -27,10 +28,19 @@ spotless {
 subprojects {
     pluginManager.withPlugin("org.jetbrains.kotlin.jvm") {
         apply(plugin = "io.gitlab.arturbosch.detekt")
+        apply(plugin = "org.jetbrains.kotlinx.kover")
         extensions.configure<DetektExtension> {
             buildUponDefaultConfig = true
             config.setFrom(rootProject.file("config/detekt/detekt.yml"))
             parallel = true
         }
     }
+}
+
+// Coverage: one aggregated Kover report for all modules (`./gradlew koverHtmlReport`).
+// Report only in phase 0; thresholds from docs/testing/strategy.md are enforced once contexts exist.
+dependencies {
+    kover(project(":app"))
+    kover(project(":protocol"))
+    kover(project(":tools:simulator"))
 }
