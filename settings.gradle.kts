@@ -19,3 +19,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "route-tracking-server"
 
+include(":app", ":protocol", ":tools:simulator")

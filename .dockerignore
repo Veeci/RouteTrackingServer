@@ -1,0 +1,14 @@
+# Keep the build context small and free of local state and secrets.
+.git
+.gradle
+.kotlin
+.idea
+**/build
+**/out
+docs
+load-tests
+*.iml
+.DS_Store
+local.properties
+.env
+deploy/.env

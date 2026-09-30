@@ -1,0 +1,25 @@
+# Overrides on top of detekt's default rule set (buildUponDefaultConfig = true).
+# Keep this file small: only change a rule with a reason in a comment.
+
+config:
+  validation: true
+
+style:
+  MagicNumber:
+    # Tests and fixtures are full of literal coordinates, distances and timestamps.
+    excludes: ['**/test/**', '**/testFixtures/**', '**/integrationTest/**', '**/e2eTest/**']
+  MaxLineLength:
+    maxLineLength: 140   # same as .editorconfig
+  WildcardImport:
+    active: false        # formatting is ktlint's job; avoid two tools disagreeing
+
+naming:
+  FunctionNaming:
+    # Backticked test names: `rejects fix recorded in the future`
+    excludes: ['**/test/**', '**/testFixtures/**', '**/integrationTest/**', '**/e2eTest/**']
+
+complexity:
+  LongParameterList:
+    constructorThreshold: 10   # aggregates and config data classes legitimately take many values
+  TooManyFunctions:
+    excludes: ['**/test/**', '**/integrationTest/**', '**/e2eTest/**']
