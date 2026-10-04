@@ -19,6 +19,7 @@ kotlin {
 dependencies {
     implementation(project(":protocol"))
     implementation(ktorLibs.serialization.kotlinx.json)
+    implementation(ktorLibs.server.callId)
     implementation(ktorLibs.server.callLogging)
     implementation(ktorLibs.server.contentNegotiation)
     implementation(ktorLibs.server.core)
@@ -43,6 +44,7 @@ dependencies {
     testFixturesApi(platform(libs.junit.bom))
     testFixturesApi(libs.bundles.unit.test)
     testFixturesApi(ktorLibs.server.testHost)
+    testFixturesApi(libs.kotlinx.serialization.json)
     testFixturesApi(platform(libs.testcontainers.bom))
     testFixturesApi(libs.testcontainers.postgresql)
 }
