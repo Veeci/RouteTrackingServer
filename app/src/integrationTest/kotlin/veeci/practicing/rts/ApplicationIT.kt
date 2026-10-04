@@ -12,6 +12,6 @@ class ApplicationIT {
     @Test
     fun `the app starts against a real database and serves requests`() =
         testApp {
-            client.get("/").status shouldBe HttpStatusCode.OK
+            client.get("/health/live").status shouldBe HttpStatusCode.OK
         }
 }

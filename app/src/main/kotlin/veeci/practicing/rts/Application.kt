@@ -5,6 +5,10 @@ import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
+import io.ktor.server.routing.routing
+import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.prometheusmetrics.PrometheusConfig
+import io.micrometer.prometheusmetrics.PrometheusMeterRegistry
 import org.koin.core.module.Module
 import org.koin.dsl.module
 import org.koin.ktor.ext.get
@@ -17,7 +21,9 @@ import veeci.practicing.rts.platform.db.Migrations
 import veeci.practicing.rts.platform.di.platformModule
 import veeci.practicing.rts.platform.http.configureErrorHandling
 import veeci.practicing.rts.platform.http.configureRequestGuards
+import veeci.practicing.rts.platform.observability.configureMetrics
 import veeci.practicing.rts.platform.observability.configureRequestLogging
+import veeci.practicing.rts.platform.observability.healthRoutes
 import kotlin.system.exitProcess
 
 private val log = LoggerFactory.getLogger("veeci.practicing.rts.Application")
@@ -37,22 +43,29 @@ fun main(args: Array<String>) {
 
 /** Installs every plugin and route. Tests call this directly with their own [AppConfig]. */
 fun Application.module(config: AppConfig) {
+    // One registry for the whole process: HTTP timers, JVM, pool and (later) business metrics all land here.
+    val metrics = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
     install(KoinIsolated) {
         slf4jLogger()
-        modules(appModule(config))
+        modules(appModule(config, metrics))
     }
     if (config.db.migrateOnStart) Migrations.run(get())
 
     configureRequestLogging()
+    configureMetrics(metrics)
     configureSerialization()
     configureRequestGuards(config.http)
     configureErrorHandling()
     configureWebsockets()
     configureRouting()
+    routing { healthRoutes(get()) }
 }
 
 /** The whole object graph: the platform plus every bounded context. Production and the wiring test both use it. */
-fun appModule(config: AppConfig): Module =
+fun appModule(
+    config: AppConfig,
+    metrics: MeterRegistry,
+): Module =
     module {
-        includes(platformModule(config))
+        includes(platformModule(config, metrics))
     }

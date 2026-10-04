@@ -103,9 +103,9 @@ class RequestGuardsIT {
     @Test
     fun `TC-1-RL-01 exceeding the rate limit becomes a 429 problem with Retry-After`() =
         testApp(env = mapOf("HTTP_RATELIMITPERMINUTE" to "3")) {
-            repeat(3) { client.get("/").status shouldBe HttpStatusCode.OK }
+            repeat(3) { client.get("/health/live").status shouldBe HttpStatusCode.OK }
 
-            val response = client.get("/")
+            val response = client.get("/health/live")
 
             response.status shouldBe HttpStatusCode.TooManyRequests
             response.headers[HttpHeaders.RetryAfter].shouldNotBeNull()

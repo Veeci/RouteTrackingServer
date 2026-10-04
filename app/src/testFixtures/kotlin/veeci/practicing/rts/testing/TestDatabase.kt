@@ -10,23 +10,27 @@ import java.util.UUID
  * database inside it, which takes milliseconds.
  */
 object TestDatabase {
-    private val container: PostgreSQLContainer by lazy {
-        PostgreSQLContainer("postgres:16-alpine").apply { start() }
-    }
+    private val shared: PostgreSQLContainer by lazy { newContainer().apply { start() } }
 
-    /** Env vars pointing the app at the container's shared database. */
-    fun env(): Map<String, String> = envFor(container.databaseName)
+    /** Env vars pointing the app at the shared container's database. */
+    fun env(): Map<String, String> = envFor(shared)
 
-    /** Creates a new, empty database and returns env vars pointing at it. */
+    /** Creates a new, empty database in the shared container and returns env vars pointing at it. */
     fun freshDatabaseEnv(): Map<String, String> {
         val name = "test_" + UUID.randomUUID().toString().replace("-", "")
-        DriverManager.getConnection(container.jdbcUrl, container.username, container.password).use { connection ->
+        DriverManager.getConnection(shared.jdbcUrl, shared.username, shared.password).use { connection ->
             connection.createStatement().use { it.execute("CREATE DATABASE $name") }
         }
-        return envFor(name)
+        return envFor(shared, name)
     }
 
-    private fun envFor(database: String): Map<String, String> =
+    /** A container of its own, for tests that break the database on purpose (pause, stop). The caller starts and closes it. */
+    fun newContainer(): PostgreSQLContainer = PostgreSQLContainer("postgres:16-alpine")
+
+    fun envFor(
+        container: PostgreSQLContainer,
+        database: String = container.databaseName,
+    ): Map<String, String> =
         mapOf(
             "DB_URL" to "jdbc:postgresql://${container.host}:${container.getMappedPort(POSTGRES_PORT)}/$database",
             "DB_USER" to container.username,

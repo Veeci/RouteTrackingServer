@@ -26,7 +26,7 @@ class RequestLoggingIT {
     @Test
     fun `TC-1-OBS-01 a request without an id gets a generated one in X-Request-Id`() =
         testApp {
-            val response = client.get("/")
+            val response = client.get("/health/live")
 
             response.headers[HttpHeaders.XRequestId].shouldNotBeNull()
         }
@@ -34,7 +34,7 @@ class RequestLoggingIT {
     @Test
     fun `TC-1-OBS-01 a caller-supplied request id is kept and echoed`() =
         testApp {
-            val response = client.get("/") { header(HttpHeaders.XRequestId, "sdk-7f3a-42") }
+            val response = client.get("/health/live") { header(HttpHeaders.XRequestId, "sdk-7f3a-42") }
 
             response.headers[HttpHeaders.XRequestId] shouldBe "sdk-7f3a-42"
         }
@@ -42,7 +42,7 @@ class RequestLoggingIT {
     @Test
     fun `an unsafe request id is replaced, never copied into logs`() =
         testApp {
-            val response = client.get("/") { header(HttpHeaders.XRequestId, "evil id with spaces") }
+            val response = client.get("/health/live") { header(HttpHeaders.XRequestId, "evil id with spaces") }
 
             response.headers[HttpHeaders.XRequestId] shouldNotBe "evil id with spaces"
         }

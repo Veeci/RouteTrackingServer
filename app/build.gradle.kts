@@ -23,6 +23,7 @@ dependencies {
     implementation(ktorLibs.server.callId)
     implementation(ktorLibs.server.callLogging)
     implementation(ktorLibs.server.contentNegotiation)
+    implementation(ktorLibs.server.metrics.micrometer)
     implementation(ktorLibs.server.core)
     implementation(ktorLibs.server.netty)
     implementation(ktorLibs.server.rateLimit)
@@ -31,6 +32,7 @@ dependencies {
     implementation(ktorLibs.server.websockets)
     implementation(libs.logback.classic)
     runtimeOnly(libs.logstash.encoder)
+    implementation(libs.micrometer.prometheus)
 
     implementation(libs.hoplite.core)
     implementation(libs.hoplite.hocon)

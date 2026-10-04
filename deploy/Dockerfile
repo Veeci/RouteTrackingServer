@@ -47,8 +47,8 @@ ENV JAVA_OPTS="-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError -Dio.ktor.dev
 # One JSON object per log line, so log platforms can search by field (see logback.xml).
 ENV LOG_FORMAT=json
 
-# Phase 0 placeholder: `/` until phase 1 adds /health/live.
+# Liveness: is the process answering? (Readiness, /health/ready, is for load balancers, not for restarts.)
 HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=3 \
-  CMD curl -fsS http://127.0.0.1:8080/ > /dev/null || exit 1
+  CMD curl -fsS http://127.0.0.1:8080/health/live > /dev/null || exit 1
 
 ENTRYPOINT ["/app/bin/app"]
