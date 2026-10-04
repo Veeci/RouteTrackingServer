@@ -7,11 +7,13 @@ import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import org.koin.core.module.Module
 import org.koin.dsl.module
+import org.koin.ktor.ext.get
 import org.koin.ktor.plugin.KoinIsolated
 import org.koin.logger.slf4jLogger
 import org.slf4j.LoggerFactory
 import veeci.practicing.rts.platform.config.AppConfig
 import veeci.practicing.rts.platform.config.AppConfigLoader
+import veeci.practicing.rts.platform.db.Migrations
 import veeci.practicing.rts.platform.di.platformModule
 import kotlin.system.exitProcess
 
@@ -30,12 +32,14 @@ fun main(args: Array<String>) {
     embeddedServer(Netty, port = config.http.port) { module(config) }.start(wait = true)
 }
 
-@Suppress("UnusedParameter")
+/** Installs every plugin and route. Tests call this directly with their own [AppConfig]. */
 fun Application.module(config: AppConfig) {
     install(KoinIsolated) {
         slf4jLogger()
-        modules(appModule())
+        modules(appModule(config))
     }
+    if (config.db.migrateOnStart) Migrations.run(get())
+
     configureSerialization()
     configureStatusPages()
     configureWebsockets()
@@ -43,7 +47,7 @@ fun Application.module(config: AppConfig) {
 }
 
 /** The whole object graph: the platform plus every bounded context. Production and the wiring test both use it. */
-fun appModule(): Module =
+fun appModule(config: AppConfig): Module =
     module {
-        includes(platformModule())
+        includes(platformModule(config))
     }

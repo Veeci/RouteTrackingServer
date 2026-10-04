@@ -32,11 +32,19 @@ dependencies {
     implementation(platform(libs.koin.bom))
     implementation(libs.koin.ktor)
     implementation(libs.koin.logger.slf4j)
+    implementation(libs.hikari)
+    implementation(libs.exposed.core)
+    implementation(libs.exposed.jdbc)
+    implementation(libs.flyway.core)
+    runtimeOnly(libs.flyway.postgresql)
+    runtimeOnly(libs.postgresql)
 
     // Shared test support (in-memory adapters, object mothers, GPX/OSM fixtures) used by every test suite.
     testFixturesApi(platform(libs.junit.bom))
     testFixturesApi(libs.bundles.unit.test)
     testFixturesApi(ktorLibs.server.testHost)
+    testFixturesApi(platform(libs.testcontainers.bom))
+    testFixturesApi(libs.testcontainers.postgresql)
 }
 
 // Test suites (see docs/testing/strategy.md):
@@ -59,10 +67,11 @@ testing {
             dependencies {
                 implementation(project())
                 implementation(testFixtures(project()))
-                implementation(platform(libs.testcontainers.bom))
-                implementation(libs.testcontainers.postgresql)
                 implementation(libs.testcontainers.junit)
-                implementation(libs.postgresql)
+                // Repository and transaction tests use these types directly.
+                implementation(libs.exposed.core)
+                implementation(libs.exposed.jdbc)
+                implementation(libs.hikari)
             }
             targets.all { testTask.configure { shouldRunAfter(test) } }
         }
@@ -74,8 +83,6 @@ testing {
                 implementation(testFixtures(project()))
                 implementation(project(":protocol"))
                 implementation(project(":tools:simulator"))
-                implementation(platform(libs.testcontainers.bom))
-                implementation(libs.testcontainers.postgresql)
                 implementation(libs.testcontainers.junit)
             }
             targets.all { testTask.configure { shouldRunAfter(integrationTest) } }
