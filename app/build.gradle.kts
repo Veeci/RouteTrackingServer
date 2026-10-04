@@ -31,6 +31,8 @@ dependencies {
     implementation(ktorLibs.server.statusPages)
     implementation(ktorLibs.server.websockets)
     implementation(libs.logback.classic)
+    implementation(platform(libs.kotlinx.coroutines.bom))
+    implementation(libs.kotlinx.coroutines.slf4j)
     runtimeOnly(libs.logstash.encoder)
     implementation(libs.micrometer.prometheus)
 
@@ -78,7 +80,8 @@ testing {
                 implementation(project())
                 implementation(testFixtures(project()))
                 implementation(libs.testcontainers.junit)
-                // Repository, transaction and logging tests use these types directly.
+                // Repository, transaction, logging and WebSocket tests use these types directly.
+                implementation(project(":protocol"))
                 implementation(libs.logback.classic)
                 implementation(libs.exposed.core)
                 implementation(libs.exposed.jdbc)

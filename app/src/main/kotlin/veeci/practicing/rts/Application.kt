@@ -17,13 +17,17 @@ import org.koin.logger.slf4jLogger
 import org.slf4j.LoggerFactory
 import veeci.practicing.rts.platform.config.AppConfig
 import veeci.practicing.rts.platform.config.AppConfigLoader
+import veeci.practicing.rts.platform.config.AppEnv
 import veeci.practicing.rts.platform.db.Migrations
 import veeci.practicing.rts.platform.di.platformModule
 import veeci.practicing.rts.platform.http.configureErrorHandling
 import veeci.practicing.rts.platform.http.configureRequestGuards
+import veeci.practicing.rts.platform.http.configureSerialization
 import veeci.practicing.rts.platform.observability.configureMetrics
 import veeci.practicing.rts.platform.observability.configureRequestLogging
 import veeci.practicing.rts.platform.observability.healthRoutes
+import veeci.practicing.rts.platform.ws.configureWebSockets
+import veeci.practicing.rts.platform.ws.echoEndpoint
 import kotlin.system.exitProcess
 
 private val log = LoggerFactory.getLogger("veeci.practicing.rts.Application")
@@ -56,9 +60,12 @@ fun Application.module(config: AppConfig) {
     configureSerialization()
     configureRequestGuards(config.http)
     configureErrorHandling()
-    configureWebsockets()
-    configureRouting()
-    routing { healthRoutes(get()) }
+    configureWebSockets(config.ws)
+
+    routing {
+        healthRoutes(get())
+        if (config.app.env != AppEnv.PROD) echoEndpoint(get())
+    }
 }
 
 /** The whole object graph: the platform plus every bounded context. Production and the wiring test both use it. */

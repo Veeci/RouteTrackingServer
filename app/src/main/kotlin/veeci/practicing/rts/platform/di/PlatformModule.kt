@@ -15,6 +15,8 @@ import veeci.practicing.rts.platform.db.TransactionRunner
 import veeci.practicing.rts.platform.db.createDataSource
 import veeci.practicing.rts.platform.observability.HealthIndicator
 import veeci.practicing.rts.platform.observability.HealthRegistry
+import veeci.practicing.rts.platform.ws.WsSessionRegistry
+import veeci.practicing.rts.platform.ws.WsSessionRunner
 import java.time.Clock
 import javax.sql.DataSource
 
@@ -41,4 +43,7 @@ fun platformModule(
         // Contexts add their own dependencies (Redis, ...) the same way: bind them as HealthIndicator.
         single { DatabaseHealthIndicator(get()) } bind HealthIndicator::class
         single { HealthRegistry(getAll()) } onClose { it?.close() }
+
+        single { WsSessionRegistry(get()) }
+        single { WsSessionRunner(config.ws, get()) }
     }

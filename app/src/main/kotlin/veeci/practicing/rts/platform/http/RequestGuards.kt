@@ -1,6 +1,8 @@
 package veeci.practicing.rts.platform.http
 
+import io.ktor.http.HttpHeaders
 import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.install
 import io.ktor.server.plugins.bodylimit.RequestBodyLimit
 import io.ktor.server.plugins.origin
@@ -12,9 +14,11 @@ import kotlin.time.Duration.Companion.minutes
 
 /** Checks every request must pass before a route runs: size, content and rate. */
 fun Application.configureRequestGuards(config: HttpConfig) {
-    // Refuse oversized bodies before reading them into memory.
+    // Refuse oversized bodies before reading them into memory. Not for WebSocket upgrades: a socket is a
+    // long-lived stream, not one body (its limit is per frame, see WsConfig.maxFrameBytes), and the plugin's
+    // stream wrapper holds small frames back instead of passing them on. Long.MAX_VALUE turns the plugin off.
     install(RequestBodyLimit) {
-        bodyLimit { config.maxBodyBytes }
+        bodyLimit { call -> if (call.isWebSocketUpgrade()) Long.MAX_VALUE else config.maxBodyBytes }
     }
 
     // One validator for every Validatable body. Ktor's own result type only carries plain strings, so a
@@ -36,3 +40,5 @@ fun Application.configureRequestGuards(config: HttpConfig) {
         }
     }
 }
+
+private fun ApplicationCall.isWebSocketUpgrade() = request.headers[HttpHeaders.Upgrade].equals("websocket", ignoreCase = true)
