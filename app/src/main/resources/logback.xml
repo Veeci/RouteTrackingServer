@@ -1,12 +1,14 @@
+<!--
+  LOG_FORMAT picks the output: "text" (default) for people reading a terminal, "json" for log platforms,
+  which can then filter by field (level, requestId, logger) instead of grepping text. The Docker image sets
+  LOG_FORMAT=json. Each format lives in logback-<format>.xml and defines the CONSOLE appender; a typo such as
+  LOG_FORMAT=jsn makes logback print an error at startup. MDC values such as requestId appear in both formats.
+-->
 <configuration>
-    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
-        <encoder>
-            <pattern>%d{YYYY-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
-        </encoder>
-    </appender>
+    <include resource="logback-${LOG_FORMAT:-text}.xml"/>
+
     <root level="INFO">
-        <appender-ref ref="STDOUT"/>
+        <appender-ref ref="CONSOLE"/>
     </root>
-    <logger name="org.eclipse.jetty" level="INFO"/>
     <logger name="io.netty" level="INFO"/>
 </configuration>

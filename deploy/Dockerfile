@@ -44,6 +44,8 @@ EXPOSE 8080
 
 # Container-aware heap sizing, fail fast on OOM, production mode for Ktor.
 ENV JAVA_OPTS="-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError -Dio.ktor.development=false"
+# One JSON object per log line, so log platforms can search by field (see logback.xml).
+ENV LOG_FORMAT=json
 
 # Phase 0 placeholder: `/` until phase 1 adds /health/live.
 HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=3 \

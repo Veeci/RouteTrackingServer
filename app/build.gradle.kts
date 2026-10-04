@@ -30,6 +30,7 @@ dependencies {
     implementation(ktorLibs.server.statusPages)
     implementation(ktorLibs.server.websockets)
     implementation(libs.logback.classic)
+    runtimeOnly(libs.logstash.encoder)
 
     implementation(libs.hoplite.core)
     implementation(libs.hoplite.hocon)
@@ -48,6 +49,8 @@ dependencies {
     testFixturesApi(libs.bundles.unit.test)
     testFixturesApi(ktorLibs.server.testHost)
     testFixturesApi(libs.kotlinx.serialization.json)
+    testFixturesApi(platform(libs.koin.bom))
+    testFixturesApi(libs.koin.ktor)
     testFixturesApi(platform(libs.testcontainers.bom))
     testFixturesApi(libs.testcontainers.postgresql)
 }
@@ -73,7 +76,8 @@ testing {
                 implementation(project())
                 implementation(testFixtures(project()))
                 implementation(libs.testcontainers.junit)
-                // Repository and transaction tests use these types directly.
+                // Repository, transaction and logging tests use these types directly.
+                implementation(libs.logback.classic)
                 implementation(libs.exposed.core)
                 implementation(libs.exposed.jdbc)
                 implementation(libs.hikari)

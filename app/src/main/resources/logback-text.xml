@@ -1,0 +1,8 @@
+<included>
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <!-- yyyy, not YYYY: YYYY is the week-based year and prints the wrong year around New Year. -->
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%X{requestId:--}] %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+</included>
