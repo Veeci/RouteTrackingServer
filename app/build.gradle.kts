@@ -29,6 +29,9 @@ dependencies {
 
     implementation(libs.hoplite.core)
     implementation(libs.hoplite.hocon)
+    implementation(platform(libs.koin.bom))
+    implementation(libs.koin.ktor)
+    implementation(libs.koin.logger.slf4j)
 
     // Shared test support (in-memory adapters, object mothers, GPX/OSM fixtures) used by every test suite.
     testFixturesApi(platform(libs.junit.bom))
@@ -47,6 +50,7 @@ testing {
             dependencies {
                 implementation(testFixtures(project()))
                 implementation(libs.konsist)
+                implementation(libs.koin.test.junit5)
             }
         }
 
