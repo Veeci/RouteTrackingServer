@@ -5,6 +5,8 @@ config:
   validation: true
 
 style:
+  UnusedImports:
+    active: true
   MagicNumber:
     # Tests and fixtures are full of literal coordinates, distances and timestamps.
     excludes: ['**/test/**', '**/testFixtures/**', '**/integrationTest/**', '**/e2eTest/**']

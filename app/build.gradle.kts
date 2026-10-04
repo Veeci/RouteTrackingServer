@@ -9,7 +9,7 @@ group = "veeci.practicing"
 version = "1.0.0-SNAPSHOT"
 
 application {
-    mainClass = "io.ktor.server.netty.EngineMain"
+    mainClass = "veeci.practicing.rts.ApplicationKt"
 }
 
 kotlin {
@@ -20,13 +20,15 @@ dependencies {
     implementation(project(":protocol"))
     implementation(ktorLibs.serialization.kotlinx.json)
     implementation(ktorLibs.server.callLogging)
-    implementation(ktorLibs.server.config.yaml)
     implementation(ktorLibs.server.contentNegotiation)
     implementation(ktorLibs.server.core)
     implementation(ktorLibs.server.netty)
     implementation(ktorLibs.server.statusPages)
     implementation(ktorLibs.server.websockets)
     implementation(libs.logback.classic)
+
+    implementation(libs.hoplite.core)
+    implementation(libs.hoplite.hocon)
 
     // Shared test support (in-memory adapters, object mothers, GPX/OSM fixtures) used by every test suite.
     testFixturesApi(platform(libs.junit.bom))
@@ -74,6 +76,20 @@ testing {
             }
             targets.all { testTask.configure { shouldRunAfter(integrationTest) } }
         }
+    }
+}
+
+tasks.named<JavaExec>("run") {
+    val envFile = rootProject.file("deploy/.env")
+    if (envFile.exists()) {
+        envFile
+            .readLines()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && !it.startsWith("#") && "=" in it }
+            .forEach { line ->
+                val (key, value) = line.split("=", limit = 2)
+                environment(key.trim(), value.trim())
+            }
     }
 }
 
