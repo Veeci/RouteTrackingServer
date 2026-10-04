@@ -29,6 +29,7 @@ dependencies {
     implementation(ktorLibs.server.rateLimit)
     implementation(ktorLibs.server.requestValidation)
     implementation(ktorLibs.server.statusPages)
+    implementation(ktorLibs.server.swagger)
     implementation(ktorLibs.server.websockets)
     implementation(libs.logback.classic)
     implementation(platform(libs.kotlinx.coroutines.bom))
@@ -55,6 +56,7 @@ dependencies {
     testFixturesApi(libs.kotlinx.serialization.json)
     testFixturesApi(platform(libs.koin.bom))
     testFixturesApi(libs.koin.ktor)
+    testFixturesApi(libs.openapi.validator)
     testFixturesApi(platform(libs.testcontainers.bom))
     testFixturesApi(libs.testcontainers.postgresql)
 }

@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test
 import org.testcontainers.junit.jupiter.Testcontainers
 import org.testcontainers.postgresql.PostgreSQLContainer
 import veeci.practicing.rts.testing.TestDatabase
+import veeci.practicing.rts.testing.shouldMatchContract
 import veeci.practicing.rts.testing.testApp
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
@@ -54,6 +55,7 @@ class HealthIT {
                     val ready = client.get("/health/ready")
                     ready.status shouldBe HttpStatusCode.ServiceUnavailable
                     ready.report().checks["db"] shouldBe HealthStatus.DOWN
+                    ready.shouldMatchContract()
                     (started.elapsedNow() < 3.seconds) shouldBe true // answered by the deadline, not Hikari's timeout
                 } finally {
                     db.unpause()

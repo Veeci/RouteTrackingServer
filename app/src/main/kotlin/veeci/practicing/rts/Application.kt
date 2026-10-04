@@ -5,6 +5,7 @@ import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
+import io.ktor.server.plugins.swagger.swaggerUI
 import io.ktor.server.routing.routing
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.prometheusmetrics.PrometheusConfig
@@ -65,6 +66,8 @@ fun Application.module(config: AppConfig) {
     routing {
         healthRoutes(get())
         if (config.app.env != AppEnv.PROD) echoEndpoint(get())
+        // Interactive API docs generated from the contract; local development only.
+        if (config.app.env == AppEnv.DEV) swaggerUI(path = "docs", swaggerFile = "openapi/rts-v1.yaml")
     }
 }
 
