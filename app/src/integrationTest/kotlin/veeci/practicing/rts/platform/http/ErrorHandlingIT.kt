@@ -6,7 +6,6 @@ import io.kotest.matchers.string.shouldNotContain
 import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
-import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
@@ -17,12 +16,12 @@ import io.ktor.server.routing.Routing
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Test
 import org.testcontainers.junit.jupiter.Testcontainers
 import veeci.practicing.rts.shared.DomainException
 import veeci.practicing.rts.shared.ErrorCategory
 import veeci.practicing.rts.shared.ErrorCode
+import veeci.practicing.rts.testing.problem
 import veeci.practicing.rts.testing.testApp
 
 @Testcontainers(disabledWithoutDocker = true)
@@ -47,7 +46,7 @@ class ErrorHandlingIT {
 
     @Test
     fun `TC-1-ERR-01 an unexpected exception becomes a 500 problem that leaks nothing`() =
-        testApp(testRoutes) {
+        testApp(routes = testRoutes) {
             val response = client.get("/test/bug")
 
             response.status shouldBe HttpStatusCode.InternalServerError
@@ -59,7 +58,7 @@ class ErrorHandlingIT {
 
     @Test
     fun `TC-1-ERR-02 a domain exception becomes a problem with its code and status`() =
-        testApp(testRoutes) {
+        testApp(routes = testRoutes) {
             val response = client.get("/test/trip")
 
             response.status shouldBe HttpStatusCode.NotFound
@@ -77,7 +76,7 @@ class ErrorHandlingIT {
 
     @Test
     fun `TC-1-ERR-03 a malformed JSON body becomes a 400 problem`() =
-        testApp(testRoutes) {
+        testApp(routes = testRoutes) {
             val response =
                 client.post("/test/echo") {
                     contentType(ContentType.Application.Json)
@@ -99,7 +98,7 @@ class ErrorHandlingIT {
 
     @Test
     fun `a valid request is not touched by error handling`() =
-        testApp(testRoutes) {
+        testApp(routes = testRoutes) {
             val response =
                 client.post("/test/echo") {
                     contentType(ContentType.Application.Json)
@@ -108,10 +107,4 @@ class ErrorHandlingIT {
 
             response.status shouldBe HttpStatusCode.OK
         }
-
-    /** Asserts the problem media type, then decodes the body. */
-    private suspend fun HttpResponse.problem(): Problem {
-        contentType()?.withoutParameters() shouldBe ProblemContentType
-        return Json.decodeFromString(bodyAsText())
-    }
 }

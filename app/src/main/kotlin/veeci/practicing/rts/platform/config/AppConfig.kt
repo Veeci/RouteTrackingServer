@@ -17,6 +17,10 @@ data class AppInfo(
 
 data class HttpConfig(
     val port: Int,
+    /** Largest request body accepted, in bytes; bigger ones get 413. */
+    val maxBodyBytes: Long,
+    /** Requests one client IP may make per minute; more get 429. */
+    val rateLimitPerMinute: Int,
 )
 
 data class DBConfig(

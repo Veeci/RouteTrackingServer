@@ -16,6 +16,7 @@ import veeci.practicing.rts.platform.config.AppConfigLoader
 import veeci.practicing.rts.platform.db.Migrations
 import veeci.practicing.rts.platform.di.platformModule
 import veeci.practicing.rts.platform.http.configureErrorHandling
+import veeci.practicing.rts.platform.http.configureRequestGuards
 import kotlin.system.exitProcess
 
 private val log = LoggerFactory.getLogger("veeci.practicing.rts.Application")
@@ -42,6 +43,7 @@ fun Application.module(config: AppConfig) {
     if (config.db.migrateOnStart) Migrations.run(get())
 
     configureSerialization()
+    configureRequestGuards(config.http)
     configureErrorHandling()
     configureWebsockets()
     configureRouting()

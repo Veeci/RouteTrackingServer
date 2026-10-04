@@ -25,6 +25,10 @@ enum class PlatformError(
     val status: HttpStatusCode,
 ) {
     MALFORMED_REQUEST(HttpStatusCode.BadRequest),
+    VALIDATION_FAILED(HttpStatusCode.BadRequest),
     NOT_FOUND(HttpStatusCode.NotFound),
+    PAYLOAD_TOO_LARGE(HttpStatusCode.PayloadTooLarge),
+    UNSUPPORTED_MEDIA_TYPE(HttpStatusCode.UnsupportedMediaType),
+    RATE_LIMITED(HttpStatusCode.TooManyRequests),
     INTERNAL_ERROR(HttpStatusCode.InternalServerError),
 }

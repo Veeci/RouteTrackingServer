@@ -8,14 +8,16 @@ import veeci.practicing.rts.module
 
 /**
  * Runs [block] against the real application (config loader, Koin graph, migrations, plugins) backed by the
- * shared test database. [routes] adds test-only endpoints, so production code never carries them.
+ * shared test database. [env] overrides config values (e.g. `HTTP_RATELIMITPERMINUTE`); [routes] adds
+ * test-only endpoints, so production code never carries them.
  */
 fun testApp(
+    env: Map<String, String> = emptyMap(),
     routes: Routing.() -> Unit = {},
     block: suspend ApplicationTestBuilder.() -> Unit,
 ) = testApplication {
     application {
-        module(TestConfig.load(TestDatabase.env()))
+        module(TestConfig.load(TestDatabase.env() + env))
         routing(routes)
     }
     block()

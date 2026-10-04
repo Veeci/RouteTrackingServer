@@ -27,6 +27,8 @@ data class Problem(
     val code: String,
     /** Correlates this response with the server's logs. */
     val traceId: String,
+    /** One entry per invalid field; only present on VALIDATION_FAILED. */
+    val errors: List<FieldError>? = null,
 )
 
 val ProblemContentType = ContentType("application", "problem+json")

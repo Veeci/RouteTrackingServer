@@ -5,6 +5,10 @@ import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.install
 import io.ktor.server.plugins.BadRequestException
+import io.ktor.server.plugins.CannotTransformContentToTypeException
+import io.ktor.server.plugins.ContentTransformationException
+import io.ktor.server.plugins.PayloadTooLargeException
+import io.ktor.server.plugins.UnsupportedMediaTypeException
 import io.ktor.server.plugins.callid.callId
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.httpMethod
@@ -23,12 +27,25 @@ fun Application.configureErrorHandling() {
             call.respondProblem(call.problem(e.code.name, ErrorCatalog.status(e.code.category), e.message))
         }
 
+        // Fields that parsed fine but break a rule (blank name, seats out of range): list every one.
+        exception<RequestInvalidException> { call, e ->
+            call.respondProblem(
+                call.problem(PlatformError.VALIDATION_FAILED, "Some fields are invalid; see errors.").copy(errors = e.errors),
+            )
+        }
+
+        exception<PayloadTooLargeException> { call, _ ->
+            call.respondProblem(call.problem(PlatformError.PAYLOAD_TOO_LARGE, "The request body is larger than this server accepts."))
+        }
+
+        // The body's Content-Type has no converter (e.g. text/plain sent to a JSON endpoint).
+        exception<UnsupportedMediaTypeException> { call, _ -> call.respondUnsupportedMediaType() }
+        exception<CannotTransformContentToTypeException> { call, _ -> call.respondUnsupportedMediaType() }
+
         // Unreadable body or parameters (bad JSON, wrong types). The parser's message can name internal
         // classes, so the client gets a fixed sentence and the details stay in the debug log.
-        exception<BadRequestException> { call, e ->
-            log.debug("Malformed request on {}: {}", call.request.path(), e.message)
-            call.respondProblem(call.problem(PlatformError.MALFORMED_REQUEST, "The request body or parameters could not be read."))
-        }
+        exception<BadRequestException> { call, e -> call.respondMalformed(e) }
+        exception<ContentTransformationException> { call, e -> call.respondMalformed(e) }
 
         // Anything else is a bug. Full details go to the log under a traceId; the client only gets that id.
         exception<Throwable> { call, cause ->
@@ -41,11 +58,26 @@ fun Application.configureErrorHandling() {
             call.respondProblem(problem)
         }
 
+        // RateLimit answers 429 with an empty body (its Retry-After header is kept); give it the standard body.
+        status(HttpStatusCode.TooManyRequests) { call, _ ->
+            call.respondProblem(
+                call.problem(PlatformError.RATE_LIMITED, "Too many requests. Retry after the number of seconds in Retry-After."),
+            )
+        }
+
         // No route matched the method and path.
         unhandled { call ->
             call.respondProblem(call.problem(PlatformError.NOT_FOUND, "Nothing exists at this method and path."))
         }
     }
+}
+
+private suspend fun ApplicationCall.respondUnsupportedMediaType() =
+    respondProblem(problem(PlatformError.UNSUPPORTED_MEDIA_TYPE, "Send the body as application/json."))
+
+private suspend fun ApplicationCall.respondMalformed(cause: Throwable) {
+    log.debug("Malformed request on {}: {}", request.path(), cause.message)
+    respondProblem(problem(PlatformError.MALFORMED_REQUEST, "The request body or parameters could not be read."))
 }
 
 private fun ApplicationCall.problem(
