@@ -22,7 +22,7 @@ COPY app/src app/src
 COPY protocol/src protocol/src
 RUN --mount=type=cache,target=/root/.gradle ./gradlew --no-daemon -q :app:installDist
 
-# OpenTelemetry Java agent: bundled but inactive unless JAVA_TOOL_OPTIONS enables it.
+# OpenTelemetry Java agent: bundled but inactive unless a -javaagent flag (APP_OPTS or JAVA_TOOL_OPTIONS) enables it.
 ARG OTEL_AGENT_VERSION
 ADD https://repo1.maven.org/maven2/io/opentelemetry/javaagent/opentelemetry-javaagent/${OTEL_AGENT_VERSION}/opentelemetry-javaagent-${OTEL_AGENT_VERSION}.jar /workspace/otel/opentelemetry-javaagent.jar
 

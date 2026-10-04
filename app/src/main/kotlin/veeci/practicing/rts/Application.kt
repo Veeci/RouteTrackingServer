@@ -3,6 +3,7 @@ package veeci.practicing.rts
 import com.sksamuel.hoplite.ConfigException
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
+import io.ktor.server.engine.connector
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.swagger.swaggerUI
@@ -24,6 +25,7 @@ import veeci.practicing.rts.platform.di.platformModule
 import veeci.practicing.rts.platform.http.configureErrorHandling
 import veeci.practicing.rts.platform.http.configureRequestGuards
 import veeci.practicing.rts.platform.http.configureSerialization
+import veeci.practicing.rts.platform.lifecycle.configureGracefulShutdown
 import veeci.practicing.rts.platform.observability.configureMetrics
 import veeci.practicing.rts.platform.observability.configureRequestLogging
 import veeci.practicing.rts.platform.observability.healthRoutes
@@ -43,7 +45,14 @@ fun main(args: Array<String>) {
         }
     log.info("Starting with {}", config)
 
-    embeddedServer(Netty, port = config.http.port) { module(config) }.start(wait = true)
+    embeddedServer(
+        Netty,
+        configure = {
+            connector { port = config.http.port }
+            shutdownGracePeriod = config.http.shutdownGracePeriod.inWholeMilliseconds
+            shutdownTimeout = config.http.shutdownTimeout.inWholeMilliseconds
+        },
+    ) { module(config) }.start(wait = true)
 }
 
 /** Installs every plugin and route. Tests call this directly with their own [AppConfig]. */
@@ -55,6 +64,7 @@ fun Application.module(config: AppConfig) {
         modules(appModule(config, metrics))
     }
     if (config.db.migrateOnStart) Migrations.run(get())
+    configureGracefulShutdown()
 
     configureRequestLogging()
     configureMetrics(metrics)

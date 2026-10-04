@@ -32,6 +32,9 @@ class WsSession internal constructor(
     ) = send(ErrorMessage(code, message, correlatesTo))
 
     internal suspend fun close(reason: CloseReason) = socket.close(reason)
+
+    /** Queues a close frame without waiting; Ktor sends it and finishes the closing handshake. */
+    internal fun goAway(reason: CloseReason): Boolean = socket.outgoing.trySend(Frame.Close(reason)).isSuccess
 }
 
 /** Every open session: shutdown says goodbye to each (step 10), and /metrics shows how many there are. */
@@ -50,8 +53,9 @@ class WsSessionRegistry(
 
     internal fun remove(session: WsSession) = sessions.remove(session)
 
-    /** Closes every open session with [reason]; a session that is already gone is skipped. */
-    suspend fun closeAll(reason: CloseReason) {
-        sessions.toList().forEach { runCatching { it.close(reason) } }
-    }
+    /**
+     * Asks every open session to close with [reason] and returns how many were asked. Doesn't wait (shutdown
+     * hooks are plain functions): the close frames go out while the server finishes in-flight work.
+     */
+    fun closeAll(reason: CloseReason): Int = sessions.count { it.goAway(reason) }
 }

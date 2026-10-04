@@ -23,6 +23,10 @@ data class HttpConfig(
     val maxBodyBytes: Long,
     /** Requests one client IP may make per minute; more get 429. */
     val rateLimitPerMinute: Int,
+    /** On stop: how long the server must be idle (no new work) before it exits early. */
+    val shutdownGracePeriod: Duration,
+    /** On stop: the most time in-flight requests get to finish. Keep it below the platform's kill timeout. */
+    val shutdownTimeout: Duration,
 )
 
 data class DBConfig(
