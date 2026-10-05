@@ -38,6 +38,23 @@ val ProtocolJson = Json { classDiscriminator = "type"; ignoreUnknownKeys = true;
 
 `FixDto` fields per [protocol.md](../architecture/protocol.md). `provider` is an enum
 `GMS_FUSED | AOSP_GPS | AOSP_NETWORK | AOSP_FUSED | UNKNOWN` (unknown strings decode to `UNKNOWN`).
+`provider` and `mock` default to `UNKNOWN` and `false` when absent; `satellites` is optional.
+
+### Android SDK alignment (reviewed 2026-10-05)
+
+The fix fields come from the public API of the Android `location_sdk` (`positions: Stream<LocationReading>`).
+The upload module (`location_sdk_transport`) does not exist yet; it implements this protocol. Two fields
+need a change in the SDK before the transport can fill them:
+
+| Field | Gap in the SDK today | SDK change |
+|---|---|---|
+| `provider` | GMS fused and AOSP fused fixes both report `"fused"`; the public API does not say which stack produced a fix | Add a source enum to `LocationReading` (`GMS_FUSED`, `AOSP_GPS`, `AOSP_NETWORK`, `AOSP_FUSED`) |
+| `satellites` | `GnssReading` is internal; the public API only exposes `sky: Value<SkyView>` | Expose `GnssReading` as a public `Value`; the transport attaches the latest reading to each fix |
+
+The server accepts fixes without these fields (`provider = UNKNOWN`, no `satellites`), so ingest works
+before the SDK change. The phase 9 GMS-vs-AOSP report needs both fields. The SDK also provides
+`isMock` and three extra accuracy values; the protocol carries them as `mock`, `speedAccuracyMps`,
+`bearingAccuracyDeg` and `verticalAccuracyM`.
 
 ### Domain (`shared/geo`, `tracking/domain`)
 
@@ -47,13 +64,16 @@ Shared kernel additions (`shared/geo`): `GeoPoint` (validated), `Meters`, `Haver
 @JvmInline value class SessionId(val value: UUID)
 @JvmInline value class DeviceId(val value: String)
 
-data class LocationFix(val point: GeoPoint, val accuracyM: Double, val speedMps: Double?, val bearingDeg: Double?,
-                       val altitudeM: Double?, val recordedAt: Instant, val provider: LocationProvider,
-                       val satellites: SatelliteHealth?)
+data class LocationFix(val point: GeoPoint, val accuracyM: Double,
+                       val speedMps: Double?, val speedAccuracyMps: Double?,
+                       val bearingDeg: Double?, val bearingAccuracyDeg: Double?,
+                       val altitudeM: Double?, val verticalAccuracyM: Double?,
+                       val recordedAt: Instant, val provider: LocationProvider, val mock: Boolean,
+                       val satellites: SatelliteHealth?)   // SatelliteHealth(usedInFix: Int, meanCn0DbHz: Double?)
 data class AcceptedFix(val fix: LocationFix, val batchSeq: Long, val index: Int,
                        val distanceFromPrevM: Double, val cumulativeM: Double, val derivedSpeedMps: Double?)
 data class Rejection(val index: Int, val reason: RejectionReason)
-enum class RejectionReason { POOR_ACCURACY, FUTURE_TIMESTAMP, TOO_OLD, DUPLICATE_TIMESTAMP, IMPLAUSIBLE_JUMP, INVALID_VALUE }
+enum class RejectionReason { POOR_ACCURACY, FUTURE_TIMESTAMP, TOO_OLD, DUPLICATE_TIMESTAMP, IMPLAUSIBLE_JUMP, INVALID_VALUE, MOCK_LOCATION }
 
 class TrackingSession(val id: SessionId, val deviceId: DeviceId, sdkVersion: String, startedAt: Instant) {  // aggregate
     fun resumeFrom(highestStoredSeq: Long?): Long
@@ -71,10 +91,11 @@ class FixPipeline(private val stages: List<FixStage>) { fun process(batch: List<
 | Stage | Rule (defaults from `PipelineConfig`) | Rejection |
 |---|---|---|
 | `ValidateStage` | finite numbers; `accuracyM` in (0, 500]; `speedMps` ≥ 0 if present; `bearingDeg` in [0, 360) | `INVALID_VALUE` |
+| `MockStage` | `mock == false` (on by default; `PipelineConfig.rejectMock`) | `MOCK_LOCATION` |
 | `AccuracyStage` | `accuracyM` ≤ `maxAccuracyM` (50) | `POOR_ACCURACY` |
 | `TimeWindowStage` | `recordedAt` ≤ now + `maxClockSkew` (30 s) and ≥ now − `maxAge` (24 h) | `FUTURE_TIMESTAMP` / `TOO_OLD` |
 | `DedupStage` | `recordedAt` not equal to an already accepted fix of the session (context) or earlier in the batch | `DUPLICATE_TIMESTAMP` |
-| `JumpFilterStage` | implied speed from previous accepted fix ≤ `maxSpeedMps` (70) after subtracting both accuracies from the distance; fixes with `satellites.usedInFix < 4` use half the tolerance | `IMPLAUSIBLE_JUMP` |
+| `JumpFilterStage` | implied speed from previous accepted fix ≤ `maxSpeedMps` (70) after subtracting both accuracies from the distance; fixes with `satellites.usedInFix < 4` use half the tolerance; fixes without `satellites` use the full tolerance | `IMPLAUSIBLE_JUMP` |
 | `EnrichStage` | compute `distanceFromPrevM`, `cumulativeM`, `derivedSpeedMps` | – |
 
 Fixes inside a batch are sorted by `recordedAt` before the pipeline; rejection indexes refer to the
@@ -123,7 +144,8 @@ create table fix_batches (session_id uuid not null references tracking_sessions(
 create table fixes (id bigserial primary key, session_id uuid not null, seq bigint not null, idx int not null,
   lat double precision not null, lng double precision not null, accuracy_m real not null,
   speed_mps real, bearing_deg real, altitude_m real, recorded_at timestamptz not null, provider text not null,
-  sat_used smallint, sat_snr real, distance_from_prev_m double precision not null, cumulative_m double precision not null,
+  speed_accuracy_mps real, bearing_accuracy_deg real, vertical_accuracy_m real, mock boolean not null default false,
+  sat_used smallint, sat_mean_cn0_dbhz real, distance_from_prev_m double precision not null, cumulative_m double precision not null,
   foreign key (session_id, seq) references fix_batches(session_id, seq));
 create index fixes_session_time on fixes (session_id, recorded_at);
 ```
@@ -172,7 +194,7 @@ Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restar
 - [ ] T2.6 `DriverSocket` + mapper; `TrackingModule` (Koin); remove echo socket from dev.
 - [ ] T2.7 `tools/simulator` driver command; GPX fixtures.
 - [ ] T2.8 E2E tests; k6 ingest script; coverage gate on `tracking.domain` / `tracking.application`.
-- [ ] T2.9 Extend the staging smoke test (phase 1.5) with a simulator run: replay `straight_2km.gpx`, expect every batch ACKed.
+- [ ] T2.9 Extend the staging smoke test (phase 1.5) with a simulator run: replay `straight_2km.gpx`, expect every batch ACKed. **Deferred with phase 1.5.**
 
 ## Test plan
 
@@ -185,6 +207,7 @@ Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restar
 | TC-2-PRO-03 | Unit | Unknown extra fields are ignored (forward compat) | P0 |
 | TC-2-PRO-04 | Unit | Unknown `provider` string decodes to `UNKNOWN` | P1 |
 | TC-2-PRO-05 | Unit | Golden file: `Welcome` encodes to the exact JSON in `protocol/src/test/resources/golden/welcome.json` (guards accidental contract changes) | P1 |
+| TC-2-PRO-06 | Unit | A fix with only the required fields (no `provider`, `mock`, `satellites`) decodes with `provider = UNKNOWN`, `mock = false`, `satellites = null` | P0 |
 
 ### Geo
 
@@ -209,6 +232,7 @@ Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restar
 | TC-2-PIP-08 | Unit | 200 m apart in 2 s (100 m/s raw) with accuracy 40 m each → effective 120 m / 2 s = 60 m/s → accepted (accuracy tolerance applied) | P1 |
 | TC-2-PIP-09 | Unit | After a rejected jump, the next fix is compared with the last *accepted* fix, not the rejected one | P0 |
 | TC-2-PIP-10 | Unit | Fix with `satellites.usedInFix = 3` and a borderline jump is rejected; same with 12 satellites is accepted | P2 |
+| TC-2-PIP-11 | Unit | Fix with `mock = true` → rejected `MOCK_LOCATION`; with `rejectMock = false` → accepted | P0 |
 | TC-2-PIP-11 | Unit | Batch given out of time order is processed sorted; rejection indexes refer to original positions | P0 |
 | TC-2-PIP-12 | Unit | Enrich: 3 accepted fixes 100 m apart → `distanceFromPrevM` 0/100/100 (first uses context previous if any), `cumulativeM` 0/100/200 | P0 |
 | TC-2-PIP-13 | Unit | First fix of a session with no previous → `distanceFromPrevM = 0`, never rejected as a jump | P0 |
