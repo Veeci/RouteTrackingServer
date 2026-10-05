@@ -27,7 +27,9 @@ docker compose -f deploy/docker-compose.yml up -d db   # start PostgreSQL
 ./gradlew :app:run                                     # start the server on http://localhost:8080
 ```
 
-Check it: `curl localhost:8080` → `Hello, World!` (replaced by `/health/live` in phase 1).
+Check it: `curl localhost:8080/health/ready` → `{"status":"UP","checks":{"db":"UP"}}`.
+Metrics: `curl localhost:8080/metrics`. API docs (dev only): <http://localhost:8080/docs>.
+Logs are plain text locally; set `LOG_FORMAT=json` for one JSON object per line (the Docker image does).
 
 ## Everyday commands
 

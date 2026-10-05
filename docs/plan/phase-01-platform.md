@@ -18,54 +18,88 @@ Swagger UI (dev), WS framework with `/ws/v1/echo` (dev only), graceful shutdown.
 
 **Out:** users/JWT issuance (phase 3; the verifier interface exists), business tables.
 
-## Design
+## Design (as built)
 
 ### Startup sequence (`Application.kt`)
 
-1. Load `AppConfig` (Hoplite: `application.conf` → profile file → env). Fail with all errors listed.
-2. Start Koin with `platformModule(config)` + context modules (none yet).
-3. Run Flyway migrations (configurable: on in dev/test, off in prod where a migration job runs them).
-4. Install plugins in order: CallId → CallLogging → metrics → ContentNegotiation → RequestValidation →
-   StatusPages → Authentication → RateLimit → WebSockets → Routing.
-5. Mount routes: health, metrics, docs (dev), contexts.
-6. Register `ApplicationStopping` hook: stop accepting sockets, close them with 1001, drain for `shutdownGrace`, close pool.
+1. Load `AppConfig` (Hoplite: env vars → `config/<APP_ENV>.conf` → `config/base.conf`). Any problem stops
+   the process with exit code 1 and one message listing every bad key.
+2. Create the process-wide Prometheus registry; start Koin (`KoinIsolated`) with `appModule(config, metrics)`.
+   The connection pool is built eagerly, so an unreachable database fails startup.
+3. Run Flyway migrations when `db.migrateOnStart` (dev/test only; prod runs them as a release step).
+4. Register the graceful-shutdown hook.
+5. Install plugins: CallId + CallLogging → MicrometerMetrics + `/metrics` → ContentNegotiation →
+   RequestBodyLimit + RequestValidation + RateLimit → StatusPages → WebSockets.
+6. Mount routes: health; `/ws/v1/echo` outside prod; Swagger UI `/docs` in dev; contexts (from phase 2).
+7. `embeddedServer(Netty)` with `http.shutdownGracePeriod` / `http.shutdownTimeout`.
+
+On SIGTERM Ktor raises `ApplicationStopPreparing` (readiness → DOWN, every socket closed with 1001), stops
+accepting connections, drains in-flight requests, then raises `ApplicationStopping` (Koin closes the pool).
 
 ### Platform components
 
-| Component | Responsibility |
-|---|---|
-| `AppConfig` | `http`, `db` (url, user, password, pool size), `ws` (ping, timeout, maxFrameBytes, rate), `security` (jwt issuer/audience/secret), `app` (env, version) |
-| `DataSourceFactory` | HikariCP from config; exposes `DataSource` |
-| `TransactionRunner` | `suspend fun <T> inTransaction(block: suspend () -> T): T` over Exposed `newSuspendedTransaction(Dispatchers.IO)`; nested calls join the outer transaction |
-| `ErrorCatalog` | `ErrorCode` → `(HttpStatusCode, type URI, title)` |
-| StatusPages config | `DomainException` → Problem Details via catalog; `RequestValidationException` → 400 with field errors; `BadRequestException`/`SerializationException` → 400; `Throwable` → 500 with `traceId`, cause logged |
-| `HealthRegistry` | list of `HealthIndicator`s (`db`: `select 1` + Flyway state); `/health/ready` aggregates |
-| `WsSessionRunner` | Generic loop for socket endpoints: handshake timeout, decode with `ProtocolJson`, per-session rate limiter, error frames, close codes, MDC for the session, structured open/close logs |
-| Metrics | `MicrometerMetrics` plugin with Prometheus registry; `http_server_requests` timers; JVM/Hikari binders |
-| Logging | `logback.xml` (dev, pattern) and `logback-json.xml` (non-dev, logstash encoder) selected by `APP_ENV` |
+| Component | Where | Responsibility |
+|---|---|---|
+| `AppConfig` | `platform/config` | `app` (env, version), `http` (port, maxBodyBytes, rateLimitPerMinute, shutdownGracePeriod, shutdownTimeout), `db` (url, user, password as `Secret`, maxPoolSize, migrateOnStart), `ws` (pingPeriod, timeout, maxFrameBytes, messagesPerSecond). `security` arrives with phase 3 |
+| `createDataSource` | `platform/db` | HikariCP from config: 5 s connection timeout, pool meters in the registry |
+| `Migrations` | `platform/db` | Flyway over `db/migration`; returns how many were applied |
+| `TransactionRunner` | `platform/db` | `suspend fun <T> inTransaction(block: suspend () -> T): T` over Exposed `suspendTransaction` on `Dispatchers.IO`; nested calls join the outer transaction; no implicit retries |
+| `ErrorCatalog` | `platform/http` | `ErrorCategory` → HTTP status, code → `type` URN and title; `PlatformError` for non-domain failures |
+| StatusPages config | `platform/http` | domain → its category's status; validation → 400 with `errors[]`; too large → 413; no converter → 415; unreadable → 400; 429 gets a body; unknown route → 404; anything else → 500 with `traceId`, cause logged, message never sent |
+| Request guards | `platform/http` | body limit (not on WebSocket upgrades), `Validatable` bodies checked inside `receive()`, per-IP token bucket |
+| Request logging | `platform/observability` | `X-Request-Id` kept (if safe) or generated, in MDC and `Problem.traceId`; one line per request, probes excluded |
+| Logging | `resources/logback*.xml` | `LOG_FORMAT=text` (default) or `json` (logstash encoder; the Docker image sets it) |
+| Metrics | `platform/observability` | `MicrometerMetrics` → `http_server_requests_seconds_*`; JVM, Hikari and `ws_sessions_open` meters; `/metrics` |
+| `HealthRegistry` | `platform/observability` | `HealthIndicator`s (`db`: `Connection.isValid`) run in parallel under a 2 s deadline; DOWN once shutdown begins |
+| `WsSessionRunner` | `platform/ws` | decode with `ProtocolJson`, per-session token bucket, `error` frames (session stays open), 1011 on handler bugs, session id in MDC, open/close logs |
+| `WsSessionRegistry` | `platform/ws` | open sessions: shutdown closes them with 1001; gauge for `/metrics` |
+| Graceful shutdown | `platform/lifecycle` | the `ApplicationStopPreparing` hook above, idempotent |
 
 ### Shared kernel (initial)
 
-`Clock` (interface + `SystemClock`), `DomainException` + `ErrorCode`, `IdGenerator` (UUIDv7).
+`DomainException`, `ErrorCode`, `ErrorCategory` (`shared/`). Time is `java.time.Clock` (UTC), injected.
+
+### Protocol module
+
+`ProtocolJson` (discriminator `type`, unknown keys ignored, nulls omitted), `ServerMessage` with
+`ErrorMessage`, `WsErrorCodes`; wire-format tests.
 
 ### OpenAPI
 
-`app/src/main/resources/openapi/rts-v1.yaml` with `info`, servers, security scheme (bearer JWT),
-the `Problem` schema, and the health endpoints. Swagger UI at `/docs` when `APP_ENV=dev`.
+`app/src/main/resources/openapi/rts-v1.yaml` (OpenAPI 3.1): health and metrics endpoints, `Problem`,
+`FieldError`, the shared 429 response, bearer scheme. Swagger UI at `/docs` in dev. `shouldMatchContract()`
+validates real responses in API tests; `ApiContractTest` proves the validator rejects broken ones.
+
+### Changes from the original plan
+
+| Planned | Built | Why |
+|---|---|---|
+| Own `Clock` interface + `SystemClock` | `java.time.Clock` | The JDK type already is that interface, with `fixed()` for tests |
+| `ErrorCatalog`: code → status | category → status | A per-code map in `platform` would have to import every context (wrong dependency direction); the category also works on WebSockets, which have no HTTP status |
+| `type` as a URL | `urn:rts:error:<code>` | There is no public docs page to link to yet |
+| Log format chosen by `APP_ENV` | `LOG_FORMAT` | Logback starts before our config loads; an explicit switch is clearer |
+| Health `db`: `select 1` + Flyway state | `Connection.isValid` | Flyway state is checked by startup migrations / the release step instead |
+| Handshake timeout in `WsSessionRunner` | Phase 2 | It needs the `hello` message, which arrives in phase 2; so does `UNKNOWN_MESSAGE` (phase 1 has `MALFORMED_MESSAGE` and `INVALID_MESSAGE`) |
+| `IdGenerator` (UUIDv7) | Phase 2 | Nothing generates ids yet |
+| `/metrics` and per-IP rate limit as is | Phase 1.5 follow-ups | Behind Fly's proxy: protect `/metrics`, and add the forwarded-header plugin so the rate limit sees client IPs |
+
+Found while building, fixed and covered by tests: Ktor's `RequestBodyLimit` stalls WebSocket traffic
+(upgrades are now exempt); "payload too large" and "no converter" exceptions fell through to 500; the
+logback pattern used `YYYY` (week-based year); Ktor raises the stop event twice (hook is idempotent).
 
 ## Tasks
 
-- [ ] T1.1 Hoplite `AppConfig` with profiles `dev`, `test`, `prod`; `.env.example` updated.
-- [ ] T1.2 Koin bootstrap; `platformModule`; test that the graph verifies.
-- [ ] T1.3 Hikari + Exposed + Flyway V1; `TransactionRunner`.
-- [ ] T1.4 `DomainException`, `ErrorCode`, `ErrorCatalog`, StatusPages → Problem Details.
-- [ ] T1.5 RequestValidation, body size limit, RateLimit plugin (default policy).
-- [ ] T1.6 CallId, CallLogging with MDC, JSON logging profile.
-- [ ] T1.7 Micrometer + `/metrics`; health registry + endpoints.
-- [ ] T1.8 `WsSessionRunner` + dev-only `/ws/v1/echo`.
-- [ ] T1.9 OpenAPI skeleton + Swagger UI (dev); OpenAPI response validation in the API test harness.
-- [ ] T1.10 Graceful shutdown; Dockerfile `HEALTHCHECK` → `/health/live`.
-- [ ] T1.11 Remove generator samples.
+- [x] T1.1 Hoplite `AppConfig` with profiles `dev`, `test`, `prod`; `.env.example` updated.
+- [x] T1.2 Koin bootstrap; `platformModule`; test that the graph verifies.
+- [x] T1.3 Hikari + Exposed + Flyway V1; `TransactionRunner`.
+- [x] T1.4 `DomainException`, `ErrorCode`, `ErrorCatalog`, StatusPages → Problem Details.
+- [x] T1.5 RequestValidation, body size limit, RateLimit plugin (default policy).
+- [x] T1.6 CallId, CallLogging with MDC, JSON logging profile.
+- [x] T1.7 Micrometer + `/metrics`; health registry + endpoints.
+- [x] T1.8 `WsSessionRunner` + dev-only `/ws/v1/echo`.
+- [x] T1.9 OpenAPI skeleton + Swagger UI (dev); OpenAPI response validation in the API test harness.
+- [x] T1.10 Graceful shutdown; Dockerfile `HEALTHCHECK` → `/health/live`.
+- [x] T1.11 Remove generator samples.
 
 ## Test plan
 

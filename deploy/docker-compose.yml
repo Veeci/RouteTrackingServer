@@ -35,7 +35,8 @@ services:
       DB_USER: ${DB_USER:-rts}
       DB_PASSWORD: ${DB_PASSWORD}
       # Tracing is off unless the observability profile's settings are provided (see .env.example).
-      JAVA_TOOL_OPTIONS: ${OTEL_JAVA_TOOL_OPTIONS:-}
+      # Extra JVM flags for the start script (empty by default; the JVM would announce an empty JAVA_TOOL_OPTIONS).
+      APP_OPTS: ${OTEL_JAVA_TOOL_OPTIONS:-}
       OTEL_SERVICE_NAME: route-tracking-server
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     ports:

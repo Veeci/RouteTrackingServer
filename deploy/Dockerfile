@@ -22,7 +22,7 @@ COPY app/src app/src
 COPY protocol/src protocol/src
 RUN --mount=type=cache,target=/root/.gradle ./gradlew --no-daemon -q :app:installDist
 
-# OpenTelemetry Java agent: bundled but inactive unless JAVA_TOOL_OPTIONS enables it.
+# OpenTelemetry Java agent: bundled but inactive unless a -javaagent flag (APP_OPTS or JAVA_TOOL_OPTIONS) enables it.
 ARG OTEL_AGENT_VERSION
 ADD https://repo1.maven.org/maven2/io/opentelemetry/javaagent/opentelemetry-javaagent/${OTEL_AGENT_VERSION}/opentelemetry-javaagent-${OTEL_AGENT_VERSION}.jar /workspace/otel/opentelemetry-javaagent.jar
 
@@ -44,9 +44,11 @@ EXPOSE 8080
 
 # Container-aware heap sizing, fail fast on OOM, production mode for Ktor.
 ENV JAVA_OPTS="-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError -Dio.ktor.development=false"
+# One JSON object per log line, so log platforms can search by field (see logback.xml).
+ENV LOG_FORMAT=json
 
-# Phase 0 placeholder: `/` until phase 1 adds /health/live.
+# Liveness: is the process answering? (Readiness, /health/ready, is for load balancers, not for restarts.)
 HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=3 \
-  CMD curl -fsS http://127.0.0.1:8080/ > /dev/null || exit 1
+  CMD curl -fsS http://127.0.0.1:8080/health/live > /dev/null || exit 1
 
 ENTRYPOINT ["/app/bin/app"]

@@ -1,4 +1,4 @@
-package veeci.practicing.rts
+package veeci.practicing.rts.platform.http
 
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
