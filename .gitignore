@@ -9,7 +9,9 @@ build/
 # IDE
 .idea/
 *.iml
+# IntelliJ's own build output. Source folders named out (such as port/out) are not build output.
 out/
+!**/src/**/out/
 
 # Local machine config
 local.properties

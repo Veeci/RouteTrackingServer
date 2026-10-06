@@ -153,31 +153,51 @@ previous accepted fix, not with every stored fix; the batch numbering rules make
 Domain exceptions (`ErrorCode`s): `UNSUPPORTED_PROTOCOL_VERSION`, `EMPTY_BATCH`, `BATCH_TOO_LARGE`, `INVALID_SEQ`.
 Domain event: `FixesAccepted(sessionId, deviceId, fixes: List<AcceptedFix>)` in `tracking.domain.event`.
 
-### Application (`tracking/application`)
+### Application (`tracking/application`, as built in T2.4)
 
 Outbound ports (`port/out`):
 
 ```kotlin
 interface TrackingSessionRepository { suspend fun find(id: SessionId): TrackingSession?; suspend fun save(session: TrackingSession) }
 interface FixBatchRepository {
-    suspend fun find(sessionId: SessionId, seq: Long): StoredBatch?          // idempotent re-ACK
+    suspend fun find(sessionId: SessionId, seq: Long): StoredBatch?          // answer a resend
     suspend fun highestSeq(sessionId: SessionId): Long?
-    suspend fun lastAcceptedBefore(sessionId: SessionId, at: Instant): AcceptedFix?
+    suspend fun lastAcceptedAtOrBefore(sessionId: SessionId, at: Instant): AcceptedFix?
     suspend fun insert(batch: NewBatch): InsertResult                         // Inserted | AlreadyExists(existing)
 }
+interface TrackingEventOutbox { suspend fun add(event: FixesAccepted) }      // writes in the caller's transaction
 ```
 
-`TrackingService` (application service, transaction boundary):
+`TrackingService` (application service, transaction boundary). Time comes from the platform's
+`java.time.Clock`; tests use `Clock.fixed`.
 
 | Method | Behaviour |
 |---|---|
-| `openSession(cmd: OpenSession): SessionOpened` | Validates protocol version; loads or creates the session aggregate; `resumeFromSeq = session.resumeFrom(highestSeq)`; saves — one transaction |
-| `ingest(cmd: IngestBatch): BatchResult` | In **one transaction**: existing batch → return stored result (`duplicate = true`); else load pipeline context, run pipeline, `insert` batch + accepted fixes, write `FixesAccepted` to the outbox. `AlreadyExists` from a concurrent insert → treated as duplicate |
+| `openSession(OpenSession): SessionOpened` | One transaction: load the session and `reconnect` it (another device → `SESSION_DEVICE_MISMATCH`), or create it; save; `resumeFromSeq = session.resumeFrom(highestSeq)` |
+| `ingest(IngestBatch): BatchResult` | Before any database access: `seq` < 1 → `INVALID_SEQ`, no fixes → `EMPTY_BATCH`, more than `maxFixesPerBatch` → `BATCH_TOO_LARGE`. Then **one transaction**: a stored `(session, seq)` → the stored counts with `duplicate = true`; an unknown session → `SESSION_NOT_FOUND`; else load `previous`, run the pipeline, `insert`, touch and save the session, and add `FixesAccepted` to the outbox if any fix was accepted. `AlreadyExists` from a concurrent insert → answered like a resend |
 
-The service returns only after commit, which is what makes "ACK after durable store" true.
+The service returns only after commit, which is what makes "ACK after durable store" true. The `find`
+before the insert is a shortcut for the common resend; the primary key `(session_id, seq)` is what
+guarantees one copy when two requests race.
 
-Public API for other contexts (`application/api`): `TrackQuery` — `fixesFor(sessionId, from, to)`,
-`lastAcceptedFix(sessionId)`; used by `trip` and `telemetry` instead of reading `fixes` directly.
+`FixesAccepted(sessionId: UUID, deviceId: String, seq, positions: List<Position>)` is in
+`tracking.domain.event`. It uses only plain and shared-kernel types, because other contexts may import
+`domain.event` but not tracking's model (TC-0-ARCH-03).
+
+Test support (`testFixtures`, package `veeci.practicing.rts.testing.tracking`): `InMemoryTrackingSessionRepository`
+(stores a copy, so an unsaved change is lost like in a table), `InMemoryFixBatchRepository`,
+`InMemoryTrackingEventOutbox`, and `DirectTransactionRunner` (no rollback).
+
+Changes from the original plan (T2.4):
+
+| Planned | Built | Why |
+|---|---|---|
+| `openSession` checks the protocol version (TC-2-SES-03) | The driver socket checks it (T2.6, TC-2-WS-04) | The version is a wire concern. The application layer does not import the `protocol` module |
+| `OpenSession` carries `lastAckedSeq` | Not passed | The server's number wins, so the service has no use for it. The socket logs it |
+| `TrackQuery` in T2.4 | Deferred to phase 3 | No context reads tracks before `trip` exists |
+| `FixesAccepted(..., fixes: List<AcceptedFix>)` | Plain types and `seq` | See above |
+| – | `SESSION_NOT_FOUND`; no event when every fix is rejected | A batch before `hello`; no position for other contexts to react to |
+| Object mothers in testFixtures | `Readings` stays in the `test` source set | It uses the internal `validate()`. T2.5 moves what the integration tests need |
 
 ### Persistence (`tracking/adapter/out/persistence`)
 
@@ -237,7 +257,7 @@ Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restar
 - [x] T2.1 Protocol v1 driver messages + `ProtocolJson`; golden files; AsyncAPI document for the driver channel.
 - [x] T2.2 `shared/geo`: `GeoPoint`, `Meters`, `Haversine`.
 - [x] T2.3 `tracking/domain`: model, session aggregate, pipeline stages, `FixPipeline`, `PipelineConfig`.
-- [ ] T2.4 `TrackingService`, ports, `TrackQuery`; in-memory adapters + object mothers in testFixtures.
+- [x] T2.4 `TrackingService`, ports, `TrackQuery`; in-memory adapters + object mothers in testFixtures.
 - [ ] T2.5 Flyway V2, Exposed repositories, outbox table + relay; port contract tests.
 - [ ] T2.6 `DriverSocket` + mapper; `TrackingModule` (Koin); remove echo socket from dev.
 - [ ] T2.7 `tools/simulator` driver command; GPX fixtures; TC-2-PIP-16 (needs the GPX reader).
@@ -293,8 +313,8 @@ Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restar
 | ID | Type | Given / When / Then | Priority |
 |---|---|---|---|
 | TC-2-SES-01 | Service | New session → upserted, `resumeFromSeq = 1` | P0 |
-| TC-2-SES-02 | Service | Session with stored seqs 1..5 → `resumeFromSeq = 6` regardless of client `lastAckedSeq = 3` | P0 |
-| TC-2-SES-03 | Service | `protocolVersion = 2` → `DomainException(UNSUPPORTED_PROTOCOL_VERSION)` | P0 |
+| TC-2-SES-02 | Service | Session with stored seqs 1..5 → `resumeFromSeq = 6` (the client's `lastAckedSeq` is not used) | P0 |
+| TC-2-SES-03 | Service | Moved to TC-2-WS-04: the driver socket checks the protocol version | – |
 | TC-2-ACK-01 | Service | Valid batch → stored; result has accepted/rejected counts; `duplicate = false` | P0 |
 | TC-2-ACK-02 | Service | Empty batch → `DomainException(EMPTY_BATCH)`, nothing stored | P1 |
 | TC-2-ACK-03 | Service | Same `(session, seq)` sent twice → second returns `duplicate = true` with the **original** counts; repository holds one copy | P0 |
@@ -310,7 +330,7 @@ Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restar
 | TC-2-DB-01 | Integration | Flyway migrates an empty DB to V2 without errors | P0 |
 | TC-2-DB-02 | Integration | `FixBatchRepositoryContract` passes against `ExposedFixBatchRepository` | P0 |
 | TC-2-DB-03 | Integration | Two coroutines store the same `(session, seq)` concurrently → exactly one `Stored`, one `AlreadyStored`; fixes stored once | P0 |
-| TC-2-DB-04 | Integration | `lastAcceptedBefore` returns the latest accepted fix at or before the given instant | P1 |
+| TC-2-DB-04 | Integration | `lastAcceptedAtOrBefore` returns the latest accepted fix at or before the given instant | P1 |
 | TC-2-DB-05 | Integration | Timestamps round-trip with millisecond precision in UTC | P1 |
 | TC-2-DB-06 | Integration | `DatabaseHealthIndicator` DOWN when the container is stopped | P2 |
 
