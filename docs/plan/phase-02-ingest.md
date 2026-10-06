@@ -83,47 +83,72 @@ Shared kernel additions (`shared/geo`, as built in T2.2):
 - `Haversine.distance(a, b): Meters`: great-circle distance with the IUGG mean Earth radius (6,371,008.8 m).
   Compared with the WGS 84 ellipsoid it is off by at most about 0.5 %.
 
+Tracking domain (`tracking/domain`, as built in T2.3):
+
 ```kotlin
 @JvmInline value class SessionId(val value: UUID)
-@JvmInline value class DeviceId(val value: String)
+@JvmInline value class DeviceId(val value: String)          // 1 to 128 characters
 
-data class LocationFix(val point: GeoPoint, val accuracyM: Double,
+data class FixReading(val lat: Double, val lng: Double, val accuracyM: Double, ...)   // as the device sent it, unchecked
+data class LocationFix(val point: GeoPoint, val accuracy: Meters,
                        val speedMps: Double?, val speedAccuracyMps: Double?,
                        val bearingDeg: Double?, val bearingAccuracyDeg: Double?,
                        val altitudeM: Double?, val verticalAccuracyM: Double?,
                        val recordedAt: Instant, val provider: LocationProvider, val mock: Boolean,
                        val satellites: SatelliteHealth?)   // SatelliteHealth(usedInFix: Int, meanCn0DbHz: Double?)
-data class AcceptedFix(val fix: LocationFix, val batchSeq: Long, val index: Int,
-                       val distanceFromPrevM: Double, val cumulativeM: Double, val derivedSpeedMps: Double?)
+data class AcceptedFix(val fix: LocationFix, val index: Int,
+                       val distanceFromPrev: Meters, val cumulative: Meters, val derivedSpeedMps: Double?)
 data class Rejection(val index: Int, val reason: RejectionReason)
-enum class RejectionReason { POOR_ACCURACY, FUTURE_TIMESTAMP, TOO_OLD, DUPLICATE_TIMESTAMP, IMPLAUSIBLE_JUMP, INVALID_VALUE, MOCK_LOCATION }
+enum class RejectionReason { INVALID_VALUE, MOCK_LOCATION, POOR_ACCURACY, FUTURE_TIMESTAMP, TOO_OLD, DUPLICATE_TIMESTAMP, IMPLAUSIBLE_JUMP }
 
-class TrackingSession(val id: SessionId, val deviceId: DeviceId, sdkVersion: String, startedAt: Instant) {  // aggregate
+class TrackingSession(val id: SessionId, val deviceId: DeviceId, sdkVersion: String, val startedAt: Instant) {  // aggregate
+    fun reconnect(deviceId: DeviceId, sdkVersion: String, at: Instant)   // another device → SESSION_DEVICE_MISMATCH
+    fun touch(at: Instant)                                               // lastSeenAt never moves backwards
     fun resumeFrom(highestStoredSeq: Long?): Long
-    fun touch(at: Instant)
 }
 ```
 
-Fix pipeline — a domain service made of small pure stages, composed in order:
+Times are `kotlin.time.Instant` (the same type as the protocol; Exposed maps it). Distances are `Meters`.
+
+Fix pipeline: a domain service with three kinds of steps.
 
 ```kotlin
-fun interface FixStage { fun apply(input: StageInput): StageOutput }
-class FixPipeline(private val stages: List<FixStage>) { fun process(batch: List<LocationFix>, context: PipelineContext): PipelineResult }
+class FixPipeline(config: PipelineConfig) { fun process(batch: List<FixReading>, context: PipelineContext): PipelineResult }
+internal fun FixReading.validate(): LocationFix?                                     // null → INVALID_VALUE
+internal fun interface FixRule { fun check(fix: LocationFix, context: RuleContext): RejectionReason? }
 ```
 
-| Stage | Rule (defaults from `PipelineConfig`) | Rejection |
+| Step | Rule (defaults from `PipelineConfig`) | Rejection |
 |---|---|---|
-| `ValidateStage` | finite numbers; `accuracyM` in (0, 500]; `speedMps` ≥ 0 if present; `bearingDeg` in [0, 360) | `INVALID_VALUE` |
-| `MockStage` | `mock == false` (on by default; `PipelineConfig.rejectMock`) | `MOCK_LOCATION` |
-| `AccuracyStage` | `accuracyM` ≤ `maxAccuracyM` (50) | `POOR_ACCURACY` |
-| `TimeWindowStage` | `recordedAt` ≤ now + `maxClockSkew` (30 s) and ≥ now − `maxAge` (24 h) | `FUTURE_TIMESTAMP` / `TOO_OLD` |
-| `DedupStage` | `recordedAt` not equal to an already accepted fix of the session (context) or earlier in the batch | `DUPLICATE_TIMESTAMP` |
-| `JumpFilterStage` | implied speed from previous accepted fix ≤ `maxSpeedMps` (70) after subtracting both accuracies from the distance; fixes with `satellites.usedInFix < 4` use half the tolerance; fixes without `satellites` use the full tolerance | `IMPLAUSIBLE_JUMP` |
-| `EnrichStage` | compute `distanceFromPrevM`, `cumulativeM`, `derivedSpeedMps` | – |
+| `validate()` | `lat`/`lng` in range; `accuracyM` finite and > 0; speed, accuracy values ≥ 0; `bearingDeg` in [0, 360); altitude finite; satellite values ≥ 0. NaN and infinity are invalid | `INVALID_VALUE` |
+| `MockRule` | `mock == false` (on by default; `PipelineConfig.rejectMock`) | `MOCK_LOCATION` |
+| `AccuracyRule` | `accuracy` ≤ `maxAccuracy` (50 m) | `POOR_ACCURACY` |
+| `TimeWindowRule` | `recordedAt` ≤ now + `maxClockSkew` (30 s) and ≥ now − `maxAge` (24 h) | `FUTURE_TIMESTAMP` / `TOO_OLD` |
+| `DuplicateRule` | `recordedAt` not equal to the previous accepted fix (from this batch or from the context) | `DUPLICATE_TIMESTAMP` |
+| `JumpRule` | implied speed from the previous accepted fix ≤ `maxSpeedMps` (70) after subtracting both accuracies from the distance; fixes with `satellites.usedInFix < 4` use half the tolerance; fixes without `satellites` use the full tolerance | `IMPLAUSIBLE_JUMP` |
+| `enrich()` | compute `distanceFromPrev`, `cumulative`, `derivedSpeedMps` | – |
 
-Fixes inside a batch are sorted by `recordedAt` before the pipeline; rejection indexes refer to the
-original positions. `PipelineContext` carries `previous: AcceptedFix?` (latest accepted fix recorded
-before this batch's first fix) and `now`.
+`process` sorts the batch by `recordedAt` (a stable sort, so the first of two equal times is kept) and
+walks it once. The rules run in the order above, and the first rule that returns a reason rejects the fix.
+Only an accepted fix becomes the next fix's `previous`, so after a rejected jump the next fix is compared
+with the last accepted fix. Rejection indexes refer to the original positions. `PipelineContext` carries
+`now` and `previous: AcceptedFix?`: the latest accepted fix of the session recorded **at or before** the
+batch's earliest fix. "At or before" lets `DuplicateRule` catch a resent fix with the same time.
+
+Changes from the original plan (T2.3):
+
+| Planned | Built | Why |
+|---|---|---|
+| `LocationFix` holds a `GeoPoint`, and a `ValidateStage` checks the numbers | `FixReading` → `validate()` → `LocationFix` | A `LocationFix` with an invalid position cannot exist, so a stage that receives one cannot check it. The type now shows whether a fix was checked |
+| One `FixStage` interface (`StageInput` → `StageOutput`) for all stages | `validate()`, `FixRule`, `enrich()` | The three kinds of step do different jobs. One interface for all three would need a vague input and output type |
+| Accuracy over 500 m is `INVALID_VALUE` | Any finite accuracy > 0 is valid; over 50 m is `POOR_ACCURACY` | A 1,500 m cell-tower fix is real but imprecise, not broken |
+| `AcceptedFix.batchSeq`, `distanceFromPrevM: Double` | No `batchSeq`; distances are `Meters` | The repository adds the seq when it stores a batch |
+| `previous` = latest fix strictly before the batch | At or before the batch's earliest fix | See above. TC-2-DB-04 is changed to match |
+| `TrackingSession` has `resumeFrom` and `touch` | Adds `reconnect`, which refuses a different device (`TrackingError.SESSION_DEVICE_MISMATCH`, category `CONFLICT`) | Until authentication exists (phase 3), any device could reuse another device's session id |
+
+Known limits: if the previous accepted fix is itself wrong (for example a bad first fix), later honest fixes
+look like jumps; a reset after N rejections in a row would fix this. `DuplicateRule` compares only with the
+previous accepted fix, not with every stored fix; the batch numbering rules make overlapping batches unlikely.
 
 Domain exceptions (`ErrorCode`s): `UNSUPPORTED_PROTOCOL_VERSION`, `EMPTY_BATCH`, `BATCH_TOO_LARGE`, `INVALID_SEQ`.
 Domain event: `FixesAccepted(sessionId, deviceId, fixes: List<AcceptedFix>)` in `tracking.domain.event`.
@@ -211,11 +236,11 @@ Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restar
 
 - [x] T2.1 Protocol v1 driver messages + `ProtocolJson`; golden files; AsyncAPI document for the driver channel.
 - [x] T2.2 `shared/geo`: `GeoPoint`, `Meters`, `Haversine`.
-- [ ] T2.3 `tracking/domain`: model, session aggregate, pipeline stages, `FixPipeline`, `PipelineConfig`.
+- [x] T2.3 `tracking/domain`: model, session aggregate, pipeline stages, `FixPipeline`, `PipelineConfig`.
 - [ ] T2.4 `TrackingService`, ports, `TrackQuery`; in-memory adapters + object mothers in testFixtures.
 - [ ] T2.5 Flyway V2, Exposed repositories, outbox table + relay; port contract tests.
 - [ ] T2.6 `DriverSocket` + mapper; `TrackingModule` (Koin); remove echo socket from dev.
-- [ ] T2.7 `tools/simulator` driver command; GPX fixtures.
+- [ ] T2.7 `tools/simulator` driver command; GPX fixtures; TC-2-PIP-16 (needs the GPX reader).
 - [ ] T2.8 E2E tests; k6 ingest script; coverage gate on `tracking.domain` / `tracking.application`.
 - [ ] T2.9 Extend the staging smoke test (phase 1.5) with a simulator run: replay `straight_2km.gpx`, expect every batch ACKed. **Deferred with phase 1.5.**
 
@@ -248,7 +273,7 @@ Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restar
 | TC-2-PIP-01 | Unit | Fix with `accuracyM = 80` (max 50) → rejected `POOR_ACCURACY` | P0 |
 | TC-2-PIP-02 | Unit | `recordedAt = now + 2 min` → `FUTURE_TIMESTAMP`; `now + 10 s` → accepted (skew allowance) | P0 |
 | TC-2-PIP-03 | Unit | `recordedAt = now − 25 h` → `TOO_OLD` | P1 |
-| TC-2-PIP-04 | Unit | NaN latitude or negative speed → `INVALID_VALUE` | P0 |
+| TC-2-PIP-04 | Unit | Each reported value out of range or not finite (NaN latitude, negative speed, bearing 360, infinite altitude, negative satellite count, …) → `INVALID_VALUE`; bearing 0, negative altitude and 0 satellites are valid | P0 |
 | TC-2-PIP-05 | Unit | Two fixes with identical `recordedAt` in one batch → second rejected `DUPLICATE_TIMESTAMP` | P0 |
 | TC-2-PIP-06 | Unit | Fix whose `recordedAt` equals context's previous accepted fix → `DUPLICATE_TIMESTAMP` | P1 |
 | TC-2-PIP-07 | Unit | Previous at A, next 2 km away 10 s later (200 m/s) → `IMPLAUSIBLE_JUMP` | P0 |
@@ -260,7 +285,7 @@ Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restar
 | TC-2-PIP-13 | Unit | First fix of a session with no previous → `distanceFromPrevM = 0`, never rejected as a jump | P0 |
 | TC-2-PIP-14 | Property | For any batch: `accepted.size + rejected.size == input.size` and indexes are a permutation of input indexes | P0 |
 | TC-2-PIP-15 | Property | `cumulativeM` is non-decreasing across accepted fixes | P1 |
-| TC-2-PIP-16 | Unit | `gps_jump.gpx` fixture: exactly the injected spike points are rejected | P1 |
+| TC-2-PIP-16 | Unit | `gps_jump.gpx` fixture: exactly the injected spike points are rejected (in T2.7) | P1 |
 | TC-2-PIP-17 | Unit | Fix with `mock = true` → rejected `MOCK_LOCATION`; with `rejectMock = false` → accepted | P0 |
 
 ### Application service
@@ -285,7 +310,7 @@ Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restar
 | TC-2-DB-01 | Integration | Flyway migrates an empty DB to V2 without errors | P0 |
 | TC-2-DB-02 | Integration | `FixBatchRepositoryContract` passes against `ExposedFixBatchRepository` | P0 |
 | TC-2-DB-03 | Integration | Two coroutines store the same `(session, seq)` concurrently → exactly one `Stored`, one `AlreadyStored`; fixes stored once | P0 |
-| TC-2-DB-04 | Integration | `lastAcceptedBefore` returns the latest fix strictly before the given instant | P1 |
+| TC-2-DB-04 | Integration | `lastAcceptedBefore` returns the latest accepted fix at or before the given instant | P1 |
 | TC-2-DB-05 | Integration | Timestamps round-trip with millisecond precision in UTC | P1 |
 | TC-2-DB-06 | Integration | `DatabaseHealthIndicator` DOWN when the container is stopped | P2 |
 
