@@ -74,7 +74,14 @@ before the SDK change. The phase 9 GMS-vs-AOSP report needs both fields. The SDK
 
 ### Domain (`shared/geo`, `tracking/domain`)
 
-Shared kernel additions (`shared/geo`): `GeoPoint` (validated), `Meters`, `Haversine`.
+Shared kernel additions (`shared/geo`, as built in T2.2):
+
+- `GeoPoint(lat, lng)`: WGS 84 degrees. The constructor throws `IllegalArgumentException` for a value outside
+  [-90, 90] / [-180, 180] or NaN. `GeoPoint.isValid(lat, lng)` lets callers check untrusted input first, so
+  that the driver socket mapper can reject one fix with `INVALID_VALUE` instead of throwing.
+- `Meters`: a value class with `plus`, `minus` and `compareTo`.
+- `Haversine.distance(a, b): Meters`: great-circle distance with the IUGG mean Earth radius (6,371,008.8 m).
+  Compared with the WGS 84 ellipsoid it is off by at most about 0.5 %.
 
 ```kotlin
 @JvmInline value class SessionId(val value: UUID)
@@ -203,7 +210,7 @@ Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restar
 ## Tasks
 
 - [x] T2.1 Protocol v1 driver messages + `ProtocolJson`; golden files; AsyncAPI document for the driver channel.
-- [ ] T2.2 `shared/geo`: `GeoPoint`, `Meters`, `Haversine`.
+- [x] T2.2 `shared/geo`: `GeoPoint`, `Meters`, `Haversine`.
 - [ ] T2.3 `tracking/domain`: model, session aggregate, pipeline stages, `FixPipeline`, `PipelineConfig`.
 - [ ] T2.4 `TrackingService`, ports, `TrackQuery`; in-memory adapters + object mothers in testFixtures.
 - [ ] T2.5 Flyway V2, Exposed repositories, outbox table + relay; port contract tests.
