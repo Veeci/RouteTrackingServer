@@ -1,0 +1,6 @@
+{
+  "type": "ack",
+  "seq": 42,
+  "accepted": 1,
+  "rejected": [{ "index": 1, "reason": "POOR_ACCURACY" }]
+}

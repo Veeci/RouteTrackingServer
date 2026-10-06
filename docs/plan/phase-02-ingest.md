@@ -19,26 +19,42 @@ Flyway V2, Exposed repositories, transactional outbox + `FixesAccepted` event, d
 
 ## Design
 
-### Protocol (`protocol` module · `v1/`)
+### Protocol (`protocol` module, as built in T2.1)
 
 ```kotlin
-@Serializable sealed interface ClientMessage {
-    @Serializable @SerialName("hello")     data class Hello(val protocolVersion: Int, val deviceId: String, val sessionId: String,
-                                                            val lastAckedSeq: Long?, val sdkVersion: String) : ClientMessage
-    @Serializable @SerialName("fix_batch") data class FixBatch(val seq: Long, val fixes: List<FixDto>) : ClientMessage
-}
-@Serializable sealed interface ServerMessage {
-    @Serializable @SerialName("welcome") data class Welcome(val sessionId: String, val resumeFromSeq: Long,
-                                                            val serverTime: Instant, val limits: LimitsDto) : ServerMessage
-    @Serializable @SerialName("ack")     data class Ack(val seq: Long, val accepted: Int, val rejected: List<RejectionDto>) : ServerMessage
-    @Serializable @SerialName("error")   data class Error(val code: String, val message: String, val correlatesTo: Long? = null) : ServerMessage
-}
-val ProtocolJson = Json { classDiscriminator = "type"; ignoreUnknownKeys = true; explicitNulls = false }
+@Serializable sealed interface ClientMessage
+@Serializable @SerialName("hello")     data class Hello(val protocolVersion: Int, val deviceId: String, val sessionId: String,
+                                                        val lastAckedSeq: Long? = null, val sdkVersion: String) : ClientMessage
+@Serializable @SerialName("fix_batch") data class FixBatch(val seq: Long, val fixes: List<FixDto>) : ClientMessage
+
+@Serializable sealed interface ServerMessage
+@Serializable @SerialName("welcome") data class Welcome(val sessionId: String, val resumeFromSeq: Long,
+                                                        val serverTime: Instant, val limits: LimitsDto) : ServerMessage
+@Serializable @SerialName("ack")     data class Ack(val seq: Long, val accepted: Int, val rejected: List<RejectionDto>) : ServerMessage
+@Serializable @SerialName("error")   data class ErrorMessage(val code: String, val message: String, val correlatesTo: Long? = null) : ServerMessage
+
+data class LimitsDto(val maxFixesPerBatch: Int, val maxFrameBytes: Long, val maxMessagesPerSecond: Int)
+data class RejectionDto(val index: Int, val reason: String)
+val ProtocolJson = Json { classDiscriminator = "type"; ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
 ```
 
 `FixDto` fields per [protocol.md](../architecture/protocol.md). `provider` is an enum
 `GMS_FUSED | AOSP_GPS | AOSP_NETWORK | AOSP_FUSED | UNKNOWN` (unknown strings decode to `UNKNOWN`).
 `provider` and `mock` default to `UNKNOWN` and `false` when absent; `satellites` is optional.
+Times are `kotlin.time.Instant`, sent as ISO-8601 strings.
+
+Changes from the original plan:
+
+| Planned | Built | Why |
+|---|---|---|
+| Messages in a `v1/` package | One package, `veeci.practicing.rts.protocol` | The phase 1 `ErrorMessage` is in the same sealed hierarchy as the new messages, and Kotlin requires one package for a sealed hierarchy. The version is in the URL and in `hello.protocolVersion` |
+| `ServerMessage.Error` | `ErrorMessage` (kept from phase 1) | `Error` clashes with `kotlin.Error` |
+| `limits { maxFixesPerBatch, maxFrameBytes }` | adds `maxMessagesPerSecond` | The client can pace itself instead of hitting `RATE_LIMITED` |
+| `ProtocolJson` without `encodeDefaults` | `encodeDefaults = true` | Default values (`"mock": false`) are written, so a logged frame shows every value the reader uses. Nulls are still left out |
+| Rejection reason as an enum | `RejectionDto.reason: String` | The server writes it, so an older SDK must accept reasons that it does not know. Values that the server reads (`provider`) are enums with an `UNKNOWN` fallback |
+| AsyncAPI in `app/src/main/resources` | `protocol/src/main/resources/asyncapi/rts-ws-v1.yaml` | The document sits next to the classes that it describes, and one module tests both |
+| – | `WsCloseCodes` (4400, 4401) and `WsErrorCodes.UNKNOWN_MESSAGE` | The server and the SDK share the numbers and codes |
+| – | `com.networknt:json-schema-validator` 2.0.1 (test only) | Validates golden files against the AsyncAPI schemas. Pinned to the version that swagger-request-validator uses |
 
 ### Android SDK alignment (reviewed 2026-10-05)
 
@@ -186,7 +202,7 @@ Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restar
 
 ## Tasks
 
-- [ ] T2.1 Protocol v1 driver messages + `ProtocolJson`; golden files; AsyncAPI document for the driver channel.
+- [x] T2.1 Protocol v1 driver messages + `ProtocolJson`; golden files; AsyncAPI document for the driver channel.
 - [ ] T2.2 `shared/geo`: `GeoPoint`, `Meters`, `Haversine`.
 - [ ] T2.3 `tracking/domain`: model, session aggregate, pipeline stages, `FixPipeline`, `PipelineConfig`.
 - [ ] T2.4 `TrackingService`, ports, `TrackQuery`; in-memory adapters + object mothers in testFixtures.
@@ -206,7 +222,7 @@ Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restar
 | TC-2-PRO-02 | Unit | JSON with `"type":"fix_batch"` decodes to `ClientMessage.FixBatch` | P0 |
 | TC-2-PRO-03 | Unit | Unknown extra fields are ignored (forward compat) | P0 |
 | TC-2-PRO-04 | Unit | Unknown `provider` string decodes to `UNKNOWN` | P1 |
-| TC-2-PRO-05 | Unit | Golden file: `Welcome` encodes to the exact JSON in `protocol/src/test/resources/golden/welcome.json` (guards accidental contract changes) | P1 |
+| TC-2-PRO-05 | Unit | Golden files: each message type encodes to the exact JSON in `protocol/src/test/resources/golden/<type>.json` (guards accidental contract changes) | P1 |
 | TC-2-PRO-06 | Unit | A fix with only the required fields (no `provider`, `mock`, `satellites`) decodes with `provider = UNKNOWN`, `mock = false`, `satellites = null` | P0 |
 
 ### Geo
@@ -232,13 +248,13 @@ Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restar
 | TC-2-PIP-08 | Unit | 200 m apart in 2 s (100 m/s raw) with accuracy 40 m each → effective 120 m / 2 s = 60 m/s → accepted (accuracy tolerance applied) | P1 |
 | TC-2-PIP-09 | Unit | After a rejected jump, the next fix is compared with the last *accepted* fix, not the rejected one | P0 |
 | TC-2-PIP-10 | Unit | Fix with `satellites.usedInFix = 3` and a borderline jump is rejected; same with 12 satellites is accepted | P2 |
-| TC-2-PIP-11 | Unit | Fix with `mock = true` → rejected `MOCK_LOCATION`; with `rejectMock = false` → accepted | P0 |
 | TC-2-PIP-11 | Unit | Batch given out of time order is processed sorted; rejection indexes refer to original positions | P0 |
 | TC-2-PIP-12 | Unit | Enrich: 3 accepted fixes 100 m apart → `distanceFromPrevM` 0/100/100 (first uses context previous if any), `cumulativeM` 0/100/200 | P0 |
 | TC-2-PIP-13 | Unit | First fix of a session with no previous → `distanceFromPrevM = 0`, never rejected as a jump | P0 |
 | TC-2-PIP-14 | Property | For any batch: `accepted.size + rejected.size == input.size` and indexes are a permutation of input indexes | P0 |
 | TC-2-PIP-15 | Property | `cumulativeM` is non-decreasing across accepted fixes | P1 |
 | TC-2-PIP-16 | Unit | `gps_jump.gpx` fixture: exactly the injected spike points are rejected | P1 |
+| TC-2-PIP-17 | Unit | Fix with `mock = true` → rejected `MOCK_LOCATION`; with `rejectMock = false` → accepted | P0 |
 
 ### Application service
 
@@ -259,12 +275,12 @@ Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restar
 
 | ID | Type | Given / When / Then | Priority |
 |---|---|---|---|
-| TC-2-DB-01 | Integration | Flyway migrates an empty DB to V1 without errors | P0 |
+| TC-2-DB-01 | Integration | Flyway migrates an empty DB to V2 without errors | P0 |
 | TC-2-DB-02 | Integration | `FixBatchRepositoryContract` passes against `ExposedFixBatchRepository` | P0 |
 | TC-2-DB-03 | Integration | Two coroutines store the same `(session, seq)` concurrently → exactly one `Stored`, one `AlreadyStored`; fixes stored once | P0 |
 | TC-2-DB-04 | Integration | `lastAcceptedBefore` returns the latest fix strictly before the given instant | P1 |
 | TC-2-DB-05 | Integration | Timestamps round-trip with millisecond precision in UTC | P1 |
-| TC-2-DB-06 | Integration | `DbHealthCheck` DOWN when the container is stopped | P2 |
+| TC-2-DB-06 | Integration | `DatabaseHealthIndicator` DOWN when the container is stopped | P2 |
 
 ### Driver socket (component, fakes)
 
@@ -275,7 +291,7 @@ Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restar
 | TC-2-WS-03 | API | First message is `fix_batch` instead of `hello` → closed 4401 | P0 |
 | TC-2-WS-04 | API | `hello` with version 2 → closed 4400 | P0 |
 | TC-2-WS-05 | API | `fix_batch` after handshake → `ack` with matching `seq` | P0 |
-| TC-2-WS-06 | API | Malformed JSON → `error{code=BAD_MESSAGE}` and session stays open (next valid batch is ACKed) | P0 |
+| TC-2-WS-06 | API | Malformed JSON → `error{code=MALFORMED_MESSAGE}` and session stays open (next valid batch is ACKed) | P0 |
 | TC-2-WS-07 | API | Unknown `type` → `error{code=UNKNOWN_MESSAGE}`, session open | P1 |
 | TC-2-WS-08 | API | Oversized batch → `error{code=BATCH_TOO_LARGE, correlatesTo=seq}`, no ack | P0 |
 | TC-2-WS-09 | API | 25 messages in 1 s (limit 20) → at least one `error{code=RATE_LIMITED}` | P2 |
@@ -307,7 +323,7 @@ Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restar
   `CompletableDeferred<Unit>`; `insert` awaits it; bound via a Koin test override. The test sends a batch, asserts
   `incoming.tryReceive()` is empty after yielding, then completes the gate and awaits the ack.
 - **Handshake timeout without real waiting (TC-2-WS-02):** make `handshakeTimeout` configurable and
-  set it to 200 ms in `application-test.yaml`; that is simpler and more reliable than virtual time
+  set it to 200 ms in `config/test.conf`; that is simpler and more reliable than virtual time
   inside `testApplication`.
 - **Testcontainers setup:** the shared `PostgresContainer` from the test strategy (one per JVM, Flyway once, `TRUNCATE` before each test).
 - **Concurrency test (TC-2-DB-03):** `coroutineScope { repeat(2) { launch(Dispatchers.IO) { repo.insert(...) } } }`

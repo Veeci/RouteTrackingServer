@@ -21,6 +21,7 @@ testing {
             useJUnitJupiter(libs.versions.junit)
             dependencies {
                 implementation(libs.kotest.assertions)
+                implementation(libs.json.schema.validator)
             }
         }
     }

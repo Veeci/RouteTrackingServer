@@ -2,18 +2,45 @@ package veeci.practicing.rts.protocol
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlin.time.Instant
 
-/** Every message the server sends. Phase 2 adds welcome, ack and the rest. */
 @Serializable
 sealed interface ServerMessage
 
-/** A recoverable problem with one message. The session stays open; the client may fix and resend. */
+@Serializable
+@SerialName("welcome")
+data class Welcome(
+    val sessionId: String,
+    val resumeFromSeq: Long,
+    val serverTime: Instant,
+    val limits: LimitsDto,
+) : ServerMessage
+
+@Serializable
+data class LimitsDto(
+    val maxFixesPerBatch: Int,
+    val maxFrameBytes: Long,
+    val maxMessagesPerSecond: Int,
+)
+
+@Serializable
+@SerialName("ack")
+data class Ack(
+    val seq: Long,
+    val accepted: Int,
+    val rejected: List<RejectionDto>,
+) : ServerMessage
+
+@Serializable
+data class RejectionDto(
+    val index: Int,
+    val reason: String,
+)
+
 @Serializable
 @SerialName("error")
 data class ErrorMessage(
-    /** One of [WsErrorCodes]; clients branch on it. */
     val code: String,
-    /** For humans and logs; may change between versions. */
     val message: String,
     /** The `seq` of the client message this is about, when it has one. */
     val correlatesTo: Long? = null,
@@ -29,4 +56,12 @@ object WsErrorCodes {
 
     /** More messages per second than allowed; this one was dropped. */
     const val RATE_LIMITED = "RATE_LIMITED"
+
+    /** Valid JSON with a `type` this endpoint does not know, for example from a newer client. */
+    const val UNKNOWN_MESSAGE = "UNKNOWN_MESSAGE"
+}
+
+object WsCloseCodes {
+    const val UNSUPPORTED_VERSION: Short = 4400
+    const val HANDSHAKE_TIMEOUT: Short = 4401
 }

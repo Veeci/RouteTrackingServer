@@ -1,0 +1,29 @@
+{
+  "type": "fix_batch",
+  "seq": 42,
+  "fixes": [
+    {
+      "lat": 10.7769,
+      "lng": 106.7009,
+      "accuracyM": 8.5,
+      "speedMps": 11.2,
+      "speedAccuracyMps": 0.8,
+      "bearingDeg": 87.0,
+      "bearingAccuracyDeg": 4.0,
+      "altitudeM": 12.0,
+      "verticalAccuracyM": 3.5,
+      "recordedAt": "2026-09-30T02:15:04.120Z",
+      "provider": "GMS_FUSED",
+      "mock": false,
+      "satellites": { "usedInFix": 14, "meanCn0DbHz": 31.5 }
+    },
+    {
+      "lat": 10.7771,
+      "lng": 106.7012,
+      "accuracyM": 80.0,
+      "recordedAt": "2026-09-30T02:15:05.120Z",
+      "provider": "UNKNOWN",
+      "mock": false
+    }
+  ]
+}
