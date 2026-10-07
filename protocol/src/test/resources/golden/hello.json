@@ -1,0 +1,8 @@
+{
+  "type": "hello",
+  "protocolVersion": 1,
+  "deviceId": "dev-sim-1",
+  "sessionId": "0f8fad5b-d9cb-469f-a165-70867728950e",
+  "lastAckedSeq": 41,
+  "sdkVersion": "0.9.0"
+}

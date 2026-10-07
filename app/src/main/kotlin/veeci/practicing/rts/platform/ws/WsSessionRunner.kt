@@ -9,7 +9,14 @@ import kotlinx.coroutines.slf4j.MDCContext
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.DeserializationStrategy
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.descriptors.PolymorphicKind
+import kotlinx.serialization.descriptors.elementNames
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import org.slf4j.LoggerFactory
 import org.slf4j.MDC
 import veeci.practicing.rts.platform.config.WsConfig
@@ -25,7 +32,8 @@ const val WS_ENDPOINT_MDC = "wsEndpoint"
 
 /**
  * Runs one WebSocket session so every endpoint gets the same behaviour: frames decoded with [ProtocolJson],
- * per-session rate limiting, `error` frames for bad messages (the session stays open), close 1011 when a
+ * per-session rate limiting, `error` frames for bad messages (the session stays open), UNKNOWN_MESSAGE for a
+ * `type` the endpoint does not know, close 1011 when a
  * handler has a bug, session id in the logs, and one log line when the session opens and when it closes.
  * Endpoints only write the handler for a decoded message.
  */
@@ -86,6 +94,7 @@ class WsSessionRunner(
         stats: Stats,
     ): String? {
         val limiter = TokenBucket(config.messagesPerSecond, config.messagesPerSecond)
+        val knownTypes = inbound.knownTypes()
         for (frame in socket.incoming) {
             stats.received++
             val text = (frame as? Frame.Text)?.readText()
@@ -102,7 +111,7 @@ class WsSessionRunner(
                 }
 
                 else -> {
-                    val message = decode(text, inbound, session) ?: continue
+                    val message = decode(text, inbound, knownTypes, session) ?: continue
                     if (!handleSafely(session, message, handle)) return "handler failed, closed with 1011"
                 }
             }
@@ -114,17 +123,38 @@ class WsSessionRunner(
     private suspend fun <In> decode(
         text: String,
         inbound: DeserializationStrategy<In>,
+        knownTypes: Set<String>?,
         session: WsSession,
     ): In? {
-        val json =
-            try {
-                ProtocolJson.parseToJsonElement(text)
-            } catch (_: SerializationException) {
-                session.sendError(WsErrorCodes.MALFORMED_MESSAGE, "The frame is not valid JSON.")
-                return null
-            }
-        // kotlinx.serialization reports a wrong shape with either of these two exceptions.
-        return try {
+        val json = parse(text, session) ?: return null
+        val type = json.typeField()
+        return if (knownTypes != null && type != null && type !in knownTypes) {
+            // A newer client may send a message this server does not know yet. It is told so, and nothing breaks.
+            session.sendError(WsErrorCodes.UNKNOWN_MESSAGE, "Unknown message type '$type'.")
+            null
+        } else {
+            decodeShape(json, inbound, session)
+        }
+    }
+
+    private suspend fun parse(
+        text: String,
+        session: WsSession,
+    ): JsonElement? =
+        try {
+            ProtocolJson.parseToJsonElement(text)
+        } catch (_: SerializationException) {
+            session.sendError(WsErrorCodes.MALFORMED_MESSAGE, "The frame is not valid JSON.")
+            null
+        }
+
+    // kotlinx.serialization reports a wrong shape with either of these two exceptions.
+    private suspend fun <In> decodeShape(
+        json: JsonElement,
+        inbound: DeserializationStrategy<In>,
+        session: WsSession,
+    ): In? =
+        try {
             ProtocolJson.decodeFromJsonElement(inbound, json)
         } catch (_: SerializationException) {
             session.sendError(WsErrorCodes.INVALID_MESSAGE, "Not a message this endpoint accepts.")
@@ -133,7 +163,6 @@ class WsSessionRunner(
             session.sendError(WsErrorCodes.INVALID_MESSAGE, "Not a message this endpoint accepts.")
             null
         }
-    }
 
     /** A bug in one handler ends that session only, with 1011, never the server. */
     @Suppress("TooGenericExceptionCaught")
@@ -152,6 +181,17 @@ class WsSessionRunner(
             session.close(CloseReason(CloseReason.Codes.INTERNAL_ERROR, "Internal error"))
             false
         }
+
+    /** The `type` names of a sealed message family, or null when [inbound] is not one (the echo endpoint). */
+    @OptIn(ExperimentalSerializationApi::class)
+    private fun DeserializationStrategy<*>.knownTypes(): Set<String>? =
+        descriptor
+            .takeIf { it.kind == PolymorphicKind.SEALED }
+            ?.getElementDescriptor(1)
+            ?.elementNames
+            ?.toSet()
+
+    private fun JsonElement.typeField(): String? = ((this as? JsonObject)?.get("type") as? JsonPrimitive)?.contentOrNull
 
     private class Stats {
         var received = 0

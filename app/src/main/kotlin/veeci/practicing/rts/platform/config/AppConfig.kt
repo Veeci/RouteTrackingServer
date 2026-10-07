@@ -10,6 +10,7 @@ data class AppConfig(
     val http: HttpConfig,
     val db: DBConfig,
     val ws: WsConfig,
+    val tracking: TrackingConfig,
 )
 
 data class AppInfo(
@@ -46,4 +47,22 @@ data class WsConfig(
     val maxFrameBytes: Long,
     /** Messages one session may send per second; extra ones are dropped with error{RATE_LIMITED}. */
     val messagesPerSecond: Int,
+)
+
+/** The tracking context's limits. The tracking module turns them into its own types. */
+data class TrackingConfig(
+    /** A driver socket that sends no valid `hello` within this time is closed with 4401. */
+    val handshakeTimeout: Duration,
+    /** Largest batch accepted; a bigger one gets error{BATCH_TOO_LARGE}. Sent to the client in `welcome`. */
+    val maxFixesPerBatch: Int,
+    /** A fix with a larger accuracy radius is rejected as POOR_ACCURACY. */
+    val maxAccuracyM: Double,
+    /** How far in the future a device clock may be before a fix is FUTURE_TIMESTAMP. */
+    val maxClockSkew: Duration,
+    /** How old a fix may be when it arrives before it is TOO_OLD. */
+    val maxAge: Duration,
+    /** Faster implied movement between two fixes is an IMPLAUSIBLE_JUMP. */
+    val maxSpeedMps: Double,
+    /** Whether fixes from a mock location provider are rejected as MOCK_LOCATION. */
+    val rejectMock: Boolean,
 )

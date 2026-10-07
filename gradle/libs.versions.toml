@@ -24,6 +24,7 @@ turbine = "1.2.1"
 testcontainers = "2.0.5"
 konsist = "0.17.3"
 openapi-validator = "3.0.0"
+json-schema-validator = "2.0.1"
 spotless = "8.10.3"
 detekt = "1.23.8"
 kover = "0.9.11"
@@ -75,6 +76,7 @@ testcontainers-postgresql = { module = "org.testcontainers:testcontainers-postgr
 testcontainers-junit = { module = "org.testcontainers:testcontainers-junit-jupiter" }
 konsist = { module = "com.lemonappdev:konsist", version.ref = "konsist" }
 openapi-validator = { module = "com.atlassian.oai:swagger-request-validator-core", version.ref = "openapi-validator" }
+json-schema-validator = { module = "com.networknt:json-schema-validator", version.ref = "json-schema-validator" }
 
 [bundles]
 exposed = ["exposed-core", "exposed-jdbc", "exposed-kotlin-datetime", "exposed-json"]

@@ -1,0 +1,6 @@
+{
+  "type": "error",
+  "code": "BATCH_TOO_LARGE",
+  "message": "A batch holds at most 100 fixes; this one has 120",
+  "correlatesTo": 43
+}

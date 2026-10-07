@@ -2,6 +2,11 @@
 
 Branch: `feat/p1b-staging` · Depends on: 1 · Unlocks: real-device testing for every later phase
 
+**Status: deferred (2026-10-05).** The project uses free tooling only, and the platforms in this plan
+cost money (Fly.io: about USD 4–7 per month for one machine). Until this phase is done, nothing deploys
+automatically, and a phone reaches a server on a laptop through a Cloudflare Quick Tunnel
+(`cloudflared tunnel --url http://localhost:8080`).
+
 ## Goal
 
 Put the platform skeleton on a public HTTPS/WSS URL, deployed automatically on every merge to `main`,

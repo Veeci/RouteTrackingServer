@@ -1,0 +1,7 @@
+<configuration>
+    <!-- The simulator prints its own progress; library logs only when something is wrong. -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder><pattern>%-5level %logger{20} - %msg%n</pattern></encoder>
+    </appender>
+    <root level="WARN"><appender-ref ref="CONSOLE"/></root>
+</configuration>

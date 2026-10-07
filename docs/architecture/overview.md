@@ -69,8 +69,8 @@ route-tracking-server/
 │       ├── shared/                   shared kernel
 │       ├── identity/  tracking/  trip/  routing/  devicecontrol/  live/  telemetry/  fleet/
 │       └── ...
-│   └── src/main/resources/           application.conf, db/migration (Flyway), openapi/, asyncapi/
-├── protocol/                         wire contract library (kotlinx.serialization DTOs), published for the SDK
+│   └── src/main/resources/           config/*.conf, db/migration (Flyway), openapi/
+├── protocol/                         wire contract library (kotlinx.serialization DTOs, asyncapi/), published for the SDK
 ├── tools/simulator/                  driver/guest CLI clients, also used by scenario tests
 ├── load-tests/                       k6 scripts
 ├── deploy/                           Dockerfile, docker-compose.yml, otel-collector config

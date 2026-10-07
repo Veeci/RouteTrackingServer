@@ -38,7 +38,7 @@ subprojects {
 }
 
 // Coverage: one aggregated Kover report for all modules (`./gradlew koverHtmlReport`).
-// Report only in phase 0; thresholds from docs/testing/strategy.md are enforced once contexts exist.
+// The 80 % gate on domain and application code is in app/build.gradle.kts.
 dependencies {
     kover(project(":app"))
     kover(project(":protocol"))

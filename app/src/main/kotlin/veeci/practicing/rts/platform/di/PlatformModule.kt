@@ -13,6 +13,7 @@ import veeci.practicing.rts.platform.db.DatabaseHealthIndicator
 import veeci.practicing.rts.platform.db.ExposedTransactionRunner
 import veeci.practicing.rts.platform.db.TransactionRunner
 import veeci.practicing.rts.platform.db.createDataSource
+import veeci.practicing.rts.platform.events.OutboxWriter
 import veeci.practicing.rts.platform.observability.HealthIndicator
 import veeci.practicing.rts.platform.observability.HealthRegistry
 import veeci.practicing.rts.platform.ws.WsSessionRegistry
@@ -39,6 +40,7 @@ fun platformModule(
         single { Database.connect(get<DataSource>(), databaseConfig = DatabaseConfig { defaultMaxAttempts = 1 }) }
 
         single<TransactionRunner> { ExposedTransactionRunner(get()) }
+        single { OutboxWriter() }
 
         // Contexts add their own dependencies (Redis, ...) the same way: bind them as HealthIndicator.
         single { DatabaseHealthIndicator(get()) } bind HealthIndicator::class

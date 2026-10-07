@@ -5,6 +5,8 @@
 .idea
 **/build
 **/out
+# ...but not the source packages named `out` (adapter/out, port/out).
+!**/src/**/out
 docs
 load-tests
 *.iml

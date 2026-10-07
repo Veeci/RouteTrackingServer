@@ -11,4 +11,6 @@ val ProtocolJson: Json =
         ignoreUnknownKeys = true
         // Absent optional fields are left out instead of being sent as null.
         explicitNulls = false
+        // Default values are written out ("mock": false), so a frame in a log shows every value the reader will use.
+        encodeDefaults = true
     }

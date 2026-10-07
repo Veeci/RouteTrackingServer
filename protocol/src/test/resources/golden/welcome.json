@@ -1,0 +1,7 @@
+{
+  "type": "welcome",
+  "sessionId": "0f8fad5b-d9cb-469f-a165-70867728950e",
+  "resumeFromSeq": 42,
+  "serverTime": "2026-09-30T02:15:03.500Z",
+  "limits": { "maxFixesPerBatch": 100, "maxFrameBytes": 65536, "maxMessagesPerSecond": 20 }
+}
