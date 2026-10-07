@@ -45,6 +45,8 @@ dependencies {
     implementation(libs.hikari)
     implementation(libs.exposed.core)
     implementation(libs.exposed.jdbc)
+    implementation(libs.exposed.kotlin.datetime)
+    implementation(libs.exposed.json)
     implementation(libs.flyway.core)
     runtimeOnly(libs.flyway.postgresql)
     runtimeOnly(libs.postgresql)

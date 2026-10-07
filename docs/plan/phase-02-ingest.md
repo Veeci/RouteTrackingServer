@@ -199,31 +199,34 @@ Changes from the original plan (T2.4):
 | – | `SESSION_NOT_FOUND`; no event when every fix is rejected | A batch before `hello`; no position for other contexts to react to |
 | Object mothers in testFixtures | `Readings` stays in the `test` source set | It uses the internal `validate()`. T2.5 moves what the integration tests need |
 
-### Persistence (`tracking/adapter/out/persistence`)
+### Persistence (`tracking/adapter/out/persistence`, as built in T2.5)
 
-Flyway `V2__tracking.sql` (V1 is the platform baseline):
+The full database design (diagram, keys, indexes, the outbox, column types, size) is in
+[database.md](../architecture/database.md). In short:
 
-```sql
-create table tracking_sessions (id uuid primary key, device_id text not null, sdk_version text not null,
-  started_at timestamptz not null, last_seen_at timestamptz not null);
-create table fix_batches (session_id uuid not null references tracking_sessions(id), seq bigint not null check (seq > 0),
-  received_at timestamptz not null, accepted_count int not null, rejections jsonb not null default '[]',
-  primary key (session_id, seq));
-create table fixes (id bigserial primary key, session_id uuid not null, seq bigint not null, idx int not null,
-  lat double precision not null, lng double precision not null, accuracy_m real not null,
-  speed_mps real, bearing_deg real, altitude_m real, recorded_at timestamptz not null, provider text not null,
-  speed_accuracy_mps real, bearing_accuracy_deg real, vertical_accuracy_m real, mock boolean not null default false,
-  sat_used smallint, sat_mean_cn0_dbhz real, distance_from_prev_m double precision not null, cumulative_m double precision not null,
-  foreign key (session_id, seq) references fix_batches(session_id, seq));
-create index fixes_session_time on fixes (session_id, recorded_at);
-```
+- `V2__outbox.sql` creates the platform `outbox` table. `V3__tracking.sql` creates `tracking_sessions`,
+  `fix_batches` and `fixes`.
+- `fixes` has the primary key `(session_id, seq, idx)`, the protocol's identity of a point, and no
+  generated id. Coordinates and distances are `double precision`; values measured by the phone are `real`.
+- `ExposedFixBatchRepository.insert` runs `INSERT INTO fix_batches … ON CONFLICT DO NOTHING`
+  (`insertIgnore`). 0 rows → `AlreadyExists` with the stored copy. The primary key is the idempotency
+  guarantee under concurrent duplicate sends. All fixes of a batch go in one `batchInsert`.
+- `ExposedTrackingSessionRepository.save` is an `upsert` that never changes `device_id` or `started_at`.
+- `ExposedTrackingEventOutbox` writes `tracking.FixesAccepted.v1` with a JSON payload of plain values
+  through the platform `OutboxWriter`, in the caller's transaction.
+- `TrackingPersistenceContract` (testFixtures) holds 8 checks. `InMemoryTrackingPersistenceTest` runs them
+  against the in-memory repositories, and `ExposedTrackingIT` runs them against Postgres. `TrackingSchemaIT`
+  checks the constraints with plain SQL.
 
-`insert` uses `insert into fix_batches … on conflict do nothing`; 0 rows → `AlreadyExists`. The
-primary key is the idempotency guarantee under concurrent duplicate sends; fixes use JDBC batch insert.
+Changes from the original plan (T2.5):
 
-Outbox: `V2` also creates the platform `outbox(id bigserial, event_type, payload jsonb, created_at, published_at)`
-table if phase 1 didn't; the relay (platform/events) publishes to the in-process bus after commit and
-marks rows published. Consumers must be idempotent (at-least-once).
+| Planned | Built | Why |
+|---|---|---|
+| One `V2__tracking.sql`, which also creates `outbox` | `V2__outbox.sql` (platform) and `V3__tracking.sql` (tracking) | Each table has one owner. Other contexts will write to `outbox` too |
+| `fixes.id bigserial` primary key | Primary key `(session_id, seq, idx)` | It is the protocol's identity of a point. One index less on the biggest table (about 20 % of its size) |
+| – | `fixes.derived_speed_mps` | `AcceptedFix` has it, so a stored fix reads back unchanged |
+| The relay in T2.5 (TC-2-OUT-02) | Deferred to phase 3 | No consumer exists yet. Rows stay unpublished until the relay arrives |
+| `FixBatchRepositoryContract` | `TrackingPersistenceContract` for both repositories | A batch needs its session (foreign key), so the two are tested together |
 
 ### Inbound WebSocket adapter (`tracking/adapter/in/ws/DriverSocket.kt`)
 
@@ -258,7 +261,7 @@ Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restar
 - [x] T2.2 `shared/geo`: `GeoPoint`, `Meters`, `Haversine`.
 - [x] T2.3 `tracking/domain`: model, session aggregate, pipeline stages, `FixPipeline`, `PipelineConfig`.
 - [x] T2.4 `TrackingService`, ports, `TrackQuery`; in-memory adapters + object mothers in testFixtures.
-- [ ] T2.5 Flyway V2, Exposed repositories, outbox table + relay; port contract tests.
+- [x] T2.5 Flyway V2, Exposed repositories, outbox table + relay; port contract tests. (The relay moved to phase 3.)
 - [ ] T2.6 `DriverSocket` + mapper; `TrackingModule` (Koin); remove echo socket from dev.
 - [ ] T2.7 `tools/simulator` driver command; GPX fixtures; TC-2-PIP-16 (needs the GPX reader).
 - [ ] T2.8 E2E tests; k6 ingest script; coverage gate on `tracking.domain` / `tracking.application`.
@@ -327,12 +330,12 @@ Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restar
 
 | ID | Type | Given / When / Then | Priority |
 |---|---|---|---|
-| TC-2-DB-01 | Integration | Flyway migrates an empty DB to V2 without errors | P0 |
-| TC-2-DB-02 | Integration | `FixBatchRepositoryContract` passes against `ExposedFixBatchRepository` | P0 |
-| TC-2-DB-03 | Integration | Two coroutines store the same `(session, seq)` concurrently → exactly one `Stored`, one `AlreadyStored`; fixes stored once | P0 |
+| TC-2-DB-01 | Integration | Flyway migrates an empty DB through V3 without errors | P0 |
+| TC-2-DB-02 | Integration | `TrackingPersistenceContract` passes against the Exposed repositories (and, as a unit test, against the in-memory ones) | P0 |
+| TC-2-DB-03 | Integration | Two coroutines store the same `(session, seq)` concurrently → exactly one `Inserted`, one `AlreadyExists`; fixes stored once | P0 |
 | TC-2-DB-04 | Integration | `lastAcceptedAtOrBefore` returns the latest accepted fix at or before the given instant | P1 |
 | TC-2-DB-05 | Integration | Timestamps round-trip with millisecond precision in UTC | P1 |
-| TC-2-DB-06 | Integration | `DatabaseHealthIndicator` DOWN when the container is stopped | P2 |
+| TC-2-DB-06 | Integration | `DatabaseHealthIndicator` DOWN when the container is stopped (covered by phase 1's TC-1-HLT-02) | P2 |
 
 ### Driver socket (component, fakes)
 
@@ -365,7 +368,7 @@ Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restar
 |---|---|---|---|
 | TC-2-CON-01 | Contract | Every golden message validates against the AsyncAPI JSON schema for its type | P0 |
 | TC-2-OUT-01 | Integration | Ingest commits → an outbox row `FixesAccepted` exists in the same transaction; forced rollback → no outbox row | P0 |
-| TC-2-OUT-02 | Integration | Relay publishes each outbox row once and marks it published; a relay crash before marking causes a re-publish (consumer must dedupe) | P1 |
+| TC-2-OUT-02 | Integration | Relay publishes each outbox row once and marks it published; a relay crash before marking causes a re-publish (consumer must dedupe). Moved to phase 3 with the relay | P1 |
 | TC-2-LOAD-01 | Load | k6 `ingest.js`: 200 drivers × 10 fixes / 5 s for 10 min → p95 ACK < 250 ms, errors < 0.1% | P1 |
 | TC-2-RES-01 | E2E | DB paused for 5 s during ingest → batches in that window are not ACKed; after unpause, client resends and all are stored once | P1 |
 

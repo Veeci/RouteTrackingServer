@@ -15,6 +15,7 @@ and observability from day one.
 | Architecture | [architecture/overview.md](architecture/overview.md) | Bounded contexts, layers, boundaries, key decisions |
 | | [architecture/conventions.md](architecture/conventions.md) | Services & transactions, errors (RFC 9457), REST design, config, persistence, security, observability, delivery |
 | | [architecture/protocol.md](architecture/protocol.md) | WebSocket message contract, ACK/resume semantics (formalised in AsyncAPI) |
+| | [architecture/database.md](architecture/database.md) | Tables, keys, indexes and the outbox, with a diagram |
 | Testing | [testing/strategy.md](testing/strategy.md) | Test types, infrastructure, contract validation, quality gates |
 | Plan | [plan/](plan/) | One file per phase: scope, design, tasks, test cases, Definition of Done |
 

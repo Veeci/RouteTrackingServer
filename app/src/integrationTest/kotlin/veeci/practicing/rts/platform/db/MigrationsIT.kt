@@ -11,11 +11,11 @@ class MigrationsIT {
     private val dataSource = createDataSource(TestConfig.load(TestDatabase.freshDatabaseEnv()).db)
 
     @Test
-    fun `TC-1-MIG-01 Flyway migrates an empty database and records V1`() {
+    fun `TC-1-MIG-01 TC-2-DB-01 Flyway migrates an empty database through every version`() {
         dataSource.use {
             Migrations.run(it)
 
-            appliedVersions() shouldBe listOf("1")
+            appliedVersions() shouldBe listOf("1", "2", "3")
         }
     }
 
