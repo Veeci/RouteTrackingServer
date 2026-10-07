@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.idea.proto.com.google.protobuf.api
+
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(ktorLibs.plugins.ktor)
@@ -75,6 +77,7 @@ testing {
                 implementation(testFixtures(project()))
                 implementation(libs.konsist)
                 implementation(libs.koin.test.junit5)
+                implementation(project(":tools:simulator"))
             }
         }
 

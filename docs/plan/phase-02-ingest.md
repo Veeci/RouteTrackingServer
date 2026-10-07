@@ -259,16 +259,28 @@ Changes from the original plan (T2.6):
 | `finally`: touch the session | No extra write on close | Every stored batch already updates `last_seen_at` |
 | – | `testApp(overrides = …)` and `Application.module(config, overrides)` | Lets a test replace one Koin definition (the gated repository of TC-2-WS-10) |
 
-### Simulator (`tools/simulator`)
+### Simulator (`tools/simulator`, as built in T2.7)
 
 ```
 ./gradlew :tools:simulator:run --args="driver --url ws://localhost:8080/ws/v1/driver --gpx routes/city_loop.gpx
   --batch-size 10 --speedup 20 --disconnect-every 15 --device dev-sim-1"
 ```
 
-Reads GPX, keeps an in-memory outbox, sends batches, deletes on ACK, reconnects with
-`lastAckedSeq` after forced disconnects. Its `DriverClient` class is a library used by E2E tests and
-serves as the reference client behaviour for the SDK team.
+- `GpxReader` reads GPX 1.1 track points with the JDK's StAX reader (no library; DTDs are refused). `--gpx` is a
+  file path or a classpath resource. `toFixes(now)` moves the route in time so that it ends now, with the
+  original spacing, because the server rejects fixes older than 24 h or in the future.
+- `DriverClient` follows the client rules of the protocol: a batch gets its seq when it is queued, leaves the
+  queue only on its ack (or when `welcome.resumeFromSeq` says the server has it), and is resent unchanged after a
+  reconnect. It sends one batch and waits for its ack before the next. The CLI and the end-to-end tests use it,
+  and it is the reference behaviour for the SDK's transport module.
+- `--speedup` changes only how fast batches are sent, never the fix times; compressed times would look like
+  impossible speeds to the jump filter.
+- Routes in `src/main/resources/routes/`: `straight_2km.gpx` (2 km north at 12.5 m/s), `city_loop.gpx` (1.6 km
+  around a block at 10 m/s), `gps_jump.gpx` (600 m with two points marked `<desc>spike</desc>`, 1 km off the road).
+  The three files are generated test data (see the T2.7 commit).
+
+Verified by hand against a running server and Postgres: `gps_jump.gpx` with `--disconnect-every 3` gave 6 batches
+over 2 connections, 58 fixes accepted and the 2 spikes rejected as `IMPLAUSIBLE_JUMP`.
 
 ### Load test (`load-tests/ingest.js`, k6)
 
@@ -283,7 +295,7 @@ Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restar
 - [x] T2.4 `TrackingService`, ports, `TrackQuery`; in-memory adapters + object mothers in testFixtures.
 - [x] T2.5 Flyway V2, Exposed repositories, outbox table + relay; port contract tests. (The relay moved to phase 3.)
 - [x] T2.6 `DriverSocket` + mapper; `TrackingModule` (Koin); remove echo socket from dev. (The echo socket stays; see above.)
-- [ ] T2.7 `tools/simulator` driver command; GPX fixtures; TC-2-PIP-16 (needs the GPX reader).
+- [x] T2.7 `tools/simulator` driver command; GPX fixtures; TC-2-PIP-16 (needs the GPX reader).
 - [ ] T2.8 E2E tests; k6 ingest script; coverage gate on `tracking.domain` / `tracking.application`.
 - [ ] T2.9 Extend the staging smoke test (phase 1.5) with a simulator run: replay `straight_2km.gpx`, expect every batch ACKed. **Deferred with phase 1.5.**
 
@@ -328,7 +340,7 @@ Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restar
 | TC-2-PIP-13 | Unit | First fix of a session with no previous → `distanceFromPrevM = 0`, never rejected as a jump | P0 |
 | TC-2-PIP-14 | Property | For any batch: `accepted.size + rejected.size == input.size` and indexes are a permutation of input indexes | P0 |
 | TC-2-PIP-15 | Property | `cumulativeM` is non-decreasing across accepted fixes | P1 |
-| TC-2-PIP-16 | Unit | `gps_jump.gpx` fixture: exactly the injected spike points are rejected (in T2.7) | P1 |
+| TC-2-PIP-16 | Unit | `gps_jump.gpx` fixture: exactly the injected spike points are rejected (`GpsJumpRouteTest`) | P1 |
 | TC-2-PIP-17 | Unit | Fix with `mock = true` → rejected `MOCK_LOCATION`; with `rejectMock = false` → accepted | P0 |
 
 ### Application service
