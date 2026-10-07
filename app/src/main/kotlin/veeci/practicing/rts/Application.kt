@@ -3,6 +3,7 @@ package veeci.practicing.rts
 import com.sksamuel.hoplite.ConfigException
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
+import io.ktor.server.auth.authenticate
 import io.ktor.server.engine.connector
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
@@ -17,11 +18,16 @@ import org.koin.ktor.ext.get
 import org.koin.ktor.plugin.KoinIsolated
 import org.koin.logger.slf4jLogger
 import org.slf4j.LoggerFactory
+import veeci.practicing.rts.identity.adapter.inbound.web.devTokenRoutes
+import veeci.practicing.rts.identity.identityModule
+import veeci.practicing.rts.live.adapter.inbound.ws.guestSocket
+import veeci.practicing.rts.live.liveModule
 import veeci.practicing.rts.platform.config.AppConfig
 import veeci.practicing.rts.platform.config.AppConfigLoader
 import veeci.practicing.rts.platform.config.AppEnv
 import veeci.practicing.rts.platform.db.Migrations
 import veeci.practicing.rts.platform.di.platformModule
+import veeci.practicing.rts.platform.events.OutboxRelay
 import veeci.practicing.rts.platform.http.configureErrorHandling
 import veeci.practicing.rts.platform.http.configureRequestGuards
 import veeci.practicing.rts.platform.http.configureSerialization
@@ -29,10 +35,14 @@ import veeci.practicing.rts.platform.lifecycle.configureGracefulShutdown
 import veeci.practicing.rts.platform.observability.configureMetrics
 import veeci.practicing.rts.platform.observability.configureRequestLogging
 import veeci.practicing.rts.platform.observability.healthRoutes
+import veeci.practicing.rts.platform.security.AUTH_JWT
+import veeci.practicing.rts.platform.security.configureAuthentication
 import veeci.practicing.rts.platform.ws.configureWebSockets
 import veeci.practicing.rts.platform.ws.echoEndpoint
 import veeci.practicing.rts.tracking.adapter.inbound.ws.driverSocket
 import veeci.practicing.rts.tracking.trackingModule
+import veeci.practicing.rts.trip.adapter.inbound.web.tripRoutes
+import veeci.practicing.rts.trip.tripModule
 import kotlin.system.exitProcess
 
 private val log = LoggerFactory.getLogger("veeci.practicing.rts.Application")
@@ -70,17 +80,26 @@ fun Application.module(
     }
     if (config.db.migrateOnStart) Migrations.run(get())
     configureGracefulShutdown()
+    // Delivers stored events to the contexts that react to them; stops with the application.
+    get<OutboxRelay>().start(this)
 
     configureRequestLogging()
     configureMetrics(metrics)
     configureSerialization()
     configureRequestGuards(config.http)
     configureErrorHandling()
+    configureAuthentication(get())
     configureWebSockets(config.ws)
 
     routing {
         healthRoutes(get())
-        driverSocket(get())
+        // Tokens without a password: only where no real user data exists.
+        if (config.app.env in setOf(AppEnv.DEV, AppEnv.TEST)) devTokenRoutes(get())
+        authenticate(AUTH_JWT) {
+            driverSocket(get())
+            guestSocket(get())
+            tripRoutes(get(), get())
+        }
         if (config.app.env != AppEnv.PROD) echoEndpoint(get())
         // Interactive API docs generated from the contract; local development only.
         if (config.app.env == AppEnv.DEV) swaggerUI(path = "docs", swaggerFile = "openapi/rts-v1.yaml")
@@ -93,5 +112,11 @@ fun appModule(
     metrics: MeterRegistry,
 ): Module =
     module {
-        includes(platformModule(config, metrics), trackingModule(config.tracking, config.ws))
+        includes(
+            platformModule(config, metrics),
+            identityModule(),
+            trackingModule(config.tracking, config.ws),
+            tripModule(),
+            liveModule(),
+        )
     }

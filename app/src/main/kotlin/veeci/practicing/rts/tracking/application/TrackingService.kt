@@ -2,6 +2,7 @@ package veeci.practicing.rts.tracking.application
 
 import veeci.practicing.rts.platform.db.TransactionRunner
 import veeci.practicing.rts.shared.DomainException
+import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.tracking.application.port.out.FixBatchRepository
 import veeci.practicing.rts.tracking.application.port.out.InsertResult
 import veeci.practicing.rts.tracking.application.port.out.NewBatch
@@ -26,6 +27,8 @@ data class OpenSession(
     val sessionId: SessionId,
     val deviceId: DeviceId,
     val sdkVersion: String,
+    /** The authenticated driver who sends the fixes. */
+    val driverId: UserId,
 )
 
 data class SessionOpened(
@@ -68,8 +71,14 @@ class TrackingService(
             val session =
                 sessions
                     .find(command.sessionId)
-                    ?.apply { reconnect(command.deviceId, command.sdkVersion, now) }
-                    ?: TrackingSession(command.sessionId, command.deviceId, command.sdkVersion, startedAt = now)
+                    ?.apply { reconnect(command.deviceId, command.driverId, command.sdkVersion, now) }
+                    ?: TrackingSession(
+                        command.sessionId,
+                        command.deviceId,
+                        command.sdkVersion,
+                        startedAt = now,
+                        driverId = command.driverId,
+                    )
             sessions.save(session)
             SessionOpened(session.id, session.resumeFrom(batches.highestSeq(session.id)))
         }
@@ -137,6 +146,7 @@ class TrackingService(
     ) = FixesAccepted(
         sessionId = session.id.value,
         deviceId = session.deviceId.value,
+        driverId = session.driverId?.value,
         seq = seq,
         positions =
             accepted.map {

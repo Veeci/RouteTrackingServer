@@ -3,6 +3,7 @@ package veeci.practicing.rts.simulator
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.webSocket
+import io.ktor.client.request.bearerAuth
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
 import kotlinx.coroutines.currentCoroutineContext
@@ -36,6 +37,8 @@ class DriverClient(
     private val url: String,
     val deviceId: String,
     val sessionId: String = UUID.randomUUID().toString(),
+    /** The driver's access token, sent as `Authorization: Bearer` when the socket opens. */
+    private val token: String? = null,
     private val ackTimeout: Duration = DEFAULT_ACK_TIMEOUT,
     private val onWelcome: (Welcome) -> Unit = {},
     private val onAck: (Ack) -> Unit = {},
@@ -104,7 +107,7 @@ class DriverClient(
         pace: Duration = Duration.ZERO,
         maxBatches: Int = Int.MAX_VALUE,
     ) {
-        http.webSocket(url) {
+        http.webSocket(url, request = { token?.let(::bearerAuth) }) {
             sendMessage(Hello(PROTOCOL_VERSION, deviceId, sessionId, lastAckedSeq, SDK_VERSION))
             val welcome = receiveMessage() as? Welcome ?: error("The server did not answer hello with welcome")
             onWelcome(welcome)

@@ -11,6 +11,8 @@ import kotlin.time.Instant
 data class FixesAccepted(
     val sessionId: UUID,
     val deviceId: String,
+    /** The user id of the driver; null for sessions stored before drivers had accounts. */
+    val driverId: UUID?,
     val seq: Long,
     /** In time order. */
     val positions: List<Position>,

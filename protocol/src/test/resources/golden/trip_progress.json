@@ -1,0 +1,8 @@
+{
+  "type": "trip_progress",
+  "tripId": "3b241101-e2bb-4255-8caf-4136c566a962",
+  "target": "PICKUP",
+  "remainingM": 1240.5,
+  "etaS": 112.0,
+  "basis": "STRAIGHT_LINE"
+}

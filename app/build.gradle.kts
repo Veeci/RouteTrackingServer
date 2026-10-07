@@ -24,6 +24,7 @@ dependencies {
     implementation(project(":protocol"))
     implementation(ktorLibs.serialization.kotlinx.json)
     implementation(ktorLibs.server.bodyLimit)
+    implementation(ktorLibs.server.auth.jwt)
     implementation(ktorLibs.server.callId)
     implementation(ktorLibs.server.callLogging)
     implementation(ktorLibs.server.contentNegotiation)
@@ -79,6 +80,7 @@ testing {
                 implementation(testFixtures(project()))
                 implementation(libs.konsist)
                 implementation(libs.koin.test.junit5)
+                implementation(libs.turbine)
                 implementation(project(":tools:simulator"))
             }
         }

@@ -34,6 +34,7 @@ services:
       DB_URL: jdbc:postgresql://db:5432/${DB_NAME:-rts}
       DB_USER: ${DB_USER:-rts}
       DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in deploy/.env}
       # Tracing is off unless the observability profile's settings are provided (see .env.example).
       # Extra JVM flags for the start script (empty by default; the JVM would announce an empty JAVA_TOOL_OPTIONS).
       APP_OPTS: ${OTEL_JAVA_TOOL_OPTIONS:-}

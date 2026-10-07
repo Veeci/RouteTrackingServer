@@ -7,6 +7,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
+import io.ktor.client.request.bearerAuth
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
@@ -31,6 +32,7 @@ import veeci.practicing.rts.protocol.ServerMessage
 import veeci.practicing.rts.protocol.Welcome
 import veeci.practicing.rts.protocol.WsCloseCodes
 import veeci.practicing.rts.protocol.WsErrorCodes
+import veeci.practicing.rts.testing.TestTokens
 import veeci.practicing.rts.testing.testApp
 import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedFixBatchRepository
 import veeci.practicing.rts.tracking.application.port.out.FixBatchRepository
@@ -45,6 +47,7 @@ import kotlin.time.Instant
 @Testcontainers(disabledWithoutDocker = true)
 class DriverSocketIT {
     private val sessionId = UUID.randomUUID().toString()
+    private val token = TestTokens.driver()
     private val now = Instant.fromEpochMilliseconds(System.currentTimeMillis())
 
     @Test
@@ -221,7 +224,7 @@ class DriverSocketIT {
                 repeat(2) {
                     launch {
                         val session = UUID.randomUUID().toString()
-                        client.webSocket(DRIVER) {
+                        client.webSocket(DRIVER, request = { bearerAuth(token) }) {
                             sendMessage(hello().copy(sessionId = session, deviceId = "phone-$it"))
                             receiveMessage().shouldBeInstanceOf<Welcome>().sessionId shouldBe session
                             val acks =
@@ -275,7 +278,7 @@ class DriverSocketIT {
     // --- helpers -------------------------------------------------------------------------------------------
 
     private suspend fun ApplicationTestBuilder.driver(block: suspend DefaultClientWebSocketSession.() -> Unit) =
-        wsClient().webSocket(DRIVER) { block() }
+        wsClient().webSocket(DRIVER, request = { bearerAuth(token) }) { block() }
 
     private fun ApplicationTestBuilder.wsClient(): HttpClient = createClient { install(WebSockets) }
 

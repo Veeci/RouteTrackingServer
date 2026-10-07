@@ -9,8 +9,8 @@ data class GeoPoint(
     }
 
     companion object {
-        private val LATITUDES = -90.0..90.0
-        private val LONGITUDES = -180.0..180.0
+        val LATITUDES = -90.0..90.0
+        val LONGITUDES = -180.0..180.0
 
         fun isValid(
             lat: Double,

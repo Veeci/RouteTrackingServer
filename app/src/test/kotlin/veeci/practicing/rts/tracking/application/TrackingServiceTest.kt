@@ -8,6 +8,7 @@ import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import veeci.practicing.rts.shared.DomainException
+import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.testing.tracking.DirectTransactionRunner
 import veeci.practicing.rts.testing.tracking.InMemoryFixBatchRepository
 import veeci.practicing.rts.testing.tracking.InMemoryTrackingEventOutbox
@@ -59,7 +60,12 @@ class TrackingServiceTest {
 
     private val service = service()
 
-    private suspend fun open(device: DeviceId = phone) = service.openSession(OpenSession(sessionId, device, sdkVersion = "0.9.0"))
+    private val driver = UserId(UUID.randomUUID())
+
+    private suspend fun open(
+        device: DeviceId = phone,
+        by: UserId = driver,
+    ) = service.openSession(OpenSession(sessionId, device, sdkVersion = "0.9.0", driverId = by))
 
     private fun batch(
         seq: Long,
@@ -88,6 +94,14 @@ class TrackingServiceTest {
             open()
 
             shouldThrow<DomainException> { open(DeviceId("phone-2")) }.code shouldBe TrackingError.SESSION_DEVICE_MISMATCH
+        }
+
+    @Test
+    fun `a reconnect by another driver is refused, even from the same device`() =
+        runTest {
+            open()
+
+            shouldThrow<DomainException> { open(by = UserId(UUID.randomUUID())) }.code shouldBe TrackingError.SESSION_DEVICE_MISMATCH
         }
 
     @Test
@@ -227,7 +241,7 @@ class TrackingServiceTest {
     @Test
     fun `a stored batch updates when the device was last seen`() =
         runTest {
-            service(now = NOW - 5.minutes).openSession(OpenSession(sessionId, phone, sdkVersion = "0.9.0"))
+            service(now = NOW - 5.minutes).openSession(OpenSession(sessionId, phone, sdkVersion = "0.9.0", driverId = driver))
 
             service.ingest(batch(1, reading()))
 

@@ -1,0 +1,9 @@
+{
+  "type": "driver_position",
+  "tripId": "3b241101-e2bb-4255-8caf-4136c566a962",
+  "lat": 10.7769,
+  "lng": 106.7009,
+  "bearingDeg": 87.0,
+  "speedMps": 11.2,
+  "recordedAt": "2026-09-30T02:15:04.120Z"
+}

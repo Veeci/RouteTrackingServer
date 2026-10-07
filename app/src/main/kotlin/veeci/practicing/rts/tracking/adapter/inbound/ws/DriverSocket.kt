@@ -8,6 +8,7 @@ import io.ktor.websocket.close
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.slf4j.LoggerFactory
+import veeci.practicing.rts.platform.security.actor
 import veeci.practicing.rts.platform.ws.WsSession
 import veeci.practicing.rts.platform.ws.WsSessionRunner
 import veeci.practicing.rts.protocol.Ack
@@ -20,15 +21,18 @@ import veeci.practicing.rts.protocol.RejectionDto
 import veeci.practicing.rts.protocol.Welcome
 import veeci.practicing.rts.protocol.WsCloseCodes
 import veeci.practicing.rts.protocol.WsErrorCodes
+import veeci.practicing.rts.shared.Actor
 import veeci.practicing.rts.shared.DomainException
+import veeci.practicing.rts.shared.Role
 import veeci.practicing.rts.tracking.application.TrackingService
 import veeci.practicing.rts.tracking.domain.SessionId
 import java.time.Clock
 import kotlin.time.Duration
 import kotlin.time.toKotlinInstant
 
+/** Mount inside `authenticate(AUTH_JWT)`: the upgrade request needs a valid token, and only a DRIVER may stay. */
 fun Route.driverSocket(socket: DriverSocket) {
-    webSocket("/ws/v1/driver") { socket.serve(this) }
+    webSocket("/ws/v1/driver") { socket.serve(this, call.actor()) }
 }
 
 /**
@@ -44,7 +48,14 @@ class DriverSocket(
 ) {
     private val log = LoggerFactory.getLogger(DriverSocket::class.java)
 
-    suspend fun serve(socket: DefaultWebSocketServerSession) {
+    suspend fun serve(
+        socket: DefaultWebSocketServerSession,
+        actor: Actor,
+    ) {
+        if (actor.role != Role.DRIVER) {
+            socket.close(CloseReason(WsCloseCodes.FORBIDDEN_ROLE, "Only a DRIVER may send fixes"))
+            return
+        }
         var session: SessionId? = null // set by the first valid hello
         val handshake =
             socket.launch {
@@ -55,7 +66,7 @@ class DriverSocket(
             runner.run(socket, ENDPOINT, ClientMessage.serializer()) { message ->
                 val current = session
                 when {
-                    message is Hello && current == null -> session = hello(message)?.also { handshake.cancel() }
+                    message is Hello && current == null -> session = hello(message, actor)?.also { handshake.cancel() }
                     message is Hello -> sendError(WsErrorCodes.INVALID_MESSAGE, "This socket already sent its hello.")
                     message is FixBatch && current != null -> batch(current, message)
                     else -> close(CloseReason(WsCloseCodes.HANDSHAKE_TIMEOUT, "The first message must be hello"))
@@ -67,8 +78,11 @@ class DriverSocket(
     }
 
     /** Opens or resumes the session and sends `welcome`. Null if the hello was refused. */
-    private suspend fun WsSession.hello(hello: Hello): SessionId? {
-        val command = DriverMessageMapper.openSession(hello)
+    private suspend fun WsSession.hello(
+        hello: Hello,
+        actor: Actor,
+    ): SessionId? {
+        val command = DriverMessageMapper.openSession(hello, actor.userId)
         return when {
             hello.protocolVersion != PROTOCOL_VERSION -> {
                 close(CloseReason(WsCloseCodes.UNSUPPORTED_VERSION, "Protocol version $PROTOCOL_VERSION is required"))

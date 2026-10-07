@@ -3,6 +3,7 @@ package veeci.practicing.rts.tracking.adapter.inbound.ws
 import veeci.practicing.rts.protocol.FixBatch
 import veeci.practicing.rts.protocol.FixDto
 import veeci.practicing.rts.protocol.Hello
+import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.tracking.application.IngestBatch
 import veeci.practicing.rts.tracking.application.OpenSession
 import veeci.practicing.rts.tracking.domain.DeviceId
@@ -15,10 +16,13 @@ import java.util.UUID
 /** Turns wire messages into service commands. The only place where protocol types meet tracking types. */
 internal object DriverMessageMapper {
     /** Null if the ids in [hello] are not valid; the caller answers INVALID_MESSAGE. */
-    fun openSession(hello: Hello): OpenSession? {
+    fun openSession(
+        hello: Hello,
+        driver: UserId,
+    ): OpenSession? {
         val sessionId = parseUuid(hello.sessionId)
         return if (sessionId != null && DeviceId.isValid(hello.deviceId)) {
-            OpenSession(SessionId(sessionId), DeviceId(hello.deviceId), hello.sdkVersion)
+            OpenSession(SessionId(sessionId), DeviceId(hello.deviceId), hello.sdkVersion, driver)
         } else {
             null
         }

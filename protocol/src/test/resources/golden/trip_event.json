@@ -1,0 +1,7 @@
+{
+  "type": "trip_event",
+  "tripId": "3b241101-e2bb-4255-8caf-4136c566a962",
+  "event": "status_changed",
+  "status": "ARRIVED",
+  "at": "2026-09-30T02:17:30Z"
+}
