@@ -228,16 +228,36 @@ Changes from the original plan (T2.5):
 | The relay in T2.5 (TC-2-OUT-02) | Deferred to phase 3 | No consumer exists yet. Rows stay unpublished until the relay arrives |
 | `FixBatchRepositoryContract` | `TrackingPersistenceContract` for both repositories | A batch needs its session (foreign key), so the two are tested together |
 
-### Inbound WebSocket adapter (`tracking/adapter/in/ws/DriverSocket.kt`)
+### Inbound WebSocket adapter (`tracking/adapter/inbound/ws/DriverSocket.kt`, as built in T2.6)
 
-Built on phase 1's `WsSessionRunner`:
+Built on phase 1's `WsSessionRunner`, mounted at `/ws/v1/driver` in every profile:
 
-1. Handshake: first message must be `hello` within `handshakeTimeout` → else close 4401.
-2. `trackingService.openSession` → send `welcome`; MDC `sessionId`, `deviceId`.
-3. Each `fix_batch` → `trackingService.ingest` → `ack`; domain exceptions → `error{code}` via `ErrorCatalog`.
-4. `finally`: touch session, log close reason and counters.
+1. A timer closes the socket with 4401 if no valid `hello` arrives within `tracking.handshakeTimeout`
+   (10 s; 300 ms in `test.conf`). A `fix_batch` before `hello` also closes with 4401.
+2. `hello`: a protocol version other than 1 closes with 4400. An invalid `sessionId` or `deviceId` gets
+   `error{INVALID_MESSAGE}` and the socket keeps waiting for a valid `hello`. Otherwise
+   `trackingService.openSession` runs, the timer stops, and `welcome` is sent. A session of another device
+   gets `error{SESSION_DEVICE_MISMATCH}`. A second `hello` gets `error{INVALID_MESSAGE}`.
+3. Each `fix_batch` → `trackingService.ingest` → `ack`. A `DomainException` (`EMPTY_BATCH`, `BATCH_TOO_LARGE`,
+   `INVALID_SEQ`) becomes `error{code, correlatesTo = seq}` and no ack. Any other exception closes the socket
+   with 1011 through the runner; the client reconnects and resends.
+4. `WsSessionRunner` now answers `error{UNKNOWN_MESSAGE}` for a `type` that is not in the sealed message family,
+   and `INVALID_MESSAGE` for a known type with a wrong shape.
 
-Sequential per session; sessions run concurrently. Protocol DTO ↔ domain mapping lives in the adapter (`DriverMessageMapper`).
+Messages of one socket are handled one at a time; sockets run concurrently. `DriverMessageMapper` is the only
+code that converts protocol types to tracking types. `trackingModule` (Koin) binds the ports to the Postgres
+adapters and builds the pipeline from `TrackingConfig` (`config/*.conf`, section `tracking`). In `dev.conf`,
+`rejectMock = false`, so that developers can test with a fake-GPS app.
+
+Changes from the original plan (T2.6):
+
+| Planned | Built | Why |
+|---|---|---|
+| Package `adapter/in/ws` | `adapter/inbound/ws` | `in` is a Kotlin keyword; the package name would need backticks in every import |
+| Remove the echo socket from dev | The echo socket stays (not in prod) | Phase 1's WebSocket framework tests use it, and it is a quick connectivity check without the protocol |
+| MDC `sessionId`, `deviceId` | One log line per `hello` with both values | The runner sets the MDC when the socket opens, before the ids are known |
+| `finally`: touch the session | No extra write on close | Every stored batch already updates `last_seen_at` |
+| – | `testApp(overrides = …)` and `Application.module(config, overrides)` | Lets a test replace one Koin definition (the gated repository of TC-2-WS-10) |
 
 ### Simulator (`tools/simulator`)
 
@@ -262,7 +282,7 @@ Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restar
 - [x] T2.3 `tracking/domain`: model, session aggregate, pipeline stages, `FixPipeline`, `PipelineConfig`.
 - [x] T2.4 `TrackingService`, ports, `TrackQuery`; in-memory adapters + object mothers in testFixtures.
 - [x] T2.5 Flyway V2, Exposed repositories, outbox table + relay; port contract tests. (The relay moved to phase 3.)
-- [ ] T2.6 `DriverSocket` + mapper; `TrackingModule` (Koin); remove echo socket from dev.
+- [x] T2.6 `DriverSocket` + mapper; `TrackingModule` (Koin); remove echo socket from dev. (The echo socket stays; see above.)
 - [ ] T2.7 `tools/simulator` driver command; GPX fixtures; TC-2-PIP-16 (needs the GPX reader).
 - [ ] T2.8 E2E tests; k6 ingest script; coverage gate on `tracking.domain` / `tracking.application`.
 - [ ] T2.9 Extend the staging smoke test (phase 1.5) with a simulator run: replay `straight_2km.gpx`, expect every batch ACKed. **Deferred with phase 1.5.**
@@ -349,7 +369,7 @@ Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restar
 | TC-2-WS-06 | API | Malformed JSON → `error{code=MALFORMED_MESSAGE}` and session stays open (next valid batch is ACKed) | P0 |
 | TC-2-WS-07 | API | Unknown `type` → `error{code=UNKNOWN_MESSAGE}`, session open | P1 |
 | TC-2-WS-08 | API | Oversized batch → `error{code=BATCH_TOO_LARGE, correlatesTo=seq}`, no ack | P0 |
-| TC-2-WS-09 | API | 25 messages in 1 s (limit 20) → at least one `error{code=RATE_LIMITED}` | P2 |
+| TC-2-WS-09 | API | More messages per second than the limit (2 in the test) → `error{code=RATE_LIMITED}` | P2 |
 | TC-2-WS-10 | API | `ack` is sent only after `TrackingService.ingest` has committed (gated repository adapter; assert no ack before release) | P0 |
 | TC-2-WS-11 | API | Two driver sessions concurrently → each gets only its own acks | P1 |
 

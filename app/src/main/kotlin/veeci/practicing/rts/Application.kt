@@ -31,6 +31,8 @@ import veeci.practicing.rts.platform.observability.configureRequestLogging
 import veeci.practicing.rts.platform.observability.healthRoutes
 import veeci.practicing.rts.platform.ws.configureWebSockets
 import veeci.practicing.rts.platform.ws.echoEndpoint
+import veeci.practicing.rts.tracking.adapter.inbound.ws.driverSocket
+import veeci.practicing.rts.tracking.trackingModule
 import kotlin.system.exitProcess
 
 private val log = LoggerFactory.getLogger("veeci.practicing.rts.Application")
@@ -56,12 +58,15 @@ fun main(args: Array<String>) {
 }
 
 /** Installs every plugin and route. Tests call this directly with their own [AppConfig]. */
-fun Application.module(config: AppConfig) {
+fun Application.module(
+    config: AppConfig,
+    overrides: List<Module> = emptyList(),
+) {
     // One registry for the whole process: HTTP timers, JVM, pool and (later) business metrics all land here.
     val metrics = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
     install(KoinIsolated) {
         slf4jLogger()
-        modules(appModule(config, metrics))
+        modules(listOf(appModule(config, metrics)) + overrides)
     }
     if (config.db.migrateOnStart) Migrations.run(get())
     configureGracefulShutdown()
@@ -75,6 +80,7 @@ fun Application.module(config: AppConfig) {
 
     routing {
         healthRoutes(get())
+        driverSocket(get())
         if (config.app.env != AppEnv.PROD) echoEndpoint(get())
         // Interactive API docs generated from the contract; local development only.
         if (config.app.env == AppEnv.DEV) swaggerUI(path = "docs", swaggerFile = "openapi/rts-v1.yaml")
@@ -87,5 +93,5 @@ fun appModule(
     metrics: MeterRegistry,
 ): Module =
     module {
-        includes(platformModule(config, metrics))
+        includes(platformModule(config, metrics), trackingModule(config.tracking, config.ws))
     }

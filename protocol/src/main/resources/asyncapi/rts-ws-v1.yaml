@@ -316,12 +316,17 @@ components:
             - EMPTY_BATCH
             - BATCH_TOO_LARGE
             - INVALID_SEQ
+            - SESSION_DEVICE_MISMATCH
           description: |
             MALFORMED_MESSAGE: the frame is not valid JSON.
             INVALID_MESSAGE: valid JSON, but the wrong shape or missing fields.
             UNKNOWN_MESSAGE: a `type` that this endpoint does not know.
             RATE_LIMITED: more messages per second than allowed; this message was dropped.
             EMPTY_BATCH, BATCH_TOO_LARGE, INVALID_SEQ: the batch was not stored and gets no ack.
+            SESSION_DEVICE_MISMATCH: the hello names a session that another device started. Start a new
+            session (new sessionId) and send hello again.
+            INVALID_MESSAGE is also the answer to a hello with an invalid sessionId or deviceId, and to a
+            second hello on the same socket.
         message:
           type: string
           description: For humans and logs. May change between versions.

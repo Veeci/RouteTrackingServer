@@ -13,10 +13,12 @@ value class DeviceId(
     val value: String,
 ) {
     init {
-        require(value.isNotBlank() && value.length <= MAX_LENGTH) { "A device id is 1 to $MAX_LENGTH characters" }
+        require(isValid(value)) { "A device id is 1 to $MAX_LENGTH characters" }
     }
 
     companion object {
         const val MAX_LENGTH = 128
+
+        fun isValid(value: String): Boolean = value.isNotBlank() && value.length <= MAX_LENGTH
     }
 }

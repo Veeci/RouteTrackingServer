@@ -148,6 +148,18 @@ A guest may subscribe only to trips where they are the guest; otherwise `error{c
 
 `server → error { code, message, correlatesTo? }` for recoverable problems; the session stays open.
 
+| Error code | Meaning |
+|---|---|
+| `MALFORMED_MESSAGE` | The frame is not valid JSON |
+| `INVALID_MESSAGE` | Valid JSON with a wrong shape; also a `hello` with an invalid `sessionId` or `deviceId`, and a second `hello` |
+| `UNKNOWN_MESSAGE` | A `type` that this server does not know (for example from a newer SDK) |
+| `RATE_LIMITED` | More messages per second than `limits.maxMessagesPerSecond`; this message was dropped |
+| `EMPTY_BATCH`, `BATCH_TOO_LARGE`, `INVALID_SEQ` | The batch was not stored and gets no ack; `correlatesTo` is its seq |
+| `SESSION_DEVICE_MISMATCH` | The `hello` names a session that another device started. Start a new session and send `hello` again |
+
+The constants are in `WsErrorCodes` (protocol errors) and `TrackingError` (business errors) in code, and in
+the `Error` schema of the AsyncAPI document.
+
 | Close code | Meaning | Client should |
 |---|---|---|
 | 1000 | Normal close | Stop |
