@@ -1,10 +1,12 @@
-import org.jetbrains.kotlin.gradle.idea.proto.com.google.protobuf.api
+import kotlinx.kover.gradle.plugin.dsl.CoverageUnit
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(ktorLibs.plugins.ktor)
     alias(libs.plugins.kotlin.serialization)
     `java-test-fixtures`
+    // Applied to every module by the root build script; named here as well, so that the `kover {}` block below compiles.
+    id("org.jetbrains.kotlinx.kover")
 }
 
 group = "veeci.practicing"
@@ -105,6 +107,9 @@ testing {
                 implementation(project(":protocol"))
                 implementation(project(":tools:simulator"))
                 implementation(libs.testcontainers.junit)
+                // The restart test runs a real server and connects to it over the network.
+                implementation(ktorLibs.server.netty)
+                implementation(ktorLibs.client.cio)
             }
             targets.all { testTask.configure { shouldRunAfter(integrationTest) } }
         }
@@ -127,4 +132,21 @@ tasks.named<JavaExec>("run") {
 
 tasks.named("check") {
     dependsOn(testing.suites.named("integrationTest"), testing.suites.named("e2eTest"))
+}
+
+// Coverage gate (docs/testing/strategy.md): `check` fails if less than 80 % of the lines in the domain and application
+// packages of every context run in tests. Adapters are measured in the aggregated report of the root project
+// (`./gradlew koverHtmlReport`), not gated.
+kover {
+    reports {
+        total {
+            filters {
+                includes { classes("veeci.practicing.rts.*.domain.*", "veeci.practicing.rts.*.application.*") }
+            }
+            verify {
+                onCheck = true
+                rule("Line coverage of domain and application code") { minBound(80, CoverageUnit.LINE) }
+            }
+        }
+    }
 }

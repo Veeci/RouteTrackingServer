@@ -3,12 +3,9 @@ package veeci.practicing.rts.simulator
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.websocket.WebSockets
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import veeci.practicing.rts.protocol.Ack
 import kotlin.system.exitProcess
-import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 
 private const val USAGE = """Usage: simulator driver [options]
@@ -18,8 +15,6 @@ private const val USAGE = """Usage: simulator driver [options]
   --speedup N               replay N times faster  (default 10)
   --disconnect-every N      reconnect after N acks (default 0 = never)
   --device ID               device id              (default dev-sim-1)"""
-
-private const val MAX_FAILED_CONNECTIONS = 5
 
 /** Replays a recorded route against the driver endpoint, like a phone that drives it. */
 fun main(args: Array<String>) {
@@ -62,39 +57,24 @@ private suspend fun replay(options: Options): Boolean {
     val pace = interval * options.batchSize / options.speedup
     val stats = Stats()
     HttpClient(CIO) { install(WebSockets) }.use { http ->
-        val client = DriverClient(http, options.url, options.device, onAck = stats::record)
+        val client =
+            DriverClient(
+                http,
+                options.url,
+                options.device,
+                onWelcome = { println("Connected; the server resumes from seq ${it.resumeFromSeq}") },
+                onAck = stats::record,
+                onConnectionFailed = { println("Connection failed (${it.message}); trying again") },
+            )
         fixes.chunked(options.batchSize).forEach(client::enqueue)
         println("Session ${client.sessionId}: ${fixes.size} fixes in ${client.pending} batches, one batch every $pace")
-        var failures = 0
-        while (client.pending > 0 && failures < MAX_FAILED_CONNECTIONS) {
-            stats.connections++
-            failures = if (connect(client, options, pace)) 0 else failures + 1
-        }
-        stats.print()
-        return client.pending == 0
+        val succeeded = client.sendAll(pace, batchesPerConnection = options.disconnectEvery.takeIf { it > 0 } ?: Int.MAX_VALUE)
+        stats.print(client.connections)
+        return succeeded
     }
 }
 
-/** One connection. False if it failed; the client keeps its outbox and the next connection resends. */
-@Suppress("TooGenericExceptionCaught") // any failure (refused, reset, closed by the server) means: try again
-private suspend fun connect(
-    client: DriverClient,
-    options: Options,
-    pace: kotlin.time.Duration,
-): Boolean =
-    try {
-        client.connectAndSend(pace, maxBatches = options.disconnectEvery.takeIf { it > 0 } ?: Int.MAX_VALUE)
-        true
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        println("Connection failed (${e.message}); retrying in 1 s")
-        delay(1.seconds)
-        false
-    }
-
 private class Stats {
-    var connections = 0
     private var batches = 0
     private var accepted = 0
     private val rejected = mutableMapOf<String, Int>()
@@ -106,7 +86,7 @@ private class Stats {
         println("seq ${ack.seq}: ${ack.accepted} accepted, ${ack.rejected.size} rejected")
     }
 
-    fun print() {
+    fun print(connections: Int) {
         println("Done: $batches batches acked over $connections connection(s), $accepted fixes accepted, rejected: $rejected")
     }
 }

@@ -39,10 +39,10 @@ Logs are plain text locally; set `LOG_FORMAT=json` for one JSON object per line 
 | `./gradlew test` | Fast tests: unit, architecture | no |
 | `./gradlew integrationTest` | Tests against real Postgres (Testcontainers) | yes |
 | `./gradlew e2eTest` | End-to-end journeys | yes |
-| `./gradlew check` | Everything above + ktlint + detekt | yes |
+| `./gradlew check` | Everything above + ktlint + detekt + coverage gate (80 % of domain and application lines) | yes |
 | `./gradlew spotlessApply` | Auto-fix formatting (run before committing) | no |
 | `./gradlew koverHtmlReport` | Coverage report → `build/reports/kover/html/index.html` | yes |
-| `./gradlew :tools:simulator:run` | Fake driver/guest client (commands arrive in phase 2) | no |
+| `./gradlew :tools:simulator:run --args="driver --gpx routes/city_loop.gpx"` | Fake driver that replays a GPX route against the server (options: `docs/plan/phase-02-ingest.md`) | server running |
 
 Local stack:
 
@@ -64,6 +64,7 @@ Connect to the database: `docker compose -f deploy/docker-compose.yml exec db ps
 | `protocol/` | WebSocket message classes, shared with the Android SDK |
 | `tools/simulator/` | CLI fake driver/guest used for manual testing and e2e tests |
 | `deploy/` | Dockerfile, docker-compose, `.env.example` |
+| `load-tests/` | k6 load test scripts (run instructions in each script) |
 | `config/detekt/` | Static analysis overrides |
 | `.github/` | CI workflow, Dependabot, PR template |
 | `docs/` | Architecture, conventions, protocol, testing strategy, phase plans |

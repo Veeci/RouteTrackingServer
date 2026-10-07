@@ -105,6 +105,10 @@ identified by `(sessionId, seq, index)`. Retries are safe only if the client fol
 2. The client assigns `seq` when it writes the batch to its on-disk queue, before the first send.
 3. After a batch has a `seq`, its content never changes: no adding, removing, splitting or merging of points.
 4. After a reconnect, the client resends the same batch with the same `seq` and the same content.
+5. If the server does not answer within 10 s (no `welcome` after `hello`, or no `ack` after a batch), the
+   client closes the connection and connects again, with a wait that doubles after each failed attempt. The
+   server sends an `ack` only after the batch is committed, so a missing ack can mean a slow database: the
+   batch may be stored or not, and rule 4 handles both cases.
 
 If the same `seq` arrives again with different content, the server keeps the first copy and ACKs the
 original counts. The server does not compare or store the second copy.

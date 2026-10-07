@@ -118,7 +118,7 @@ merge the phase; P1 should; P2 nice to have). Deferred cases are listed with a r
 | `./gradlew integrationTest` | persistence, API, security | yes |
 | `./gradlew e2eTest` | scenarios | yes |
 | `./gradlew check` | all of the above + lint + coverage verification | yes |
-| `k6 run load-tests/<script>.js` | load test against `docker compose up` stack | yes |
+| `k6 run load-tests/<script>.js` | load test against `docker compose up` stack (without a local k6: the `grafana/k6` image, see the phase 2 plan) | yes |
 
 ## Rules of thumb
 

@@ -273,19 +273,78 @@ Changes from the original plan (T2.6):
   queue only on its ack (or when `welcome.resumeFromSeq` says the server has it), and is resent unchanged after a
   reconnect. It sends one batch and waits for its ack before the next. The CLI and the end-to-end tests use it,
   and it is the reference behaviour for the SDK's transport module.
+- `DriverClient.sendAll` (added in T2.8) connects again after every connection that ends or fails. The wait before
+  the next attempt starts at 1 s and doubles after each failed attempt in a row. If the server does not answer
+  within the ack timeout (10 s), the client gives up on the connection (protocol client rule 5). `onWelcome`,
+  `onAck` and `onConnectionFailed` report progress; the CLI prints them, and the tests record them.
 - `--speedup` changes only how fast batches are sent, never the fix times; compressed times would look like
   impossible speeds to the jump filter.
 - Routes in `src/main/resources/routes/`: `straight_2km.gpx` (2 km north at 12.5 m/s), `city_loop.gpx` (1.6 km
-  around a block at 10 m/s), `gps_jump.gpx` (600 m with two points marked `<desc>spike</desc>`, 1 km off the road).
-  The three files are generated test data (see the T2.7 commit).
+  around a block at 10 m/s), `gps_jump.gpx` (600 m with two points marked `<desc>spike</desc>`, 1 km off the road),
+  `tunnel_gap.gpx` (`straight_2km.gpx` without the fixes of 90 s in the middle: 1125 m in a tunnel).
+  The files are generated test data (see the T2.7 and T2.8 commits).
 
 Verified by hand against a running server and Postgres: `gps_jump.gpx` with `--disconnect-every 3` gave 6 batches
 over 2 connections, 58 fixes accepted and the 2 spikes rejected as `IMPLAUSIBLE_JUMP`.
+
+### End-to-end and resilience tests (as built in T2.8)
+
+Every test drives a whole route through `DriverClient` and then reads Postgres directly (`StoredTrack`). Each test
+checks the same three things: every seq from 1 to 17 is stored once, every fix is stored once, and the running
+total of the last fix equals the length of the route. A batch that was counted twice would make the total too big.
+
+| Test | How the failure is made |
+|---|---|
+| TC-2-E2E-02 (`DriverRecoveryE2ETest`) | After 4 acks, the test opens its own socket, sends batch 5 from the same session and closes the socket without reading the ack. `DriverClient` then reconnects. `welcome.resumeFromSeq` is 6 if the server stored batch 5 first, otherwise 5. Both are correct. |
+| TC-2-E2E-03 (`DriverReplayE2ETest`) | `tunnel_gap.gpx`. No server change was needed: the jump rule compares speeds, and 1125 m in 90 s is 12.5 m/s. |
+| TC-2-E2E-04 (`DriverRecoveryE2ETest`) | A real Netty server on a free port, because the test client of `testApplication` belongs to one application instance. The server stops after ack 6, and a new server starts 1 s later on the same port with the same database. The client is refused in between and keeps trying. |
+| TC-2-RES-01 (`DriverRecoveryE2ETest`) | A Postgres container of its own, so the other tests keep working. `docker pause` after ack 5, `docker unpause` 5 s later. The test also checks that no ack arrives during the pause. The client uses an ack timeout of 1 s, so it gives up on the stuck connection and connects again. |
+
+Found while preparing the load test: `.dockerignore` excluded every folder named `out`, which includes the
+source packages `adapter/out` and `port/out`. The Docker image did not build from T2.4 to T2.8. The fix keeps
+`!**/src/**/out`, as `.gitignore` already does.
+
+Found while building E2E-04: when a connection drops, Ktor cancels the socket's channels, so the client sees a
+`CancellationException`. `sendAll` treats it as a failed connection and stops only if its own coroutine is
+cancelled (`ensureActive()`). The recovery tests passed 20 runs out of 20 (`./gradlew :app:e2eTest --rerun`).
+
+Coverage gate: `:app:koverVerify` (part of `check`) fails if less than 80 % of the lines in the `domain` and
+`application` packages of every context run in tests. At the end of T2.8 the coverage is 99.6 %. The aggregated report of all modules
+(`./gradlew koverHtmlReport`) still shows every package.
 
 ### Load test (`load-tests/ingest.js`, k6)
 
 200 virtual drivers, batch of 10 fixes every 5 s, 10 minutes, against the compose stack.
 Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restarts, heap stable.
+
+Run (k6 does not need to be installed; the image runs in the compose network):
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d --build
+docker run --rm --network route-tracking_default -v "$PWD/load-tests:/scripts:ro" \
+  -e WS_URL=ws://app:8080/ws/v1/driver grafana/k6:2.3.0 run /scripts/ingest.js
+```
+
+Each virtual user is one driver with one session. The drivers start one after another over 30 s, because the rate
+limit allows 300 requests per minute from one IP address and every WebSocket upgrade counts. The script also
+requires that no fix is rejected: the generated cars drive at 10 m/s, so a rejection means a bug in the script.
+
+Result on 2026-10-07 (Mac mini, Docker Desktop, app and Postgres containers with default settings):
+
+| Measure | Result | Threshold |
+|---|---|---|
+| Batches acked | 24,690 (about 39 per second, 390 fixes per second) | – |
+| Ack latency | median 8 ms, p95 16 ms, max 375 ms | p95 < 250 ms |
+| Batch errors | 0 | < 0.1 % |
+| Rejected fixes | 0 | 0 |
+| Stored | 24,690 batches, 246,900 fixes, one outbox row per batch; `fixes` uses 72 MB with indexes | – |
+| App container | 0 restarts, about 10–17 % CPU after the start, about 400 MiB memory | no restarts |
+| Heap | Old generation 25 MB after the ramp-up, 31 MB at the end; the growth became slower over time. Only young collections ran (197, longest pause 11 ms). | stable |
+
+Old-generation growth with no old-generation collection is normal for G1 with a large maximum heap, so this run
+cannot prove that there is no slow leak; a longer soak test would. 14 of the 200 k6 sessions logged
+`close 1006` at the very end: the server closed all sessions normally (code 1000, all batches acked), and the k6
+client reported the end of the TCP connection after its own close.
 
 ## Tasks
 
@@ -296,7 +355,7 @@ Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restar
 - [x] T2.5 Flyway V2, Exposed repositories, outbox table + relay; port contract tests. (The relay moved to phase 3.)
 - [x] T2.6 `DriverSocket` + mapper; `TrackingModule` (Koin); remove echo socket from dev. (The echo socket stays; see above.)
 - [x] T2.7 `tools/simulator` driver command; GPX fixtures; TC-2-PIP-16 (needs the GPX reader).
-- [ ] T2.8 E2E tests; k6 ingest script; coverage gate on `tracking.domain` / `tracking.application`.
+- [x] T2.8 E2E tests; k6 ingest script; coverage gate on `tracking.domain` / `tracking.application`.
 - [ ] T2.9 Extend the staging smoke test (phase 1.5) with a simulator run: replay `straight_2km.gpx`, expect every batch ACKed. **Deferred with phase 1.5.**
 
 ## Test plan
@@ -391,7 +450,7 @@ Thresholds: `ack_latency p95 < 250 ms`, error rate `< 0.1%`, no container restar
 |---|---|---|---|
 | TC-2-E2E-01 | E2E | Simulator client replays `straight_2km.gpx` in batches of 10 → every batch ACKed; DB fix count = accepted count; last `cumulativeM` ≈ 2 km ±3% | P0 |
 | TC-2-E2E-02 | E2E | Disconnect after batch 5 is sent but before its ack is read; reconnect → `welcome.resumeFromSeq` is 5 or 6 depending on whether 5 was stored; after resending, DB has each seq exactly once and no duplicate fixes | P0 |
-| TC-2-E2E-03 | E2E | `city_loop_with_tunnel_gap.gpx` with a 90 s gap → accepted; gap does not trigger jump rejection when speed is plausible | P1 |
+| TC-2-E2E-03 | E2E | `tunnel_gap.gpx` (2 km straight) with a 90 s gap → accepted; gap does not trigger jump rejection when speed is plausible | P1 |
 | TC-2-E2E-04 | E2E | Server restarts mid-stream (stop/start app, same DB) → client resumes, no loss | P1 |
 
 ### Contract, load and resilience
