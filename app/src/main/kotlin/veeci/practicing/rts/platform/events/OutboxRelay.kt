@@ -3,6 +3,7 @@ package veeci.practicing.rts.platform.events
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -48,15 +49,30 @@ class OutboxRelay(
     private val handlers = handlers.groupBy { it.eventType }
     private val failures = ConcurrentHashMap<Long, Int>()
 
+    @Volatile
+    private var job: Job? = null
+
+    /** True between [start] and the end of the delivery loop. */
+    val isRunning: Boolean get() = job?.isActive == true
+
     /** Runs until [scope] ends (the application stops). */
     fun start(scope: CoroutineScope): Job =
-        scope.launch {
-            while (isActive) {
-                val delivered = deliverPending()
-                // A full batch means more may be waiting: go on at once. Otherwise wait before looking again.
-                if (delivered < config.relayBatchSize) delay(config.relayInterval)
-            }
-        }
+        scope
+            .launch {
+                while (isActive) {
+                    val delivered = deliverPending()
+                    // A full batch means more may be waiting: go on at once. Otherwise wait before looking again.
+                    if (delivered < config.relayBatchSize) delay(config.relayInterval)
+                }
+            }.also { job = it }
+
+    /**
+     * Stops delivering and waits until the event in hand is done (its transaction commits or rolls back).
+     * Events not delivered yet stay in the outbox for the next start: at least once.
+     */
+    suspend fun stop() {
+        job?.cancelAndJoin()
+    }
 
     /** Delivers up to one batch of waiting events and returns how many it delivered. */
     suspend fun deliverPending(): Int {

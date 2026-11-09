@@ -34,9 +34,7 @@ fun Application.configureErrorHandling() {
             )
         }
 
-        exception<PayloadTooLargeException> { call, _ ->
-            call.respondProblem(call.problem(PlatformError.PAYLOAD_TOO_LARGE, "The request body is larger than this server accepts."))
-        }
+        exception<PayloadTooLargeException> { call, _ -> call.respondPayloadTooLarge() }
 
         // The body's Content-Type has no converter (e.g. text/plain sent to a JSON endpoint).
         exception<UnsupportedMediaTypeException> { call, _ -> call.respondUnsupportedMediaType() }
@@ -44,8 +42,10 @@ fun Application.configureErrorHandling() {
 
         // Unreadable body or parameters (bad JSON, wrong types). The parser's message can name internal
         // classes, so the client gets a fixed sentence and the details stay in the debug log.
-        exception<BadRequestException> { call, e -> call.respondMalformed(e) }
-        exception<ContentTransformationException> { call, e -> call.respondMalformed(e) }
+        // Ktor's JSON converter wraps every read failure in BadRequestException, also the body limit cutting a
+        // stream without Content-Length short; the cause chain tells the two apart.
+        exception<BadRequestException> { call, e -> call.respondUnreadable(e) }
+        exception<ContentTransformationException> { call, e -> call.respondUnreadable(e) }
 
         // Anything else is a bug. Full details go to the log under a traceId; the client only gets that id.
         exception<Throwable> { call, cause ->
@@ -74,6 +74,14 @@ fun Application.configureErrorHandling() {
 
 private suspend fun ApplicationCall.respondUnsupportedMediaType() =
     respondProblem(problem(PlatformError.UNSUPPORTED_MEDIA_TYPE, "Send the body as application/json."))
+
+private suspend fun ApplicationCall.respondPayloadTooLarge() =
+    respondProblem(problem(PlatformError.PAYLOAD_TOO_LARGE, "The request body is larger than this server accepts."))
+
+private suspend fun ApplicationCall.respondUnreadable(cause: Throwable) {
+    val bodyTooLarge = generateSequence(cause) { it.cause }.any { it is PayloadTooLargeException }
+    if (bodyTooLarge) respondPayloadTooLarge() else respondMalformed(cause)
+}
 
 private suspend fun ApplicationCall.respondMalformed(cause: Throwable) {
     log.debug("Malformed request on {}: {}", request.path(), cause.message)

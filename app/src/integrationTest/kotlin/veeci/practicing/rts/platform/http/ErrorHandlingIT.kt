@@ -10,6 +10,8 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
+import io.ktor.server.plugins.BadRequestException
+import io.ktor.server.plugins.PayloadTooLargeException
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Routing
@@ -42,6 +44,9 @@ class ErrorHandlingIT {
         get("/test/bug") { error("secret: db password is hunter2") }
         get("/test/trip") { throw DomainException(TestError.TRIP_NOT_FOUND, "Trip 42 does not exist") }
         post("/test/echo") { call.respond(call.receive<Payload>()) }
+
+        // What Ktor's JSON converter throws when the body limit cuts a stream without Content-Length short.
+        get("/test/too-large-wrapped") { throw BadRequestException("Failed to convert request body", PayloadTooLargeException(64)) }
     }
 
     @Test
@@ -85,6 +90,15 @@ class ErrorHandlingIT {
 
             response.status shouldBe HttpStatusCode.BadRequest
             response.problem().code shouldBe "MALFORMED_REQUEST"
+        }
+
+    @Test
+    fun `an oversized body reported inside a read failure is still a 413 problem`() =
+        testApp(routes = testRoutes) {
+            val response = client.get("/test/too-large-wrapped")
+
+            response.status shouldBe HttpStatusCode.PayloadTooLarge
+            response.problem().code shouldBe "PAYLOAD_TOO_LARGE"
         }
 
     @Test
