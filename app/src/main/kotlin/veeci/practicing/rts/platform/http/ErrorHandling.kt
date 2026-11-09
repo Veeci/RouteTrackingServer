@@ -98,3 +98,9 @@ private fun ApplicationCall.problem(
     error: PlatformError,
     detail: String,
 ) = problem(error.name, error.status, detail)
+
+/** Answers with a platform failure, for plugins that respond themselves (authentication, idempotency). */
+suspend fun ApplicationCall.respondPlatformProblem(
+    error: PlatformError,
+    detail: String,
+) = respondProblem(problem(error, detail))

@@ -1,5 +1,6 @@
 package veeci.practicing.rts.testing.tracking
 
+import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.shared.geo.GeoPoint
 import veeci.practicing.rts.shared.geo.Meters
 import veeci.practicing.rts.tracking.application.port.out.NewBatch
@@ -21,10 +22,13 @@ object TrackingSamples {
     val T0: Instant = Instant.parse("2026-10-06T08:00:00.123Z")
     val START = GeoPoint(10.7725, 106.6980)
 
+    /** The driver of every sample session. */
+    val DRIVER = UserId(UUID.fromString("7c9e6679-7425-40de-944b-e07fc1f90ae7"))
+
     fun session(
         id: SessionId = SessionId(UUID.randomUUID()),
         at: Instant = T0,
-    ) = TrackingSession(id, DeviceId("phone-1"), sdkVersion = "0.9.0", startedAt = at)
+    ) = TrackingSession(id, DeviceId("phone-1"), sdkVersion = "0.9.0", startedAt = at, driverId = DRIVER)
 
     /**
      * An accepted fix with every value set. The measured values are exact in a 4-byte float (8.5, 11.25, ...),

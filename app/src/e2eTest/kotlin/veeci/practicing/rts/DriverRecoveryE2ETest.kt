@@ -8,6 +8,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
+import io.ktor.client.request.bearerAuth
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.connector
 import io.ktor.server.engine.embeddedServer
@@ -34,6 +35,7 @@ import veeci.practicing.rts.protocol.Welcome
 import veeci.practicing.rts.simulator.DriverClient
 import veeci.practicing.rts.testing.TestConfig
 import veeci.practicing.rts.testing.TestDatabase
+import veeci.practicing.rts.testing.TestTokens
 import veeci.practicing.rts.testing.testApp
 import java.net.ServerSocket
 import java.util.concurrent.CopyOnWriteArrayList
@@ -56,12 +58,13 @@ class DriverRecoveryE2ETest {
         testApp {
             val http = createClient { install(WebSockets) }
             val welcomes = mutableListOf<Welcome>()
-            val client = DriverClient(http, DRIVER_PATH, "e2e-killed", onWelcome = { welcomes += it })
+            val token = TestTokens.driver()
+            val client = DriverClient(http, DRIVER_PATH, "e2e-killed", token = token, onWelcome = { welcomes += it })
             batches.forEach(client::enqueue)
 
             client.connectAndSend(maxBatches = 4)
             // The phone sends batch 5 from its outbox and dies before the ack arrives.
-            http.webSocket(DRIVER_PATH) {
+            http.webSocket(DRIVER_PATH, request = { bearerAuth(token) }) {
                 sendMessage(Hello(PROTOCOL_VERSION, client.deviceId, client.sessionId, lastAckedSeq = 4, sdkVersion = "e2e"))
                 incoming.receive() // welcome
                 sendMessage(FixBatch(seq = 5, fixes = batches[4]))
@@ -89,6 +92,7 @@ class DriverRecoveryE2ETest {
                             http,
                             "ws://localhost:$port$DRIVER_PATH",
                             "e2e-restart",
+                            token = TestTokens.driver(),
                             ackTimeout = 2.seconds,
                             onAck = { ack ->
                                 // The server goes down between two batches, while the connection is open.
@@ -132,6 +136,7 @@ class DriverRecoveryE2ETest {
                             createClient { install(WebSockets) },
                             DRIVER_PATH,
                             "e2e-db-pause",
+                            token = TestTokens.driver(),
                             ackTimeout = 1.seconds,
                             onAck = { ack ->
                                 if (paused.get()) acksWhilePaused.incrementAndGet()

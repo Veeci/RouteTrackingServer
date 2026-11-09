@@ -9,6 +9,7 @@ import veeci.practicing.rts.protocol.Ack
 import veeci.practicing.rts.simulator.DriverClient
 import veeci.practicing.rts.simulator.GpxReader
 import veeci.practicing.rts.simulator.toFixes
+import veeci.practicing.rts.testing.TestTokens
 import veeci.practicing.rts.testing.testApp
 import kotlin.time.Duration.Companion.seconds
 
@@ -19,7 +20,14 @@ class DriverReplayE2ETest {
     fun `TC-2-E2E-01 a 2 km route is stored completely, and its running total is 2 km`() =
         testApp {
             val acks = mutableListOf<Ack>()
-            val client = DriverClient(createClient { install(WebSockets) }, DRIVER_PATH, "e2e-straight", onAck = { acks += it })
+            val client =
+                DriverClient(
+                    createClient { install(WebSockets) },
+                    DRIVER_PATH,
+                    "e2e-straight",
+                    token = TestTokens.driver(),
+                    onAck = { acks += it },
+                )
             routeFixes("routes/straight_2km.gpx").chunked(10).forEach(client::enqueue)
 
             client.connectAndSend()
@@ -34,7 +42,7 @@ class DriverReplayE2ETest {
     @Test
     fun `reconnecting every 5 batches stores each batch exactly once`() =
         testApp {
-            val client = DriverClient(createClient { install(WebSockets) }, DRIVER_PATH, "e2e-reconnect")
+            val client = DriverClient(createClient { install(WebSockets) }, DRIVER_PATH, "e2e-reconnect", token = TestTokens.driver())
             routeFixes("routes/city_loop.gpx").chunked(10).forEach(client::enqueue)
 
             client.sendAll(batchesPerConnection = 5) shouldBe true
@@ -50,7 +58,14 @@ class DriverReplayE2ETest {
             points.zipWithNext { a, b -> b.time - a.time }.max() shouldBe 90.seconds // the fixture really has the gap
             val fixes = points.toFixes(now())
             val acks = mutableListOf<Ack>()
-            val client = DriverClient(createClient { install(WebSockets) }, DRIVER_PATH, "e2e-tunnel", onAck = { acks += it })
+            val client =
+                DriverClient(
+                    createClient { install(WebSockets) },
+                    DRIVER_PATH,
+                    "e2e-tunnel",
+                    token = TestTokens.driver(),
+                    onAck = { acks += it },
+                )
             fixes.chunked(10).forEach(client::enqueue)
 
             client.connectAndSend()

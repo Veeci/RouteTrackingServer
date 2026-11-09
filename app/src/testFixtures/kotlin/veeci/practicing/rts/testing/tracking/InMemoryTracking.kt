@@ -3,6 +3,7 @@ package veeci.practicing.rts.testing.tracking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import veeci.practicing.rts.platform.db.TransactionRunner
+import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.tracking.application.port.out.FixBatchRepository
 import veeci.practicing.rts.tracking.application.port.out.InsertResult
 import veeci.practicing.rts.tracking.application.port.out.NewBatch
@@ -35,6 +36,7 @@ class InMemoryTrackingSessionRepository : TrackingSessionRepository {
         val sdkVersion: String,
         val startedAt: Instant,
         val lastSeenAt: Instant,
+        val driverId: UserId?,
     )
 
     private val mutex = Mutex()
@@ -42,12 +44,13 @@ class InMemoryTrackingSessionRepository : TrackingSessionRepository {
 
     override suspend fun find(id: SessionId): TrackingSession? =
         mutex.withLock {
-            rows[id]?.let { TrackingSession(it.id, it.deviceId, it.sdkVersion, it.startedAt, it.lastSeenAt) }
+            rows[id]?.let { TrackingSession(it.id, it.deviceId, it.sdkVersion, it.startedAt, it.lastSeenAt, it.driverId) }
         }
 
     override suspend fun save(session: TrackingSession) =
         mutex.withLock {
-            rows[session.id] = Row(session.id, session.deviceId, session.sdkVersion, session.startedAt, session.lastSeenAt)
+            rows[session.id] =
+                Row(session.id, session.deviceId, session.sdkVersion, session.startedAt, session.lastSeenAt, session.driverId)
         }
 }
 

@@ -6,7 +6,7 @@ import veeci.practicing.rts.shared.ErrorCode
 enum class TrackingError(
     override val category: ErrorCategory,
 ) : ErrorCode {
-    /** A device tried to continue a session that another device started. */
+    /** A device or driver tried to continue a session that another device or driver started. */
     SESSION_DEVICE_MISMATCH(ErrorCategory.CONFLICT),
 
     /** A batch arrived for a session that was never opened with `hello`. */

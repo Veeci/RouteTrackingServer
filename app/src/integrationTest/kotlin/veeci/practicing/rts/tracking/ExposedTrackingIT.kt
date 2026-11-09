@@ -19,6 +19,7 @@ import veeci.practicing.rts.platform.events.OutboxWriter
 import veeci.practicing.rts.testing.TestConfig
 import veeci.practicing.rts.testing.TestDatabase
 import veeci.practicing.rts.testing.tracking.TrackingPersistenceContract
+import veeci.practicing.rts.testing.tracking.TrackingSamples.DRIVER
 import veeci.practicing.rts.testing.tracking.TrackingSamples.T0
 import veeci.practicing.rts.testing.tracking.TrackingSamples.fullFix
 import veeci.practicing.rts.testing.tracking.TrackingSamples.newBatch
@@ -79,7 +80,7 @@ class ExposedTrackingIT : TrackingPersistenceContract() {
                     Clock.fixed((T0 + 1.minutes).toJavaInstant(), ZoneOffset.UTC),
                     maxFixesPerBatch = 100,
                 )
-            service.openSession(OpenSession(session.id, session.deviceId, sdkVersion = "0.9.0"))
+            service.openSession(OpenSession(session.id, session.deviceId, sdkVersion = "0.9.0", driverId = DRIVER))
 
             service.ingest(IngestBatch(session.id, 1, listOf(reading(T0))))
             shouldThrow<IllegalStateException> {

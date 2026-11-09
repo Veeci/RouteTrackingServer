@@ -17,6 +17,7 @@ internal object TrackingSessionsTable : Table("tracking_sessions") {
     val sdkVersion = text("sdk_version")
     val startedAt = timestamp("started_at")
     val lastSeenAt = timestamp("last_seen_at")
+    val driverId = javaUUID("driver_id").nullable() // migration V5
     override val primaryKey = PrimaryKey(id)
 }
 

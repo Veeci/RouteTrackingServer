@@ -42,6 +42,28 @@ channels:
       error:
         $ref: '#/components/messages/error'
 
+  guest:
+    address: /ws/v1/guest
+    title: Guest watches a trip
+    description: |
+      One socket per watched trip; only a GUEST token may use it (other roles: close 4403). The first client message
+      is `subscribe`. Another user's trip answers `error` TRIP_NOT_FOUND, the same as a trip that does not exist,
+      and the socket stays open. After `subscribed` the server sends live messages until the trip reaches a final
+      stage (COMPLETED, CANCELLED); then it sends that `trip_event` and closes the socket with 1000.
+    messages:
+      subscribe:
+        $ref: '#/components/messages/subscribe'
+      subscribed:
+        $ref: '#/components/messages/subscribed'
+      driver_position:
+        $ref: '#/components/messages/driver_position'
+      trip_progress:
+        $ref: '#/components/messages/trip_progress'
+      trip_event:
+        $ref: '#/components/messages/trip_event'
+      error:
+        $ref: '#/components/messages/error'
+
 operations:
   receiveHello:
     action: receive
@@ -74,6 +96,35 @@ operations:
     summary: Report a recoverable problem with one client message. The session stays open.
     messages:
       - $ref: '#/channels/driver/messages/error'
+
+  receiveSubscribe:
+    action: receive
+    channel:
+      $ref: '#/channels/guest'
+    summary: Start watching one of the guest's own trips.
+    messages:
+      - $ref: '#/channels/guest/messages/subscribe'
+    reply:
+      channel:
+        $ref: '#/channels/guest'
+      messages:
+        - $ref: '#/channels/guest/messages/subscribed'
+  sendLiveUpdates:
+    action: send
+    channel:
+      $ref: '#/channels/guest'
+    summary: Live updates of the watched trip. Positions and progress are "latest wins"; a slow client may miss some.
+    messages:
+      - $ref: '#/channels/guest/messages/driver_position'
+      - $ref: '#/channels/guest/messages/trip_progress'
+      - $ref: '#/channels/guest/messages/trip_event'
+  sendGuestError:
+    action: send
+    channel:
+      $ref: '#/channels/guest'
+    summary: Report a problem with one client message. The session stays open.
+    messages:
+      - $ref: '#/channels/guest/messages/error'
 
 components:
   messages:
@@ -108,7 +159,174 @@ components:
       payload:
         $ref: '#/components/schemas/Error'
 
+    subscribe:
+      name: subscribe
+      title: Subscribe
+      summary: Watch one trip.
+      payload:
+        $ref: '#/components/schemas/Subscribe'
+    subscribed:
+      name: subscribed
+      title: Subscribed
+      summary: Watching started; the trip as it is now.
+      payload:
+        $ref: '#/components/schemas/Subscribed'
+    driver_position:
+      name: driver_position
+      title: Driver position
+      summary: Where the driver is now.
+      payload:
+        $ref: '#/components/schemas/DriverPosition'
+    trip_progress:
+      name: trip_progress
+      title: Trip progress
+      summary: Distance to the target and the expected time of arrival.
+      payload:
+        $ref: '#/components/schemas/TripProgress'
+    trip_event:
+      name: trip_event
+      title: Trip event
+      summary: The trip moved to another stage.
+      payload:
+        $ref: '#/components/schemas/TripEvent'
+
   schemas:
+    Subscribe:
+      type: object
+      additionalProperties: false
+      required: [type, tripId]
+      properties:
+        type:
+          const: subscribe
+        tripId:
+          type: string
+          format: uuid
+
+    Subscribed:
+      type: object
+      additionalProperties: false
+      required: [type, trip]
+      properties:
+        type:
+          const: subscribed
+        trip:
+          $ref: '#/components/schemas/GuestTrip'
+
+    GuestTrip:
+      type: object
+      additionalProperties: false
+      required: [tripId, status, pickup, destination, updatedAt]
+      properties:
+        tripId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/TripStatus'
+        pickup:
+          $ref: '#/components/schemas/Point'
+        destination:
+          $ref: '#/components/schemas/Point'
+        driverId:
+          type: string
+          format: uuid
+          description: Absent until a driver accepts the trip.
+        updatedAt:
+          type: string
+          format: date-time
+
+    TripStatus:
+      type: string
+      enum: [REQUESTED, ACCEPTED, ARRIVED, IN_PROGRESS, COMPLETED, CANCELLED]
+
+    Point:
+      type: object
+      additionalProperties: false
+      required: [lat, lng]
+      properties:
+        lat:
+          type: number
+          minimum: -90
+          maximum: 90
+        lng:
+          type: number
+          minimum: -180
+          maximum: 180
+
+    DriverPosition:
+      type: object
+      additionalProperties: false
+      required: [type, tripId, lat, lng, recordedAt]
+      properties:
+        type:
+          const: driver_position
+        tripId:
+          type: string
+          format: uuid
+        lat:
+          type: number
+          minimum: -90
+          maximum: 90
+        lng:
+          type: number
+          minimum: -180
+          maximum: 180
+        bearingDeg:
+          type: number
+          minimum: 0
+          exclusiveMaximum: 360
+          description: Degrees, 0 = north. Rotate the car marker with it.
+        speedMps:
+          type: number
+          minimum: 0
+        recordedAt:
+          type: string
+          format: date-time
+
+    TripProgress:
+      type: object
+      additionalProperties: false
+      required: [type, tripId, target, remainingM, etaS, basis]
+      properties:
+        type:
+          const: trip_progress
+        tripId:
+          type: string
+          format: uuid
+        target:
+          type: string
+          enum: [PICKUP, DESTINATION]
+          description: PICKUP while the driver comes to the guest, DESTINATION during the ride.
+        remainingM:
+          type: number
+          minimum: 0
+        etaS:
+          type: number
+          minimum: 0
+          description: Seconds until arrival at the target, from a smoothed speed (at least 2 m/s).
+        basis:
+          type: string
+          enum: [STRAIGHT_LINE, ROUTE]
+          description: STRAIGHT_LINE until distances are measured along the road (phase 7).
+
+    TripEvent:
+      type: object
+      additionalProperties: false
+      required: [type, tripId, event, status, at]
+      properties:
+        type:
+          const: trip_event
+        tripId:
+          type: string
+          format: uuid
+        event:
+          type: string
+          enum: [status_changed]
+        status:
+          $ref: '#/components/schemas/TripStatus'
+        at:
+          type: string
+          format: date-time
+
     Hello:
       type: object
       additionalProperties: false
@@ -122,7 +340,7 @@ components:
         deviceId:
           type: string
           minLength: 1
-          description: Stable id of the device. Identifies the driver until authentication arrives (phase 3).
+          description: Stable id of the device. The driver is identified by the access token, not by this id.
         sessionId:
           type: string
           format: uuid
@@ -317,14 +535,16 @@ components:
             - BATCH_TOO_LARGE
             - INVALID_SEQ
             - SESSION_DEVICE_MISMATCH
+            - TRIP_NOT_FOUND
           description: |
             MALFORMED_MESSAGE: the frame is not valid JSON.
             INVALID_MESSAGE: valid JSON, but the wrong shape or missing fields.
             UNKNOWN_MESSAGE: a `type` that this endpoint does not know.
             RATE_LIMITED: more messages per second than allowed; this message was dropped.
             EMPTY_BATCH, BATCH_TOO_LARGE, INVALID_SEQ: the batch was not stored and gets no ack.
-            SESSION_DEVICE_MISMATCH: the hello names a session that another device started. Start a new
-            session (new sessionId) and send hello again.
+            SESSION_DEVICE_MISMATCH: the hello names a session that another device or driver started. Start a
+            new session (new sessionId) and send hello again.
+            TRIP_NOT_FOUND (guest socket): no such trip, or one this guest may not see.
             INVALID_MESSAGE is also the answer to a hello with an invalid sessionId or deviceId, and to a
             second hello on the same socket.
         message:

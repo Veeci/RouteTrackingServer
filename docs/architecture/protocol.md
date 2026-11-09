@@ -14,7 +14,11 @@ the AsyncAPI schema accepts the file. The Kotlin classes, error codes (`WsErrorC
 | `/ws/v1/driver` | Driver SDK | `Authorization: Bearer <token>` (header) or `?token=` (fallback for clients that can't set headers) | Upload fixes and device status; receive ACKs and commands |
 | `/ws/v1/guest` | Guest app | same | Subscribe to one trip; receive driver position, progress and events |
 
-Before phase 3 (no auth yet) the driver endpoint accepts a `deviceId` in `Hello`.
+Since phase 3 both endpoints need an access token (a JWT; in dev and test, get one from
+`POST /api/v1/dev/tokens`). The server checks the token on the upgrade request: without a valid token the
+upgrade fails with HTTP 401 and no socket opens. A valid token with the wrong role (a GUEST on the driver
+endpoint, a DRIVER on the guest endpoint) opens the socket and closes it at once with 4403. The driver is
+identified by the token; `deviceId` in `hello` only names the device.
 
 ## Envelope
 
@@ -25,11 +29,13 @@ class discriminator `"type"`:
 { "type": "fix_batch", "seq": 42, "fixes": [ ... ] }
 ```
 
-Messages are grouped into two sealed hierarchies in the `protocol` module:
+Messages are grouped into sealed hierarchies in the `protocol` module, one pair per endpoint:
 
 ```kotlin
-@Serializable sealed interface ClientMessage   // sent by devices
-@Serializable sealed interface ServerMessage   // sent by the server
+@Serializable sealed interface ClientMessage        // sent by driver devices
+@Serializable sealed interface ServerMessage        // sent by the server on the driver socket; `error` on both sockets
+@Serializable sealed interface GuestClientMessage   // sent by guest apps
+@Serializable sealed interface GuestServerMessage   // sent by the server on the guest socket
 ```
 
 Unknown `type` values are rejected with `error{code=UNKNOWN_MESSAGE}` and the session stays open
@@ -134,19 +140,31 @@ client → command_ack  { commandId, status: "applied" | "rejected", reason? }
 
 Commands are persisted until acknowledged or expired and re-sent after `welcome` on reconnect.
 
-## Guest session (phase 3+)
+## Guest session
 
 ```
 client → subscribe        { tripId }
-server → subscribed       { trip: TripSnapshot }
-server → driver_position  { tripId, lat, lng, bearingDeg, speedMps, at }
-server → trip_progress    { tripId, remainingM, etaS, basis: "straight_line" | "route" }
-server → trip_event       { tripId, event: { type: "arriving" | "arrived" | ... , at, ... } }
+server → subscribed       { trip: { tripId, status, pickup, destination, driverId?, updatedAt } }
+server → driver_position  { tripId, lat, lng, bearingDeg?, speedMps?, recordedAt }
+server → trip_progress    { tripId, target: PICKUP | DESTINATION, remainingM, etaS, basis: STRAIGHT_LINE }
+server → trip_event       { tripId, event: status_changed, status, at }
 server → route_updated    { tripId, polyline, distanceM }                    // phase 7
-client → unsubscribe      { tripId }
 ```
 
-A guest may subscribe only to trips where they are the guest; otherwise `error{code=FORBIDDEN}`.
+- One socket watches one trip. A second `subscribe` on the same socket gets `error{INVALID_MESSAGE}`.
+- A guest may watch only their own trips. Another user's trip gets `error{TRIP_NOT_FOUND}`, exactly like a
+  trip that does not exist, so trip ids cannot be probed. The socket stays open.
+- `subscribed` carries the trip as it is now. Live messages follow while the trip runs.
+- `driver_position` and `trip_progress` are "latest wins": they are not stored, and a client that reads too
+  slowly skips old ones (the server keeps at most 64 per trip). The server sends each position before the
+  progress computed from it.
+- `trip_progress.remainingM` is a straight line until phase 7 measures it along the road. `etaS` is the
+  remaining distance divided by a smoothed speed (exponential moving average, α = 0.3), with at least 2 m/s,
+  so a waiting driver does not give an endless ETA.
+- `trip_event` is sent for each change of stage; the server reads the trip again first, so `status` is always
+  the trip's current stage. When changes come quickly, a stage in between may be skipped.
+- After a final stage (COMPLETED, CANCELLED) the server sends that `trip_event` and closes the socket with 1000.
+  A `subscribe` to a trip that has already ended gets `subscribed` and then the same close.
 
 ## Errors and close codes
 
@@ -159,7 +177,8 @@ A guest may subscribe only to trips where they are the guest; otherwise `error{c
 | `UNKNOWN_MESSAGE` | A `type` that this server does not know (for example from a newer SDK) |
 | `RATE_LIMITED` | More messages per second than `limits.maxMessagesPerSecond`; this message was dropped |
 | `EMPTY_BATCH`, `BATCH_TOO_LARGE`, `INVALID_SEQ` | The batch was not stored and gets no ack; `correlatesTo` is its seq |
-| `SESSION_DEVICE_MISMATCH` | The `hello` names a session that another device started. Start a new session and send `hello` again |
+| `SESSION_DEVICE_MISMATCH` | The `hello` names a session that another device or driver started. Start a new session and send `hello` again |
+| `TRIP_NOT_FOUND` | Guest socket: no such trip, or one this guest may not see |
 
 The constants are in `WsErrorCodes` (protocol errors) and `TrackingError` (business errors) in code, and in
 the `Error` schema of the AsyncAPI document.
@@ -173,7 +192,7 @@ the `Error` schema of the AsyncAPI document.
 | 1011 | Internal error | Reconnect with backoff |
 | 4400 | Unsupported protocol version | Stop, report |
 | 4401 | Handshake timeout / missing hello | Reconnect |
-| 4403 | Unauthorized role for endpoint | Stop |
+| 4403 | The token's role may not use this endpoint (`WsCloseCodes.FORBIDDEN_ROLE`) | Stop |
 
 ## Keepalive
 

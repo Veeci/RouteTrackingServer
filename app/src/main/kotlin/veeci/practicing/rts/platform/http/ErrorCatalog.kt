@@ -11,6 +11,7 @@ object ErrorCatalog {
             ErrorCategory.CONFLICT -> HttpStatusCode.Conflict
             ErrorCategory.INVALID -> HttpStatusCode.UnprocessableEntity
             ErrorCategory.FORBIDDEN -> HttpStatusCode.Forbidden
+            ErrorCategory.STALE -> HttpStatusCode.PreconditionFailed
         }
 
     /** A stable identifier for the error type. A URN, because there is no public docs page to link to yet. */
@@ -26,6 +27,7 @@ enum class PlatformError(
 ) {
     MALFORMED_REQUEST(HttpStatusCode.BadRequest),
     VALIDATION_FAILED(HttpStatusCode.BadRequest),
+    UNAUTHORIZED(HttpStatusCode.Unauthorized),
     NOT_FOUND(HttpStatusCode.NotFound),
     PAYLOAD_TOO_LARGE(HttpStatusCode.PayloadTooLarge),
     UNSUPPORTED_MEDIA_TYPE(HttpStatusCode.UnsupportedMediaType),

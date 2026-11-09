@@ -22,6 +22,9 @@ enum class ErrorCategory {
 
     /** The caller is known but not allowed to do this. */
     FORBIDDEN,
+
+    /** The caller acted on an outdated copy (an old version); they read again and decide again. */
+    STALE,
 }
 
 /**

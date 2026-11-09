@@ -10,7 +10,9 @@ data class AppConfig(
     val http: HttpConfig,
     val db: DBConfig,
     val ws: WsConfig,
+    val jwt: JwtConfig,
     val tracking: TrackingConfig,
+    val events: EventsConfig,
 )
 
 data class AppInfo(
@@ -47,6 +49,28 @@ data class WsConfig(
     val maxFrameBytes: Long,
     /** Messages one session may send per second; extra ones are dropped with error{RATE_LIMITED}. */
     val messagesPerSecond: Int,
+)
+
+/** Access tokens: JSON Web Tokens signed with HMAC-SHA256. */
+data class JwtConfig(
+    /** The signing key, at least 32 characters. Set it with the JWT_SECRET environment variable, never in a file in git. */
+    val secret: Secret,
+    /** Written into every token (`iss`) and required when a token is checked. */
+    val issuer: String,
+    /** Written into every token (`aud`) and required when a token is checked. */
+    val audience: String,
+    /** How long an issued token is valid. */
+    val tokenTtl: Duration,
+    /** Clock difference between servers that is tolerated when `exp` and `iat` are checked. */
+    val leeway: Duration,
+)
+
+/** Delivery of the events in the outbox to the contexts that react to them. */
+data class EventsConfig(
+    /** How long the relay waits between two reads of the outbox when it found nothing to deliver. */
+    val relayInterval: Duration,
+    /** The most events the relay delivers in one transaction. */
+    val relayBatchSize: Int,
 )
 
 /** The tracking context's limits. The tracking module turns them into its own types. */

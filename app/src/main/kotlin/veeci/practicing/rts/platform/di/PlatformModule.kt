@@ -13,9 +13,12 @@ import veeci.practicing.rts.platform.db.DatabaseHealthIndicator
 import veeci.practicing.rts.platform.db.ExposedTransactionRunner
 import veeci.practicing.rts.platform.db.TransactionRunner
 import veeci.practicing.rts.platform.db.createDataSource
+import veeci.practicing.rts.platform.events.OutboxRelay
 import veeci.practicing.rts.platform.events.OutboxWriter
+import veeci.practicing.rts.platform.http.Idempotency
 import veeci.practicing.rts.platform.observability.HealthIndicator
 import veeci.practicing.rts.platform.observability.HealthRegistry
+import veeci.practicing.rts.platform.security.AccessTokens
 import veeci.practicing.rts.platform.ws.WsSessionRegistry
 import veeci.practicing.rts.platform.ws.WsSessionRunner
 import java.time.Clock
@@ -41,10 +44,16 @@ fun platformModule(
 
         single<TransactionRunner> { ExposedTransactionRunner(get()) }
         single { OutboxWriter() }
+        // Every context's OutboxEventHandler definitions, found with getAll().
+        single { OutboxRelay(get(), getAll(), config.events) }
+        single { Idempotency(get(), get()) }
 
         // Contexts add their own dependencies (Redis, ...) the same way: bind them as HealthIndicator.
         single { DatabaseHealthIndicator(get()) } bind HealthIndicator::class
         single { HealthRegistry(getAll()) } onClose { it?.close() }
+
+        // Built at startup, so a missing or short JWT_SECRET stops the app before it serves anything.
+        single(createdAtStart = true) { AccessTokens(config.jwt, get()) }
 
         single { WsSessionRegistry(get()) }
         single { WsSessionRunner(config.ws, get()) }

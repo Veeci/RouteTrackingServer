@@ -22,7 +22,7 @@ Kotlin · Ktor 3 · PostgreSQL 16 · Docker · GitHub Actions. Modular monolith 
 ```bash
 git clone https://github.com/Veeci/RouteTrackingServer.git
 cd RouteTrackingServer
-cp deploy/.env.example deploy/.env                     # then edit DB_PASSWORD
+cp deploy/.env.example deploy/.env                     # then set DB_PASSWORD and JWT_SECRET (openssl rand -base64 48)
 docker compose -f deploy/docker-compose.yml up -d db   # start PostgreSQL
 ./gradlew :app:run                                     # start the server on http://localhost:8080
 ```
@@ -30,6 +30,11 @@ docker compose -f deploy/docker-compose.yml up -d db   # start PostgreSQL
 Check it: `curl localhost:8080/health/ready` → `{"status":"UP","checks":{"db":"UP"}}`.
 Metrics: `curl localhost:8080/metrics`. API docs (dev only): <http://localhost:8080/docs>.
 Logs are plain text locally; set `LOG_FORMAT=json` for one JSON object per line (the Docker image does).
+
+Every `/api/v1/trips` route and both WebSockets need an access token. In dev, get one with
+`./gradlew -q :tools:simulator:run --args="token --role GUEST"` (or `POST /api/v1/dev/tokens`) and send it as
+`Authorization: Bearer <token>`. A full walk-through (book a trip, drive it, watch it live) is in
+[docs/plan/phase-03-live-trip.md](docs/plan/phase-03-live-trip.md#try-it).
 
 ## Everyday commands
 
@@ -42,7 +47,9 @@ Logs are plain text locally; set `LOG_FORMAT=json` for one JSON object per line 
 | `./gradlew check` | Everything above + ktlint + detekt + coverage gate (80 % of domain and application lines) | yes |
 | `./gradlew spotlessApply` | Auto-fix formatting (run before committing) | no |
 | `./gradlew koverHtmlReport` | Coverage report → `build/reports/kover/html/index.html` | yes |
-| `./gradlew :tools:simulator:run --args="driver --gpx routes/city_loop.gpx"` | Fake driver that replays a GPX route against the server (options: `docs/plan/phase-02-ingest.md`) | server running |
+| `./gradlew :tools:simulator:run --args="token --role DRIVER"` | Create a user and print an access token (dev and test servers) | server running |
+| `./gradlew :tools:simulator:run --args="driver --token T --gpx routes/city_loop.gpx"` | Fake driver that replays a GPX route against the server | server running |
+| `./gradlew :tools:simulator:run --args="guest --token T --trip ID"` | Fake guest that prints a trip's live positions, ETA and stages | server running |
 
 Local stack:
 

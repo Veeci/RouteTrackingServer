@@ -15,6 +15,7 @@ class AppConfigLoaderTest {
             "DB_URL" to "jdbc:postgresql://db.internal:5432/rts",
             "DB_USER" to "rts_app",
             "DB_PASSWORD" to "s3cret-value",
+            "JWT_SECRET" to "a-signing-key-of-at-least-32-characters",
         )
 
     @ParameterizedTest

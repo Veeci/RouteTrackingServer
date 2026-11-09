@@ -59,9 +59,15 @@ object WsErrorCodes {
 
     /** Valid JSON with a `type` this endpoint does not know, for example from a newer client. */
     const val UNKNOWN_MESSAGE = "UNKNOWN_MESSAGE"
+
+    /** Guest socket: no such trip, or one this guest may not see (the two look the same). */
+    const val TRIP_NOT_FOUND = "TRIP_NOT_FOUND"
 }
 
 object WsCloseCodes {
     const val UNSUPPORTED_VERSION: Short = 4400
     const val HANDSHAKE_TIMEOUT: Short = 4401
+
+    /** The token is valid, but its role may not use this endpoint (for example a GUEST on the driver socket). Do not retry. */
+    const val FORBIDDEN_ROLE: Short = 4403
 }

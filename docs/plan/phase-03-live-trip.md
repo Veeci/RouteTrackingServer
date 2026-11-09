@@ -104,22 +104,88 @@ Ports: `TripRepository { insert; find; findOpen(page); findActiveForDriver; upda
 
 ### Migrations
 
-`V3__identity.sql` (`users`), `V4__trips.sql`: `trips(id uuid pk, guest_id fk, driver_id fk null, pickup_lat/lng,
-destination_lat/lng, status text check (...), version bigint, created_at, updated_at)`, index `(status, created_at)`,
-partial unique index `one_active_trip_per_driver on trips(driver_id) where status in ('ACCEPTED','ARRIVED','IN_PROGRESS')`,
-`idempotency_keys(key, principal, request_hash, response jsonb, created_at)`.
+As built (phase 2 already used V3): `V4__identity.sql` (`users`), `V5__tracking_session_driver.sql`
+(`tracking_sessions.driver_id`), `V6__trips.sql` (`trips` with `version`, check that every stage after REQUESTED
+has a driver, index `(status, created_at, id)`, partial unique index `one_active_trip_per_driver on trips(driver_id)
+where status in ('ACCEPTED','ARRIVED','IN_PROGRESS')`), `V7__idempotency_keys.sql`
+(`idempotency_keys(principal, key, request_hash, status, headers jsonb, body, created_at)`). No foreign keys to
+`users`: the tables belong to other contexts (docs/architecture/database.md).
+
+## As built
+
+The code follows the design above, with these differences. Each one has a reason.
+
+| Plan | As built | Why |
+|---|---|---|
+| JWT verifier "exists from phase 1" | `platform/security`: `AccessTokens` (issue and check, HMAC-SHA256, `JWT_SECRET`), `Authentication.kt` (Ktor `auth-jwt`, `?token=` for sockets, 401 Problem) | Phase 1 did not build it |
+| `Actor` in identity | `Actor`, `UserId`, `Role` in the shared kernel (`shared/Actor.kt`) | Every context passes actors to its services; the shared kernel is the one place all contexts may import |
+| `POST /api/v1/dev/tokens {userId}` | `{role, displayName?, userId?}`: creates the user (or reuses `userId`) and returns `{token, userId, role, displayName, expiresAt}` | One call gives a developer a working user |
+| — | Tracking sessions store `driver_id`; `FixesAccepted` carries it; reconnecting to another driver's session is SESSION_DEVICE_MISMATCH | Progress must find the driver's active trip from a batch |
+| Payload classes private to tracking's adapter | `FixesAcceptedV1` and `TripStatusChangedV1` in the `domain.event` packages | The trip and live contexts decode them; a public package is the only place they may import from |
+| `TripStatus` in trip's domain | `trip.domain.event.TripStatus` | Events and `TripQuery` snapshots carry it, so it is part of the public language |
+| `accept / arrive / start / complete / cancel` methods | One `TripService.act(ActOnTrip(id, action, expectedVersion), actor)`; the aggregate has `perform(action, actor, now)` | One path for all actions; the order of checks is in one place |
+| A driver acting on a trip they cannot see gets 404 | A driver who **accepts** an already accepted trip gets 409 ILLEGAL_TRANSITION | The loser of an accept race learns "taken", whichever moment they read the trip (TC-3-DB-03 is deterministic) |
+| Status check in route (If-Match) | `ErrorCategory.STALE` → 412, code VERSION_MISMATCH | The domain stays free of HTTP |
+| `TripProgressService` publishes to `LiveUpdates` | Port `ProgressPublisher` in trip's application layer; adapter `LiveProgressPublisher` calls `LiveUpdates` | Trip's application layer does not know the live context |
+| Outbox relay (moved from phase 2) | `platform/events/OutboxRelay`: one event per transaction, `FOR UPDATE SKIP LOCKED`, handlers per event type from Koin, 5 attempts then skip; 250 ms between empty reads (20 ms in tests) | Simple and safe for several instances later |
+| — | The guest socket reads the trip again on every status event and sends its current stage | The snapshot is the truth; a repeated or reordered event cannot show a wrong stage |
+| — | Trip times are cut to microseconds | Postgres keeps microseconds; a Linux JVM clock has nanoseconds, so a created trip would read back different |
+| — | The REST API leaves out absent optional fields instead of writing `null` (`ApiJson`) | The contract describes optional fields as absent |
+
+Found along the way:
+- `java.util.UUID.compareTo` compares two signed numbers, so its order differs from Postgres's byte order. The
+  in-memory trip repository sorts by the text form, which matches Postgres (the contract test caught it).
+- Ktor's default JSON writes `"driverId": null`, which the contract does not allow; one `ApiJson` setting
+  fixed it for every route.
+
+Tests: 353 in all (134 unit, 166 integration, 9 end-to-end, 40 protocol, 4 simulator); coverage of the
+domain and application packages is 99.5 %. Every test-case ID of the test plan below is a test name, except
+TC-3-SM-02, which checks all 30 (stage, action) pairs instead of random ones.
+
+### Try it
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d --build
+./gradlew -q :tools:simulator:installDist
+tools/simulator/build/install/simulator/bin/simulator token --role GUEST --name Alice
+tools/simulator/build/install/simulator/bin/simulator token --role DRIVER --name Dana
+```
+
+Book a trip as the guest (the pickup is where `straight_2km.gpx` ends) and accept it as the driver:
+
+```bash
+curl -i -X POST localhost:8080/api/v1/trips -H "Authorization: Bearer $GUEST" -H "Content-Type: application/json" \
+  -H "Idempotency-Key: $(uuidgen)" -d '{"pickup":{"lat":10.7904864,"lng":106.698},"destination":{"lat":10.7798,"lng":106.699}}'
+curl -X POST localhost:8080/api/v1/trips/$TRIP/accept -H "Authorization: Bearer $DRIVER"
+```
+
+Then, in two terminals:
+
+```bash
+tools/simulator/build/install/simulator/bin/simulator guest --token $GUEST --trip $TRIP
+tools/simulator/build/install/simulator/bin/simulator driver --token $DRIVER --gpx routes/straight_2km.gpx --speedup 20
+```
+
+Load: `load-tests/ingest.js` (now with a DRIVER token from the dev endpoint) with 200 drivers for 3 minutes on
+2026-10-07: 7,898 batches, ack p95 15 ms, 0 errors. Every batch now also goes through the relay and the
+active-trip lookup; the outbox backlog stayed between 0 and 10 events (under 0.3 s) and app CPU went from about
+13 % (phase 2) to 20–30 %.
+
+Verified on 2026-10-07 against the Docker image: the guest saw 17 positions, the distance to the pickup fell
+from 1887 m to 0 m and the ETA from 151 s to 0 s; after `arrive`, `start` and `complete` the socket closed
+with 1000.
 
 ## Tasks
 
-- [ ] T3.1 `identity` context: users, dev tokens, `Actor`; driver socket requires DRIVER.
-- [ ] T3.2 `Trip` aggregate + events; `TripService`; `TripQuery`; in-memory adapters + mothers.
-- [ ] T3.3 V3/V4 migrations; `ExposedTripRepository` (optimistic `update ... where version = ?`); contract tests.
-- [ ] T3.4 Platform: Idempotency-Key support, ETag/If-Match helpers.
-- [ ] T3.5 Trip REST routes; OpenAPI paths and schemas.
-- [ ] T3.6 `FixesAcceptedListener` + `TripProgressService`.
-- [ ] T3.7 `live` context: bus, `GuestSocket`; AsyncAPI guest channel.
-- [ ] T3.8 Simulator `guest --trip <id>` command; `--token` for driver.
-- [ ] T3.9 Tests below, including the authorization matrix.
+- [x] T3.1 `identity` context: users, dev tokens, `Actor`; driver socket requires DRIVER.
+- [x] T3.2 `Trip` aggregate + events; `TripService`; `TripQuery`; in-memory adapters + mothers.
+- [x] T3.3 V3/V4 migrations; `ExposedTripRepository` (optimistic `update ... where version = ?`); contract tests.
+- [x] T3.4 Platform: Idempotency-Key support, ETag/If-Match helpers.
+- [x] T3.5 Trip REST routes; OpenAPI paths and schemas.
+- [x] T3.6 `FixesAcceptedListener` + `TripProgressService`.
+- [x] T3.7 `live` context: bus, `GuestSocket`; AsyncAPI guest channel.
+- [x] T3.8 Simulator `guest --trip <id>` command; `--token` for driver.
+- [x] T3.9 Tests below, including the authorization matrix.
 
 ## Test plan
 

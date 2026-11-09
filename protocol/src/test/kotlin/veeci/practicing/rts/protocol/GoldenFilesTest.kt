@@ -53,7 +53,10 @@ class GoldenFilesTest {
 
     @Test
     fun `every message type has a sample, a golden file and an AsyncAPI message`() {
-        val inCode = ClientMessage.serializer().descriptor.subclassNames() + ServerMessage.serializer().descriptor.subclassNames()
+        val inCode =
+            listOf(ClientMessage.serializer(), ServerMessage.serializer(), GuestClientMessage.serializer(), GuestServerMessage.serializer())
+                .flatMap { it.descriptor.subclassNames() }
+                .toSet()
         val goldenFiles = File(javaClass.getResource("/golden")!!.toURI()).list()!!.map { it.removeSuffix(".json") }.toSet()
 
         samples().map { it.type }.toSet() shouldBe inCode
@@ -102,10 +105,13 @@ class GoldenFilesTest {
         private val schemas = SchemaRegistry.withDefaultDialect(SpecificationVersion.DRAFT_7)
 
         private const val SESSION = "0f8fad5b-d9cb-469f-a165-70867728950e"
+        private const val TRIP = "3b241101-e2bb-4255-8caf-4136c566a962"
         private val at = Instant.parse("2026-09-30T02:15:04.120Z")
 
         @JvmStatic
-        fun samples(): List<Sample<*>> =
+        fun samples(): List<Sample<*>> = driverSamples() + guestSamples()
+
+        private fun driverSamples(): List<Sample<*>> =
             listOf(
                 Sample("hello", Hello(1, "dev-sim-1", SESSION, lastAckedSeq = 41, sdkVersion = "0.9.0"), ClientMessage.serializer()),
                 Sample(
@@ -149,6 +155,40 @@ class GoldenFilesTest {
                     "error",
                     ErrorMessage("BATCH_TOO_LARGE", "A batch holds at most 100 fixes; this one has 120", correlatesTo = 43),
                     ServerMessage.serializer(),
+                ),
+            )
+
+        private fun guestSamples(): List<Sample<*>> =
+            listOf(
+                Sample("subscribe", Subscribe(TRIP), GuestClientMessage.serializer()),
+                Sample(
+                    "subscribed",
+                    Subscribed(
+                        GuestTrip(
+                            tripId = TRIP,
+                            status = "ACCEPTED",
+                            pickup = Point(10.7725, 106.698),
+                            destination = Point(10.7798, 106.699),
+                            driverId = "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+                            updatedAt = Instant.parse("2026-09-30T02:15:00Z"),
+                        ),
+                    ),
+                    GuestServerMessage.serializer(),
+                ),
+                Sample(
+                    "driver_position",
+                    DriverPosition(TRIP, 10.7769, 106.7009, bearingDeg = 87.0, speedMps = 11.2, recordedAt = at),
+                    GuestServerMessage.serializer(),
+                ),
+                Sample(
+                    "trip_progress",
+                    TripProgress(TRIP, "PICKUP", remainingM = 1240.5, etaS = 112.0, basis = "STRAIGHT_LINE"),
+                    GuestServerMessage.serializer(),
+                ),
+                Sample(
+                    "trip_event",
+                    TripEvent(TRIP, TripEvent.STATUS_CHANGED, "ARRIVED", Instant.parse("2026-09-30T02:17:30Z")),
+                    GuestServerMessage.serializer(),
                 ),
             )
     }

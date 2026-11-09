@@ -3,6 +3,8 @@ package veeci.practicing.rts
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.junit.jupiter.api.Test
 import org.koin.test.verify.verify
+import veeci.practicing.rts.platform.config.EventsConfig
+import veeci.practicing.rts.platform.config.JwtConfig
 import veeci.practicing.rts.platform.config.WsConfig
 import veeci.practicing.rts.protocol.LimitsDto
 import veeci.practicing.rts.testing.TestConfig
@@ -15,7 +17,16 @@ class WiringTest {
         // Values built from config are handed to constructors by the module functions, not built by Koin:
         // declare their types as given.
         appModule(TestConfig.load(), SimpleMeterRegistry()).verify(
-            extraTypes = listOf(WsConfig::class, PipelineConfig::class, LimitsDto::class, Duration::class, Int::class),
+            extraTypes =
+                listOf(
+                    WsConfig::class,
+                    JwtConfig::class,
+                    EventsConfig::class,
+                    PipelineConfig::class,
+                    LimitsDto::class,
+                    Duration::class,
+                    Int::class,
+                ),
         )
     }
 }

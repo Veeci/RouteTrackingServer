@@ -10,12 +10,17 @@
 //     -e WS_URL=ws://app:8080/ws/v1/driver grafana/k6:2.3.0 run /scripts/ingest.js
 //
 // Settings (environment variables): WS_URL, DRIVERS (default 200), DURATION_S (default 600 = 10 minutes).
+//
+// The driver socket needs a DRIVER token (phase 3). setup() gets one from the dev token endpoint, so the target
+// must run with APP_ENV=dev or test. All virtual drivers share that one user; their sessions are separate.
 
+import http from 'k6/http';
 import exec from 'k6/execution';
 import { Counter, Rate, Trend } from 'k6/metrics';
 import { WebSocket } from 'k6/websockets';
 
 const WS_URL = __ENV.WS_URL || 'ws://localhost:8080/ws/v1/driver';
+const HTTP_URL = WS_URL.replace(/^ws/, 'http').replace(/\/ws\/v1\/driver$/, '');
 const DRIVERS = Number(__ENV.DRIVERS || 200);
 const DURATION_S = Number(__ENV.DURATION_S || 600);
 
@@ -50,21 +55,30 @@ export const options = {
   },
 };
 
-export default function () {
+export function setup() {
+  const response = http.post(`${HTTP_URL}/api/v1/dev/tokens`, JSON.stringify({ role: 'DRIVER', displayName: 'k6' }), {
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (response.status !== 200) throw new Error(`No driver token: ${response.status} ${response.body}`);
+  return { token: response.json('token') };
+}
+
+export default function (data) {
   const driver = exec.vu.idInTest; // 1..DRIVERS
   const startDelayMs = (RAMP_UP_S * 1000 * (driver - 1)) / DRIVERS;
   const endAt = exec.scenario.startTime + (RAMP_UP_S + DURATION_S) * 1000;
-  setTimeout(() => drive(driver, endAt), startDelayMs);
+  setTimeout(() => drive(driver, endAt, data.token), startDelayMs);
 }
 
-function drive(driver, endAt) {
+function drive(driver, endAt, token) {
   const sessionId = crypto.randomUUID();
   const vehicle = startVehicle();
   const sentAt = new Map(); // seq -> time the batch was sent, until its ack arrives
   let seq = 0;
   let timer;
 
-  const ws = new WebSocket(WS_URL);
+  // Browsers and k6 cannot always set headers on a WebSocket upgrade, so the token goes in the query.
+  const ws = new WebSocket(`${WS_URL}?token=${token}`);
 
   ws.onopen = () => {
     ws.send(JSON.stringify({ type: 'hello', protocolVersion: 1, deviceId: `k6-driver-${driver}`, sessionId, sdkVersion: 'k6' }));

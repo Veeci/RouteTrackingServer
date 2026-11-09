@@ -37,7 +37,7 @@ abstract class TrackingPersistenceContract {
 
     private suspend fun givenSession() = tx { sessions.save(session) }
 
-    private fun TrackingSession.values() = listOf(id, deviceId, sdkVersion, startedAt, lastSeenAt)
+    private fun TrackingSession.values() = listOf(id, deviceId, sdkVersion, startedAt, lastSeenAt, driverId)
 
     @Test
     fun `a saved session is found with all its values`() =
@@ -51,7 +51,7 @@ abstract class TrackingPersistenceContract {
     fun `saving a session again updates it`() =
         runTest {
             givenSession()
-            session.reconnect(session.deviceId, sdkVersion = "1.0.0", at = T0 + 5.minutes)
+            session.reconnect(session.deviceId, TrackingSamples.DRIVER, sdkVersion = "1.0.0", at = T0 + 5.minutes)
 
             tx { sessions.save(session) }
 

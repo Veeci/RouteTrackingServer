@@ -18,7 +18,210 @@ servers:
 tags:
   - name: operations
     description: Probes and metrics for the hosting platform, not for app users.
+  - name: identity
+    description: Users and access tokens.
+  - name: trips
+    description: |
+      Booking and running a trip. Every route needs a token. A guest sees only their own trips; a driver sees open
+      trips and their own; another user's trip answers 404, the same as a trip that does not exist.
+      Stages: REQUESTED → ACCEPTED → ARRIVED → IN_PROGRESS → COMPLETED, or CANCELLED before IN_PROGRESS.
 paths:
+  /api/v1/dev/tokens:
+    post:
+      tags: [identity]
+      operationId: issueDevToken
+      summary: Create a user and an access token (dev and test only)
+      description: |
+        Creates a user with the given role, or reuses `userId`, and returns an access token for that user without
+        any password. This route exists only when APP_ENV is dev or test; elsewhere it answers 404.
+        Send the token as `Authorization: Bearer <token>` (WebSockets: the same header, or `?token=`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DevTokenRequest' }
+      responses:
+        '200':
+          description: The user and their token.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DevTokenResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/trips:
+    post:
+      tags: [trips]
+      operationId: requestTrip
+      summary: Book a trip (GUEST)
+      description: |
+        Creates a trip in stage REQUESTED. Send a new random Idempotency-Key per booking: a retry with the same key
+        and body returns the first response (header `Idempotent-Replayed: true`) and books nothing new.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RequestTrip' }
+      responses:
+        '201':
+          description: The trip was created.
+          headers:
+            Location:
+              description: The URL of the new trip.
+              schema: { type: string }
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Trip' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: IDEMPOTENCY_KEY_REUSED, the key was used before for a different request.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    get:
+      tags: [trips]
+      operationId: listOpenTrips
+      summary: List open trips (DRIVER)
+      description: Trips that wait for a driver, oldest first, one page at a time (keyset pagination).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: status
+          in: query
+          description: Only REQUESTED is supported.
+          schema: { type: string, enum: [REQUESTED], default: REQUESTED }
+        - name: cursor
+          in: query
+          description: The `nextCursor` of the previous page.
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: One page of trips.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TripPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/trips/{id}:
+    get:
+      tags: [trips]
+      operationId: getTrip
+      summary: Read a trip
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+      responses:
+        '200': { $ref: '#/components/responses/Trip' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/trips/{id}/accept:
+    post:
+      tags: [trips]
+      operationId: acceptTrip
+      summary: Accept an open trip
+      description: "DRIVER. The caller becomes the trip's driver. A driver drives one trip at a time (409 DRIVER_ALREADY_ON_TRIP). Send If-Match with the last ETag to refuse the change if the trip changed meanwhile (412)."
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200': { $ref: '#/components/responses/Trip' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/trips/{id}/arrive:
+    post:
+      tags: [trips]
+      operationId: arriveAtPickup
+      summary: Mark the driver as arrived at the pickup
+      description: "The assigned driver. Send If-Match with the last ETag to refuse the change if the trip changed meanwhile (412)."
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200': { $ref: '#/components/responses/Trip' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/trips/{id}/start:
+    post:
+      tags: [trips]
+      operationId: startTrip
+      summary: Start the ride
+      description: "The assigned driver, after arriving. Send If-Match with the last ETag to refuse the change if the trip changed meanwhile (412)."
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200': { $ref: '#/components/responses/Trip' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/trips/{id}/complete:
+    post:
+      tags: [trips]
+      operationId: completeTrip
+      summary: Finish the ride
+      description: "The assigned driver. Send If-Match with the last ETag to refuse the change if the trip changed meanwhile (412)."
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200': { $ref: '#/components/responses/Trip' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/trips/{id}/cancel:
+    post:
+      tags: [trips]
+      operationId: cancelTrip
+      summary: Cancel the trip
+      description: "The guest or the assigned driver, before the ride starts. Send If-Match with the last ETag to refuse the change if the trip changed meanwhile (412)."
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200': { $ref: '#/components/responses/Trip' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
   /health/live:
     get:
       tags: [operations]
@@ -71,8 +274,71 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: Access token. Issued from phase 3; operations endpoints need none.
+      description: Access token (JWT). In dev and test, get one from POST /api/v1/dev/tokens. Operations endpoints need none.
+  parameters:
+    TripId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IfMatch:
+      name: If-Match
+      in: header
+      description: The ETag of the trip as the caller last saw it. Absent or `*` skips the check.
+      schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: A new random value (e.g. a UUID) per user action; reuse it only when retrying that action.
+      schema: { type: string, minLength: 1, maxLength: 255 }
+  headers:
+    ETag:
+      description: The trip's version, e.g. `"3"`. Send it back in If-Match.
+      schema: { type: string }
   responses:
+    Trip:
+      description: The trip after the request.
+      headers:
+        ETag:
+          $ref: '#/components/headers/ETag'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Trip' }
+    Unauthorized:
+      description: No access token, or an invalid or expired one (UNAUTHORIZED).
+      headers:
+        WWW-Authenticate:
+          schema: { type: string }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Forbidden:
+      description: The caller may not do this (TRIP_ACTION_FORBIDDEN), e.g. a guest accepting a trip.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: TRIP_NOT_FOUND, no such trip or one the caller may not see.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Conflict:
+      description: |
+        ILLEGAL_TRANSITION (not possible in the trip's stage, also when another driver accepted it first),
+        CONCURRENT_MODIFICATION (changed at the same time; read it again), or DRIVER_ALREADY_ON_TRIP.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    PreconditionFailed:
+      description: VERSION_MISMATCH, If-Match names an older version of the trip.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    BadRequest:
+      description: The body is not readable JSON (MALFORMED_REQUEST) or a field is invalid (VALIDATION_FAILED, with `errors`).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
     TooManyRequests:
       description: Rate limit exceeded for this client IP.
       headers:
@@ -83,6 +349,82 @@ components:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
   schemas:
+    Point:
+      type: object
+      required: [lat, lng]
+      additionalProperties: false
+      properties:
+        lat: { type: number, minimum: -90, maximum: 90 }
+        lng: { type: number, minimum: -180, maximum: 180 }
+    RequestTrip:
+      type: object
+      required: [pickup, destination]
+      properties:
+        pickup: { $ref: '#/components/schemas/Point' }
+        destination: { $ref: '#/components/schemas/Point' }
+    TripStatus:
+      type: string
+      enum: [REQUESTED, ACCEPTED, ARRIVED, IN_PROGRESS, COMPLETED, CANCELLED]
+    Trip:
+      type: object
+      required: [id, guestId, pickup, destination, status, createdAt, updatedAt, version]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        guestId: { type: string, format: uuid }
+        driverId:
+          type: string
+          format: uuid
+          description: Absent until a driver accepts the trip.
+        pickup: { $ref: '#/components/schemas/Point' }
+        destination: { $ref: '#/components/schemas/Point' }
+        status: { $ref: '#/components/schemas/TripStatus' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        version:
+          type: integer
+          minimum: 1
+          description: Increases by 1 with every change; the same value as the ETag.
+    TripPage:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Trip' }
+        nextCursor:
+          type: string
+          description: Absent on the last page.
+    Role:
+      type: string
+      enum: [GUEST, DRIVER, ADMIN]
+    DevTokenRequest:
+      type: object
+      required: [role]
+      properties:
+        role: { $ref: '#/components/schemas/Role' }
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Absent gives a generated name.
+        userId:
+          type: string
+          format: uuid
+          description: Log in as this existing user (their name and role are replaced). Absent creates a new user.
+    DevTokenResponse:
+      type: object
+      required: [token, userId, role, displayName, expiresAt]
+      additionalProperties: false
+      properties:
+        token:
+          type: string
+          description: The access token (a JWT).
+        userId: { type: string, format: uuid }
+        role: { $ref: '#/components/schemas/Role' }
+        displayName: { type: string }
+        expiresAt: { type: string, format: date-time }
     HealthStatus:
       type: string
       enum: [UP, DOWN]
