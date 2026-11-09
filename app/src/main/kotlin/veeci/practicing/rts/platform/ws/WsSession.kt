@@ -5,11 +5,16 @@ import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
 import io.ktor.websocket.close
 import io.micrometer.core.instrument.MeterRegistry
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.job
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.SerializationStrategy
 import veeci.practicing.rts.protocol.ErrorMessage
 import veeci.practicing.rts.protocol.ProtocolJson
 import veeci.practicing.rts.protocol.ServerMessage
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.time.Duration
 
 /** One open WebSocket connection, as message handlers see it. */
 class WsSession internal constructor(
@@ -35,6 +40,9 @@ class WsSession internal constructor(
 
     /** Queues a close frame without waiting; Ktor sends it and finishes the closing handshake. */
     internal fun goAway(reason: CloseReason): Boolean = socket.outgoing.trySend(Frame.Close(reason)).isSuccess
+
+    /** The socket's coroutine; work an endpoint launches in the socket (a subscription) is its child. */
+    internal val job: Job get() = socket.coroutineContext.job
 }
 
 /** Every open session: shutdown says goodbye to each (step 10), and /metrics shows how many there are. */
@@ -54,8 +62,20 @@ class WsSessionRegistry(
     internal fun remove(session: WsSession) = sessions.remove(session)
 
     /**
-     * Asks every open session to close with [reason] and returns how many were asked. Doesn't wait (shutdown
-     * hooks are plain functions): the close frames go out while the server finishes in-flight work.
+     * Asks every open session to close with [reason], waits up to [timeout] for them to end, cancels the ones
+     * still open after that, and returns how many were asked. When it returns, no session is running.
      */
-    fun closeAll(reason: CloseReason): Int = sessions.count { it.goAway(reason) }
+    suspend fun closeAll(
+        reason: CloseReason,
+        timeout: Duration,
+    ): Int {
+        val open = sessions.toList()
+        val asked = open.count { it.goAway(reason) }
+        val jobs = open.map { it.job }
+        if (withTimeoutOrNull(timeout) { jobs.joinAll() } == null) {
+            jobs.forEach { it.cancel() }
+            jobs.joinAll()
+        }
+        return asked
+    }
 }

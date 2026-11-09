@@ -3,8 +3,11 @@ package veeci.practicing.rts.platform.lifecycle
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationStopPreparing
 import io.ktor.websocket.CloseReason
+import kotlinx.coroutines.runBlocking
 import org.koin.ktor.ext.get
 import org.slf4j.LoggerFactory
+import veeci.practicing.rts.platform.config.HttpConfig
+import veeci.practicing.rts.platform.events.OutboxRelay
 import veeci.practicing.rts.platform.observability.HealthRegistry
 import veeci.practicing.rts.platform.ws.WsSessionRegistry
 import java.util.concurrent.atomic.AtomicBoolean
@@ -17,18 +20,28 @@ private val log = LoggerFactory.getLogger("veeci.practicing.rts.platform.lifecyc
  * http.shutdownTimeout to finish; only after that does Koin close the connection pool. At that first
  * moment, while connections still work:
  * 1. readiness turns DOWN, so load balancers stop routing new traffic here;
- * 2. every WebSocket gets close 1001 (going away), so clients reconnect with backoff, to another
- *    instance, instead of seeing a dropped connection.
+ * 2. the outbox relay stops, so no new event reaches a socket;
+ * 3. every WebSocket gets close 1001 (going away), so clients reconnect with backoff, to another
+ *    instance, instead of seeing a dropped connection; sessions still open after
+ *    [HttpConfig.shutdownGracePeriod] are cancelled.
+ * This waits for 2 and 3: Koin closes the pool at ApplicationStopping, before Ktor cancels the
+ * application's coroutines, and WebSocket sessions are not the application's coroutines at all.
  */
-fun Application.configureGracefulShutdown() {
+fun Application.configureGracefulShutdown(config: HttpConfig) {
     val health = get<HealthRegistry>()
+    val relay = get<OutboxRelay>()
     val sockets = get<WsSessionRegistry>()
     val started = AtomicBoolean(false)
     // Ktor raises this event from more than one layer of its stop sequence; act on the first only.
     monitor.subscribe(ApplicationStopPreparing) {
         if (!started.compareAndSet(false, true)) return@subscribe
         health.markStopping()
-        val asked = sockets.closeAll(CloseReason(CloseReason.Codes.GOING_AWAY, "Server shutting down"))
+        // A plain event handler: block this (shutdown) thread until both have stopped.
+        val asked =
+            runBlocking {
+                relay.stop()
+                sockets.closeAll(CloseReason(CloseReason.Codes.GOING_AWAY, "Server shutting down"), config.shutdownGracePeriod)
+            }
         log.info("Shutting down: readiness is DOWN, {} WebSocket session(s) asked to reconnect", asked)
     }
 }

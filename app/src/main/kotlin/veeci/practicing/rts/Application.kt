@@ -79,7 +79,7 @@ fun Application.module(
         modules(listOf(appModule(config, metrics)) + overrides)
     }
     if (config.db.migrateOnStart) Migrations.run(get())
-    configureGracefulShutdown()
+    configureGracefulShutdown(config.http)
     // Delivers stored events to the contexts that react to them; stops with the application.
     get<OutboxRelay>().start(this)
 
