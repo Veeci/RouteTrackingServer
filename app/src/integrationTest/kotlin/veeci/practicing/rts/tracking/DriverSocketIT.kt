@@ -8,7 +8,6 @@ import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.client.request.bearerAuth
-import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
 import kotlinx.coroutines.CompletableDeferred
@@ -32,8 +31,9 @@ import veeci.practicing.rts.protocol.ServerMessage
 import veeci.practicing.rts.protocol.Welcome
 import veeci.practicing.rts.protocol.WsCloseCodes
 import veeci.practicing.rts.protocol.WsErrorCodes
+import veeci.practicing.rts.testing.SocketTestApp
 import veeci.practicing.rts.testing.TestTokens
-import veeci.practicing.rts.testing.testApp
+import veeci.practicing.rts.testing.socketApp
 import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedFixBatchRepository
 import veeci.practicing.rts.tracking.application.port.out.FixBatchRepository
 import veeci.practicing.rts.tracking.application.port.out.InsertResult
@@ -52,7 +52,7 @@ class DriverSocketIT {
 
     @Test
     fun `TC-2-WS-01 hello is answered with welcome, seq 1 and the server's limits`() =
-        testApp {
+        socketApp {
             driver {
                 sendMessage(hello())
 
@@ -65,7 +65,7 @@ class DriverSocketIT {
 
     @Test
     fun `TC-2-WS-02 no hello within the handshake timeout closes the socket with 4401`() =
-        testApp {
+        socketApp {
             driver {
                 closeReason.await()?.code shouldBe WsCloseCodes.HANDSHAKE_TIMEOUT
             }
@@ -73,7 +73,7 @@ class DriverSocketIT {
 
     @Test
     fun `after a valid hello the handshake timeout no longer applies`() =
-        testApp {
+        socketApp {
             driver {
                 handshake()
 
@@ -86,7 +86,7 @@ class DriverSocketIT {
 
     @Test
     fun `TC-2-WS-03 a batch before hello closes the socket with 4401`() =
-        testApp {
+        socketApp {
             driver {
                 sendMessage(batch(1))
 
@@ -96,7 +96,7 @@ class DriverSocketIT {
 
     @Test
     fun `TC-2-WS-04 an unsupported protocol version closes the socket with 4400`() =
-        testApp {
+        socketApp {
             driver {
                 sendMessage(hello().copy(protocolVersion = 2))
 
@@ -106,7 +106,7 @@ class DriverSocketIT {
 
     @Test
     fun `TC-2-WS-05 a batch is acked with its counts, and a resend gets the same ack`() =
-        testApp {
+        socketApp {
             driver {
                 handshake()
                 val batch = FixBatch(1, listOf(fix(0), fix(1), fix(2).copy(accuracyM = 80.0)))
@@ -122,7 +122,7 @@ class DriverSocketIT {
 
     @Test
     fun `a reconnect resumes after the highest stored seq`() =
-        testApp {
+        socketApp {
             driver {
                 handshake()
                 for (seq in 1L..2L) {
@@ -140,7 +140,7 @@ class DriverSocketIT {
 
     @Test
     fun `TC-2-WS-06 malformed JSON gets MALFORMED_MESSAGE and the next batch is still acked`() =
-        testApp {
+        socketApp {
             driver {
                 handshake()
 
@@ -154,7 +154,7 @@ class DriverSocketIT {
 
     @Test
     fun `TC-2-WS-07 an unknown message type gets UNKNOWN_MESSAGE and the session stays open`() =
-        testApp {
+        socketApp {
             driver {
                 handshake()
 
@@ -168,7 +168,7 @@ class DriverSocketIT {
 
     @Test
     fun `TC-2-WS-08 an oversized batch gets BATCH_TOO_LARGE for its seq and no ack`() =
-        testApp {
+        socketApp {
             driver {
                 handshake()
 
@@ -184,7 +184,7 @@ class DriverSocketIT {
 
     @Test
     fun `TC-2-WS-09 messages above the rate limit get RATE_LIMITED`() =
-        testApp(env = mapOf("WS_MESSAGESPERSECOND" to "2")) {
+        socketApp(env = mapOf("WS_MESSAGESPERSECOND" to "2")) {
             driver {
                 sendMessage(hello())
                 sendMessage(batch(1))
@@ -203,7 +203,7 @@ class DriverSocketIT {
             module {
                 single<FixBatchRepository> { GatedFixBatchRepository(gate, ExposedFixBatchRepository()) }
             }
-        testApp(overrides = listOf(gated)) {
+        socketApp(overrides = listOf(gated)) {
             driver {
                 handshake()
                 sendMessage(batch(1))
@@ -218,7 +218,7 @@ class DriverSocketIT {
 
     @Test
     fun `TC-2-WS-11 two drivers at the same time each get their own acks`() =
-        testApp {
+        socketApp {
             val client = createClient { install(WebSockets) }
             coroutineScope {
                 repeat(2) {
@@ -241,7 +241,7 @@ class DriverSocketIT {
 
     @Test
     fun `a hello with an invalid session id gets INVALID_MESSAGE and the next valid hello is welcomed`() =
-        testApp {
+        socketApp {
             driver {
                 sendMessage(hello().copy(sessionId = "not-a-uuid"))
                 receiveError().code shouldBe WsErrorCodes.INVALID_MESSAGE
@@ -253,7 +253,7 @@ class DriverSocketIT {
 
     @Test
     fun `a second hello on the same socket gets INVALID_MESSAGE`() =
-        testApp {
+        socketApp {
             driver {
                 handshake()
 
@@ -265,7 +265,7 @@ class DriverSocketIT {
 
     @Test
     fun `a session started by another device is refused with SESSION_DEVICE_MISMATCH`() =
-        testApp {
+        socketApp {
             driver { handshake() }
 
             driver {
@@ -277,10 +277,10 @@ class DriverSocketIT {
 
     // --- helpers -------------------------------------------------------------------------------------------
 
-    private suspend fun ApplicationTestBuilder.driver(block: suspend DefaultClientWebSocketSession.() -> Unit) =
+    private suspend fun SocketTestApp.driver(block: suspend DefaultClientWebSocketSession.() -> Unit) =
         wsClient().webSocket(DRIVER, request = { bearerAuth(token) }) { block() }
 
-    private fun ApplicationTestBuilder.wsClient(): HttpClient = createClient { install(WebSockets) }
+    private fun SocketTestApp.wsClient(): HttpClient = createClient { install(WebSockets) }
 
     private fun hello() = Hello(protocolVersion = 1, deviceId = "phone-1", sessionId = sessionId, lastAckedSeq = null, sdkVersion = "0.9.0")
 

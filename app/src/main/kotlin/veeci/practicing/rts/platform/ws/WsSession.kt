@@ -5,9 +5,9 @@ import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
 import io.ktor.websocket.close
 import io.micrometer.core.instrument.MeterRegistry
+import kotlinx.coroutines.CompletableJob
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.job
-import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.SerializationStrategy
 import veeci.practicing.rts.protocol.ErrorMessage
@@ -21,7 +21,11 @@ class WsSession internal constructor(
     val id: String,
     val endpoint: String,
     private val socket: DefaultWebSocketServerSession,
+    private val handler: Job,
 ) {
+    /** Completed by the runner when the handler has finished, after the session left the registry. */
+    internal val finished: CompletableJob = Job()
+
     suspend fun send(message: ServerMessage) = send(ServerMessage.serializer(), message)
 
     /** For endpoints whose replies are not [ServerMessage]s (the diagnostic echo). */
@@ -41,8 +45,20 @@ class WsSession internal constructor(
     /** Queues a close frame without waiting; Ktor sends it and finishes the closing handshake. */
     internal fun goAway(reason: CloseReason): Boolean = socket.outgoing.trySend(Frame.Close(reason)).isSuccess
 
-    /** The socket's coroutine; work an endpoint launches in the socket (a subscription) is its child. */
-    internal val job: Job get() = socket.coroutineContext.job
+    /**
+     * Waits for both coroutines of a session: the handler (it runs in the call's coroutine) and the connection
+     * (work an endpoint launches in the socket, such as a subscription, is its child). On Netty the connection
+     * ends first, once the close handshake is done, while the handler may still be working.
+     */
+    internal suspend fun awaitEnd() {
+        finished.join()
+        socket.coroutineContext.job.join()
+    }
+
+    internal fun cancel() {
+        handler.cancel()
+        socket.coroutineContext.job.cancel()
+    }
 }
 
 /** Every open session: shutdown says goodbye to each (step 10), and /metrics shows how many there are. */
@@ -71,10 +87,9 @@ class WsSessionRegistry(
     ): Int {
         val open = sessions.toList()
         val asked = open.count { it.goAway(reason) }
-        val jobs = open.map { it.job }
-        if (withTimeoutOrNull(timeout) { jobs.joinAll() } == null) {
-            jobs.forEach { it.cancel() }
-            jobs.joinAll()
+        if (withTimeoutOrNull(timeout) { open.forEach { it.awaitEnd() } } == null) {
+            open.forEach { it.cancel() }
+            open.forEach { it.awaitEnd() }
         }
         return asked
     }

@@ -20,7 +20,7 @@
 | **Property** | Invariants over generated inputs (geometry, routing, pipeline) | Function | kotest-property | `test` |
 | **Service** | Application service behaviour: orchestration, authorization, events recorded | Service + in-memory adapters | JUnit 5, coroutines-test | `test` |
 | **Persistence integration** | Repository SQL, constraints, concurrency, migrations | Adapter + real Postgres | Testcontainers | `integrationTest` |
-| **API (component)** | HTTP/WS behaviour of the whole app: routing, auth, serialization, error mapping, contract conformance | Full app in-process + real Postgres | Ktor `testApplication`, Testcontainers, OpenAPI validator | `integrationTest` |
+| **API (component)** | HTTP/WS behaviour of the whole app: routing, auth, serialization, error mapping, contract conformance | Full app in-process + real Postgres | Ktor `testApplication` (`testApp`); WebSocket classes use `socketApp`: Netty + CIO over a real port, because the in-memory engine sometimes upgrades a socket without starting its handler. Testcontainers, OpenAPI validator | `integrationTest` |
 | **Contract** | Wire format stability for the SDK | `protocol` module | Golden JSON files, AsyncAPI JSON-schema validation | `protocol:test` |
 | **Architecture** | Context boundaries, layer rules, naming | Codebase | Konsist | `test` |
 | **Wiring** | DI graph resolves; config loads for each profile | Koin modules, config | Koin `verify()`, Hoplite | `test` |

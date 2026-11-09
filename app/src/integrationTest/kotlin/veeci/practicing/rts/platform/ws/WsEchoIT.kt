@@ -6,7 +6,6 @@ import io.ktor.client.HttpClient
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
-import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
@@ -16,13 +15,14 @@ import veeci.practicing.rts.protocol.ErrorMessage
 import veeci.practicing.rts.protocol.ProtocolJson
 import veeci.practicing.rts.protocol.ServerMessage
 import veeci.practicing.rts.protocol.WsErrorCodes
-import veeci.practicing.rts.testing.testApp
+import veeci.practicing.rts.testing.SocketTestApp
+import veeci.practicing.rts.testing.socketApp
 
 @Testcontainers(disabledWithoutDocker = true)
 class WsEchoIT {
     @Test
     fun `TC-1-WS-01 echo sends every JSON object back`() =
-        testApp {
+        socketApp {
             wsClient().webSocket(ECHO) {
                 send(Frame.Text("""{"hello":"world"}"""))
 
@@ -32,7 +32,7 @@ class WsEchoIT {
 
     @Test
     fun `TC-1-WS-02 a frame over the size limit closes the session with 1009`() =
-        testApp(env = mapOf("WS_MAXFRAMEBYTES" to "1024")) {
+        socketApp(env = mapOf("WS_MAXFRAMEBYTES" to "1024")) {
             wsClient().webSocket(ECHO) {
                 send(Frame.Text("""{"pad":"${"x".repeat(2_000)}"}"""))
 
@@ -42,7 +42,7 @@ class WsEchoIT {
 
     @Test
     fun `TC-1-WS-03 invalid JSON gets an error frame and the session stays open`() =
-        testApp {
+        socketApp {
             wsClient().webSocket(ECHO) {
                 send(Frame.Text("not json"))
                 receiveError().code shouldBe WsErrorCodes.MALFORMED_MESSAGE
@@ -54,7 +54,7 @@ class WsEchoIT {
 
     @Test
     fun `JSON that is not an accepted message gets INVALID_MESSAGE`() =
-        testApp {
+        socketApp {
             wsClient().webSocket(ECHO) {
                 send(Frame.Text("""[1, 2, 3]"""))
 
@@ -64,7 +64,7 @@ class WsEchoIT {
 
     @Test
     fun `messages beyond the per-session rate are dropped with RATE_LIMITED`() =
-        testApp(env = mapOf("WS_MESSAGESPERSECOND" to "2")) {
+        socketApp(env = mapOf("WS_MESSAGESPERSECOND" to "2")) {
             wsClient().webSocket(ECHO) {
                 repeat(3) { send(Frame.Text("""{"n":$it}""")) }
 
@@ -78,7 +78,7 @@ class WsEchoIT {
 
     @Test
     fun `TC-1-WS-04 echo is mounted in staging`() =
-        testApp(env = mapOf("APP_ENV" to "staging")) {
+        socketApp(env = mapOf("APP_ENV" to "staging")) {
             wsClient().webSocket(ECHO) {
                 send(Frame.Text("{}"))
                 receiveText() shouldBe "{}"
@@ -87,12 +87,12 @@ class WsEchoIT {
 
     @Test
     fun `TC-1-WS-04 echo is not mounted in prod`() =
-        testApp(env = mapOf("APP_ENV" to "prod")) {
+        socketApp(env = mapOf("APP_ENV" to "prod")) {
             // The same client connects in staging (test above); here the upgrade is refused (404).
             shouldThrow<IllegalStateException> { wsClient().webSocket(ECHO) {} }
         }
 
-    private fun ApplicationTestBuilder.wsClient(): HttpClient = createClient { install(WebSockets) }
+    private fun SocketTestApp.wsClient(): HttpClient = createClient { install(WebSockets) }
 
     private suspend fun DefaultClientWebSocketSession.receiveText(): String = (incoming.receive() as Frame.Text).readText()
 

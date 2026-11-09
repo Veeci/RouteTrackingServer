@@ -60,6 +60,9 @@ dependencies {
     testFixturesApi(platform(libs.junit.bom))
     testFixturesApi(libs.bundles.unit.test)
     testFixturesApi(ktorLibs.server.testHost)
+    // socketApp: WebSocket tests run on Netty and connect with CIO, as in production.
+    testFixturesImplementation(ktorLibs.server.netty)
+    testFixturesImplementation(ktorLibs.client.cio)
     testFixturesApi(libs.kotlinx.serialization.json)
     testFixturesApi(platform(libs.koin.bom))
     testFixturesApi(libs.koin.ktor)

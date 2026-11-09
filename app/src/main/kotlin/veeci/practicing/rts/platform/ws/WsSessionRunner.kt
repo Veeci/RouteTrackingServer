@@ -5,6 +5,8 @@ import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.job
 import kotlinx.coroutines.slf4j.MDCContext
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -49,7 +51,7 @@ class WsSessionRunner(
         inbound: DeserializationStrategy<In>,
         handle: suspend WsSession.(In) -> Unit,
     ) {
-        val session = WsSession(UUID.randomUUID().toString(), endpoint, socket)
+        val session = WsSession(UUID.randomUUID().toString(), endpoint, socket, currentCoroutineContext().job)
         val mdc = MDC.getCopyOfContextMap().orEmpty() + mapOf(WS_SESSION_MDC to session.id, WS_ENDPOINT_MDC to endpoint)
         withContext(MDCContext(mdc)) {
             val opened = TimeSource.Monotonic.markNow()
@@ -62,6 +64,7 @@ class WsSessionRunner(
             } finally {
                 sessions.remove(session)
                 log.info("WebSocket session closed ({}) after {}, {} message(s) received", outcome, opened.elapsedNow(), stats.received)
+                session.finished.complete()
             }
         }
     }
