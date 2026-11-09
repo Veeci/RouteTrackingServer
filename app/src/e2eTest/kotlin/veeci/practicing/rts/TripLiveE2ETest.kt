@@ -64,7 +64,8 @@ class TripLiveE2ETest {
                 watching.await()
             }
 
-            val remaining = messages.filterIsInstance<TripProgress>().map { it.remainingM }
+            // Only the way to the pickup: a batch the relay delivers after `start` measures to the destination.
+            val remaining = messages.filterIsInstance<TripProgress>().filter { it.target == "PICKUP" }.map { it.remainingM }
             remaining.shouldNotBeEmpty()
             // Each update is at most a GPS accuracy radius (5 m) worse than the one before: the driver comes closer.
             remaining.zipWithNext().filter { (before, after) -> after > before + 5.0 }.shouldBeEmpty()
