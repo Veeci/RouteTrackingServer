@@ -10,7 +10,10 @@ import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
 import org.junit.jupiter.api.Test
+import org.koin.ktor.ext.get
 import org.testcontainers.junit.jupiter.Testcontainers
+import veeci.practicing.rts.platform.events.OutboxRelay
+import veeci.practicing.rts.platform.ws.WsSessionRegistry
 import veeci.practicing.rts.testing.shouldMatchContract
 import veeci.practicing.rts.testing.testApp
 
@@ -40,6 +43,25 @@ class GracefulShutdownIT {
             val ready = client.get("/health/ready")
             ready.status shouldBe HttpStatusCode.ServiceUnavailable
             ready.shouldMatchContract()
+        }
+
+    @Test
+    fun `stopping ends the relay and every socket before the connection pool closes`() =
+        testApp {
+            createClient { install(WebSockets) }.webSocket("/ws/v1/echo") {
+                send(Frame.Text("{}"))
+                incoming.receive() // the session is established
+                val relay = application.get<OutboxRelay>()
+                val sockets = application.get<WsSessionRegistry>()
+                relay.isRunning shouldBe true
+                sockets.size shouldBe 1
+
+                beginShutdown()
+
+                // Koin closes the pool at ApplicationStopping, which comes after this event: nothing may be left.
+                relay.isRunning shouldBe false
+                sockets.size shouldBe 0
+            }
         }
 
     private fun ApplicationTestBuilder.beginShutdown() = application.monitor.raise(ApplicationStopPreparing, application.environment)
