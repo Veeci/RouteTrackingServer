@@ -14,7 +14,6 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
-import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
 import kotlinx.serialization.json.Json
@@ -31,11 +30,12 @@ import veeci.practicing.rts.protocol.Welcome
 import veeci.practicing.rts.protocol.WsCloseCodes
 import veeci.practicing.rts.shared.Actor
 import veeci.practicing.rts.shared.Role
+import veeci.practicing.rts.testing.SocketTestApp
 import veeci.practicing.rts.testing.TestConfig
 import veeci.practicing.rts.testing.TestTokens
 import veeci.practicing.rts.testing.problem
 import veeci.practicing.rts.testing.shouldMatchContract
-import veeci.practicing.rts.testing.testApp
+import veeci.practicing.rts.testing.socketApp
 import java.time.Clock
 import java.util.UUID
 
@@ -44,7 +44,7 @@ import java.util.UUID
 class AuthenticationIT {
     @Test
     fun `the dev token endpoint creates a user whose token opens the driver socket`() =
-        testApp {
+        socketApp {
             val response =
                 client.post("/api/v1/dev/tokens") {
                     contentType(ContentType.Application.Json)
@@ -66,7 +66,7 @@ class AuthenticationIT {
 
     @Test
     fun `an invalid dev token request is answered with every invalid field`() =
-        testApp {
+        socketApp {
             val response =
                 client.post("/api/v1/dev/tokens") {
                     contentType(ContentType.Application.Json)
@@ -80,7 +80,7 @@ class AuthenticationIT {
 
     @Test
     fun `TC-3-API-08 the dev token endpoint does not exist in prod`() =
-        testApp(env = mapOf("APP_ENV" to "prod")) {
+        socketApp(env = mapOf("APP_ENV" to "prod")) {
             val response =
                 client.post("/api/v1/dev/tokens") {
                     contentType(ContentType.Application.Json)
@@ -92,13 +92,13 @@ class AuthenticationIT {
 
     @Test
     fun `the driver socket refuses an upgrade without a token`() =
-        testApp {
+        socketApp {
             shouldThrowAny { wsClient().webSocket(DRIVER) { sayHello() } }
         }
 
     @Test
     fun `TC-3-API-07 the driver socket refuses an expired token and a token signed with another key`() =
-        testApp {
+        socketApp {
             val otherKey =
                 AccessTokens(TestConfig.load(mapOf("JWT_SECRET" to "another-signing-key-0123456789abcdef")).jwt, Clock.systemUTC())
 
@@ -109,7 +109,7 @@ class AuthenticationIT {
 
     @Test
     fun `TC-3-SEC-02 a token for another issuer or audience is refused`() =
-        testApp {
+        socketApp {
             val config = TestConfig.load().jwt
             val otherIssuer = AccessTokens(config.copy(issuer = "someone-else"), Clock.systemUTC())
             val otherAudience = AccessTokens(config.copy(audience = "another-api"), Clock.systemUTC())
@@ -121,7 +121,7 @@ class AuthenticationIT {
 
     @Test
     fun `TC-3-API-09 a guest token on the driver socket closes it with 4403`() =
-        testApp {
+        socketApp {
             wsClient().webSocket(DRIVER, request = { bearerAuth(TestTokens.guest()) }) {
                 closeReason.await()?.code shouldBe WsCloseCodes.FORBIDDEN_ROLE
             }
@@ -129,7 +129,7 @@ class AuthenticationIT {
 
     @Test
     fun `a socket may send its token as a query parameter`() =
-        testApp {
+        socketApp {
             wsClient().webSocket("$DRIVER?token=${TestTokens.driver()}") {
                 sayHello() shouldNotBe null
             }
@@ -137,7 +137,7 @@ class AuthenticationIT {
 
     private fun driver() = Actor(TestTokens.newUser(), Role.DRIVER)
 
-    private fun ApplicationTestBuilder.wsClient(): HttpClient = createClient { install(WebSockets) }
+    private fun SocketTestApp.wsClient(): HttpClient = createClient { install(WebSockets) }
 
     /** Sends hello and returns the welcome. */
     private suspend fun DefaultClientWebSocketSession.sayHello(): Welcome? {

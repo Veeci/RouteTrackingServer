@@ -7,7 +7,6 @@ import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.client.request.bearerAuth
-import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
@@ -40,8 +39,9 @@ import veeci.practicing.rts.protocol.TripProgress
 import veeci.practicing.rts.protocol.Welcome
 import veeci.practicing.rts.protocol.WsCloseCodes
 import veeci.practicing.rts.protocol.WsErrorCodes
+import veeci.practicing.rts.testing.SocketTestApp
 import veeci.practicing.rts.testing.TestTokens
-import veeci.practicing.rts.testing.testApp
+import veeci.practicing.rts.testing.socketApp
 import veeci.practicing.rts.testing.trip.TripApi
 import veeci.practicing.rts.testing.trip.TripSamples.PICKUP
 import java.util.UUID
@@ -58,7 +58,7 @@ class GuestSocketIT {
 
     @Test
     fun `TC-3-GWS-01 a guest subscribes to their trip and gets it as it is now`() =
-        testApp {
+        socketApp {
             val trip = api().created(guest)
 
             watch(guest) {
@@ -73,7 +73,7 @@ class GuestSocketIT {
 
     @Test
     fun `TC-3-GWS-02 another guest's trip is not found, and the socket stays open`() =
-        testApp {
+        socketApp {
             val someoneElses = api().created(TestTokens.guest())
             val own = api().created(guest)
 
@@ -88,7 +88,7 @@ class GuestSocketIT {
 
     @Test
     fun `TC-3-GWS-03 a batch from the assigned driver reaches the guest as position, then progress`() =
-        testApp {
+        socketApp {
             val trip = api().created(guest)
             api().act(trip.id, "accept", driver)
 
@@ -108,7 +108,7 @@ class GuestSocketIT {
 
     @Test
     fun `TC-3-GWS-04 when the trip is completed the guest gets the event, then the socket closes with 1000`() =
-        testApp {
+        socketApp {
             val trip = api().created(guest)
             api().moved(trip.id, driver, "accept", "arrive", "start")
 
@@ -128,7 +128,7 @@ class GuestSocketIT {
     fun `TC-3-GWS-05 a guest who leaves is no longer a subscriber`() {
         val bus = InMemoryLiveUpdateBus()
         val ownBus = module { single { bus } binds arrayOf(LiveUpdateBus::class, LiveUpdates::class) }
-        testApp(overrides = listOf(ownBus)) {
+        socketApp(overrides = listOf(ownBus)) {
             val trip = api().created(guest)
             val tripId = UUID.fromString(trip.id)
 
@@ -144,7 +144,7 @@ class GuestSocketIT {
 
     @Test
     fun `a driver token on the guest socket closes it with 4403`() =
-        testApp {
+        socketApp {
             wsClient().webSocket(GUEST, request = { bearerAuth(driver) }) {
                 closeReason.await()?.code shouldBe WsCloseCodes.FORBIDDEN_ROLE
             }
@@ -152,7 +152,7 @@ class GuestSocketIT {
 
     @Test
     fun `a socket watches one trip only`() =
-        testApp {
+        socketApp {
             val trip = api().created(guest)
 
             watch(guest) {
@@ -166,7 +166,7 @@ class GuestSocketIT {
 
     @Test
     fun `a finished trip is answered with its last state, then the socket closes`() =
-        testApp {
+        socketApp {
             val trip = api().created(guest)
             api().act(trip.id, "cancel", guest)
 
@@ -180,11 +180,11 @@ class GuestSocketIT {
 
     // ---- helpers -----------------------------------------------------------------------------------------------
 
-    private fun ApplicationTestBuilder.api() = TripApi(client)
+    private fun SocketTestApp.api() = TripApi(client)
 
-    private fun ApplicationTestBuilder.wsClient(): HttpClient = createClient { install(WebSockets) }
+    private fun SocketTestApp.wsClient(): HttpClient = createClient { install(WebSockets) }
 
-    private suspend fun ApplicationTestBuilder.watch(
+    private suspend fun SocketTestApp.watch(
         token: String,
         block: suspend DefaultClientWebSocketSession.() -> Unit,
     ) = wsClient().webSocket(GUEST, request = { bearerAuth(token) }) { withTimeout(10.seconds) { block() } }
@@ -224,7 +224,7 @@ class GuestSocketIT {
     }
 
     /** The assigned driver sends one batch of 3 fixes, [metersFromPickup] south of the pickup, over their own socket. */
-    private suspend fun ApplicationTestBuilder.sendDriverBatch(metersFromPickup: Double) {
+    private suspend fun SocketTestApp.sendDriverBatch(metersFromPickup: Double) {
         val now = Instant.fromEpochMilliseconds(System.currentTimeMillis())
         val fixes =
             (0..2).map {

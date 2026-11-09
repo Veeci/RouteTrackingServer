@@ -6,7 +6,6 @@ import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.client.request.get
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationStopPreparing
-import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
 import org.junit.jupiter.api.Test
@@ -14,15 +13,16 @@ import org.koin.ktor.ext.get
 import org.testcontainers.junit.jupiter.Testcontainers
 import veeci.practicing.rts.platform.events.OutboxRelay
 import veeci.practicing.rts.platform.ws.WsSessionRegistry
+import veeci.practicing.rts.testing.SocketTestApp
 import veeci.practicing.rts.testing.shouldMatchContract
-import veeci.practicing.rts.testing.testApp
+import veeci.practicing.rts.testing.socketApp
 
 /** Raises the event a real stop (SIGTERM) starts with, then checks what clients observe. */
 @Testcontainers(disabledWithoutDocker = true)
 class GracefulShutdownIT {
     @Test
     fun `TC-1-SHD-01 stopping says goodbye to open sockets with 1001`() =
-        testApp {
+        socketApp {
             createClient { install(WebSockets) }.webSocket("/ws/v1/echo") {
                 send(Frame.Text("{}"))
                 incoming.receive() // the session is established
@@ -35,7 +35,7 @@ class GracefulShutdownIT {
 
     @Test
     fun `stopping turns readiness DOWN so load balancers stop routing here`() =
-        testApp {
+        socketApp {
             client.get("/health/ready").status shouldBe HttpStatusCode.OK
 
             beginShutdown()
@@ -47,7 +47,7 @@ class GracefulShutdownIT {
 
     @Test
     fun `stopping ends the relay and every socket before the connection pool closes`() =
-        testApp {
+        socketApp {
             createClient { install(WebSockets) }.webSocket("/ws/v1/echo") {
                 send(Frame.Text("{}"))
                 incoming.receive() // the session is established
@@ -64,5 +64,5 @@ class GracefulShutdownIT {
             }
         }
 
-    private fun ApplicationTestBuilder.beginShutdown() = application.monitor.raise(ApplicationStopPreparing, application.environment)
+    private fun SocketTestApp.beginShutdown() = application.monitor.raise(ApplicationStopPreparing, application.environment)
 }
