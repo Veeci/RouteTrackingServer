@@ -11,6 +11,7 @@ import kotlinx.coroutines.launch
 import org.slf4j.LoggerFactory
 import veeci.practicing.rts.live.application.api.DriverPositionUpdate
 import veeci.practicing.rts.live.application.api.LiveUpdate
+import veeci.practicing.rts.live.application.api.TripMomentUpdate
 import veeci.practicing.rts.live.application.api.TripProgressUpdate
 import veeci.practicing.rts.live.application.api.TripStatusUpdate
 import veeci.practicing.rts.live.application.port.out.LiveUpdateBus
@@ -127,6 +128,12 @@ class GuestSocket(
 
             is TripProgressUpdate -> {
                 send(TripProgress(update.tripId.toString(), update.target, update.remainingM, update.etaS, update.basis))
+                true
+            }
+
+            is TripMomentUpdate -> {
+                // The protocol names events in lower case: DRIVER_ARRIVING travels as driver_arriving.
+                send(TripEvent(update.tripId.toString(), update.kind.lowercase(), update.status.name, update.at, update.remainingM))
                 true
             }
 

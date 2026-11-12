@@ -4,18 +4,24 @@ import org.koin.core.module.Module
 import org.koin.dsl.bind
 import org.koin.dsl.module
 import veeci.practicing.rts.platform.events.OutboxEventHandler
+import veeci.practicing.rts.trip.adapter.inbound.event.ArrivalListener
 import veeci.practicing.rts.trip.adapter.inbound.event.FixesAcceptedListener
 import veeci.practicing.rts.trip.adapter.inbound.event.TripFinishedListener
 import veeci.practicing.rts.trip.adapter.out.live.LiveProgressPublisher
 import veeci.practicing.rts.trip.adapter.out.memory.InMemoryProgressStateStore
+import veeci.practicing.rts.trip.adapter.out.persistence.ExposedArrivalStateStore
 import veeci.practicing.rts.trip.adapter.out.persistence.ExposedTripEventOutbox
+import veeci.practicing.rts.trip.adapter.out.persistence.ExposedTripMomentRepository
 import veeci.practicing.rts.trip.adapter.out.persistence.ExposedTripRepository
+import veeci.practicing.rts.trip.application.TripEventService
 import veeci.practicing.rts.trip.application.TripProgressService
 import veeci.practicing.rts.trip.application.TripService
 import veeci.practicing.rts.trip.application.api.TripQuery
+import veeci.practicing.rts.trip.application.port.out.ArrivalStateStore
 import veeci.practicing.rts.trip.application.port.out.ProgressPublisher
 import veeci.practicing.rts.trip.application.port.out.ProgressStateStore
 import veeci.practicing.rts.trip.application.port.out.TripEventOutbox
+import veeci.practicing.rts.trip.application.port.out.TripMomentRepository
 import veeci.practicing.rts.trip.application.port.out.TripRepository
 
 /**
@@ -33,4 +39,10 @@ fun tripModule(): Module =
         single { TripProgressService(get(), get(), get(), get()) }
         single { FixesAcceptedListener(get()) } bind OutboxEventHandler::class
         single { TripFinishedListener(get()) } bind OutboxEventHandler::class
+
+        // Phase 4: moments and auto-arrive, decided inside the relay's transaction.
+        single<TripMomentRepository> { ExposedTripMomentRepository() }
+        single<ArrivalStateStore> { ExposedArrivalStateStore() }
+        single { TripEventService(get(), get(), get(), get(), get(), get()) }
+        single { ArrivalListener(get()) } bind OutboxEventHandler::class
     }

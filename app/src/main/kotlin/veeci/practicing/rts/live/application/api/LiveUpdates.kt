@@ -34,6 +34,17 @@ data class TripStatusUpdate(
     val at: Instant,
 ) : LiveUpdate
 
+/** Something happened on the trip that is not a change of stage, for example "driver arriving". */
+data class TripMomentUpdate(
+    override val tripId: UUID,
+    /** The moment's kind, for example DRIVER_ARRIVING. */
+    val kind: String,
+    /** The trip's stage when it happened. */
+    val status: TripStatus,
+    val at: Instant,
+    val remainingM: Double?,
+) : LiveUpdate
+
 /** The live context's public API: other contexts hand it updates; it delivers them to the watching guests. */
 interface LiveUpdates {
     /** Never waits: a slow guest loses old updates instead of slowing down the caller. */

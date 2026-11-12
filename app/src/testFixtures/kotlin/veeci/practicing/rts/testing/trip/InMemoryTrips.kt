@@ -5,12 +5,16 @@ import kotlinx.coroutines.sync.withLock
 import veeci.practicing.rts.shared.DomainException
 import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.shared.geo.GeoPoint
+import veeci.practicing.rts.trip.application.port.out.ArrivalStateStore
 import veeci.practicing.rts.trip.application.port.out.TripCursor
 import veeci.practicing.rts.trip.application.port.out.TripEventOutbox
+import veeci.practicing.rts.trip.application.port.out.TripMomentRepository
 import veeci.practicing.rts.trip.application.port.out.TripRepository
+import veeci.practicing.rts.trip.domain.ArrivalState
 import veeci.practicing.rts.trip.domain.Trip
 import veeci.practicing.rts.trip.domain.TripError
 import veeci.practicing.rts.trip.domain.TripId
+import veeci.practicing.rts.trip.domain.event.TripMoment
 import veeci.practicing.rts.trip.domain.event.TripStatus
 import veeci.practicing.rts.trip.domain.event.TripStatusChanged
 import kotlin.time.Instant
@@ -86,11 +90,39 @@ class InMemoryTripRepository : TripRepository {
     private fun Trip.toRow(version: Long) = Row(id, guestId, driverId, pickup, destination, status, createdAt, updatedAt, version)
 }
 
-/** Keeps the events, in order, for assertions. */
+/** Keeps the events and moments, in order, for assertions. */
 class InMemoryTripEventOutbox : TripEventOutbox {
     val events = mutableListOf<TripStatusChanged>()
+    val moments = mutableListOf<TripMoment>()
 
     override suspend fun add(event: TripStatusChanged) {
         events += event
+    }
+
+    override suspend fun add(moment: TripMoment) {
+        moments += moment
+    }
+}
+
+/** The stored moments, in order. */
+class InMemoryTripMomentRepository : TripMomentRepository {
+    val moments = mutableListOf<TripMoment>()
+
+    override suspend fun append(moment: TripMoment) {
+        moments += moment
+    }
+}
+
+/** Arrival state per trip. No locking: the unit tests run one batch at a time. */
+class InMemoryArrivalStateStore : ArrivalStateStore {
+    val states = mutableMapOf<TripId, ArrivalState>()
+
+    override suspend fun lock(trip: TripId): ArrivalState = states[trip] ?: ArrivalState()
+
+    override suspend fun save(
+        trip: TripId,
+        state: ArrivalState,
+    ) {
+        states[trip] = state
     }
 }

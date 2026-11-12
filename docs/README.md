@@ -12,6 +12,7 @@ and observability from day one.
 | Area | Doc | What it answers |
 |---|---|---|
 | Product | [product/features.md](product/features.md) | What we build and for whom |
+| | [product/decisions.md](product/decisions.md) | Every business rule, who decided it, and the open product questions |
 | Architecture | [architecture/overview.md](architecture/overview.md) | Bounded contexts, layers, boundaries, key decisions |
 | | [architecture/conventions.md](architecture/conventions.md) | Services & transactions, errors (RFC 9457), REST design, config, persistence, security, observability, delivery |
 | | [architecture/protocol.md](architecture/protocol.md) | WebSocket message contract, ACK/resume semantics (formalised in AsyncAPI) |

@@ -5,6 +5,7 @@ import veeci.practicing.rts.shared.DomainException
 import veeci.practicing.rts.shared.Role
 import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.shared.geo.GeoPoint
+import veeci.practicing.rts.trip.domain.event.StatusCause
 import veeci.practicing.rts.trip.domain.event.TripStatus
 import veeci.practicing.rts.trip.domain.event.TripStatus.ACCEPTED
 import veeci.practicing.rts.trip.domain.event.TripStatus.ARRIVED
@@ -37,6 +38,9 @@ enum class TripAction { ACCEPT, ARRIVE, START, COMPLETE, CANCEL }
  * | ARRIVED                      | START    | the assigned driver      | IN_PROGRESS |
  * | IN_PROGRESS                  | COMPLETE | the assigned driver      | COMPLETED   |
  * | REQUESTED, ACCEPTED, ARRIVED | CANCEL   | the guest or the driver  | CANCELLED   |
+ *
+ * The server itself may also move an ACCEPTED trip to ARRIVED ([autoArrive]), when the arrival rules see the
+ * driver at the pickup.
  *
  * Every change records a [TripStatusChanged]; the service writes it to the outbox in the same transaction.
  */
@@ -81,6 +85,20 @@ class Trip private constructor(
     }
 
     /**
+     * The arrival rules saw the driver at the pickup: the trip moves to ARRIVED. No person acts, so nobody is
+     * authorized; the change is recorded with cause AUTO. Returns false, and changes nothing, when the trip is no
+     * longer ACCEPTED (the driver marked it arrived first, or it was cancelled).
+     */
+    fun autoArrive(now: Instant): Boolean {
+        if (status != ACCEPTED) return false
+        val target = TRANSITIONS.getValue(ACCEPTED to TripAction.ARRIVE)
+        record(from = status, to = target, now, StatusCause.AUTO)
+        status = target
+        updatedAt = now
+        return true
+    }
+
+    /**
      * Whether [actor] may know that this trip exists. A guest sees their own trips, a driver sees open
      * (REQUESTED) trips and the trips assigned to them, an admin sees every trip.
      */
@@ -110,8 +128,9 @@ class Trip private constructor(
         from: TripStatus?,
         to: TripStatus,
         at: Instant,
+        cause: StatusCause = StatusCause.USER,
     ) {
-        events += TripStatusChanged(id.value, guestId.value, driverId?.value, from, to, at)
+        events += TripStatusChanged(id.value, guestId.value, driverId?.value, from, to, at, cause)
     }
 
     private fun TripAction.done(): String =

@@ -147,7 +147,7 @@ client → subscribe        { tripId }
 server → subscribed       { trip: { tripId, status, pickup, destination, driverId?, updatedAt } }
 server → driver_position  { tripId, lat, lng, bearingDeg?, speedMps?, recordedAt }
 server → trip_progress    { tripId, target: PICKUP | DESTINATION, remainingM, etaS, basis: STRAIGHT_LINE }
-server → trip_event       { tripId, event: status_changed, status, at }
+server → trip_event       { tripId, event: status_changed | driver_arriving, status, at, remainingM? }
 server → route_updated    { tripId, polyline, distanceM }                    // phase 7
 ```
 
@@ -163,6 +163,12 @@ server → route_updated    { tripId, polyline, distanceM }                    /
   so a waiting driver does not give an endless ETA.
 - `trip_event` is sent for each change of stage; the server reads the trip again first, so `status` is always
   the trip's current stage. When changes come quickly, a stage in between may be skipped.
+- `trip_event` with `event: driver_arriving` (phase 4) says the driver came within 200 m of the pickup for 2 fixes in
+  a row. `status` is the stage at that time and `remainingM` the straight-line distance. It is sent again only
+  after the driver was beyond 300 m for 2 fixes in a row. Phase 4 adds more `event` values, so a client must
+  ignore values it does not know; `status` is always present, so older clients keep decoding the message.
+- When the arrival rules see the driver at the pickup, the server moves the trip to ARRIVED itself, and the guest
+  gets the usual `status_changed` with `status: ARRIVED`.
 - After a final stage (COMPLETED, CANCELLED) the server sends that `trip_event` and closes the socket with 1000.
   A `subscribe` to a trip that has already ended gets `subscribed` and then the same close.
 
