@@ -5,6 +5,8 @@ import io.ktor.server.websocket.DefaultWebSocketServerSession
 import io.ktor.server.websocket.webSocket
 import io.ktor.websocket.CloseReason
 import io.ktor.websocket.close
+import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.Timer
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.slf4j.LoggerFactory
@@ -28,6 +30,7 @@ import veeci.practicing.rts.shared.Role
 import veeci.practicing.rts.tracking.application.TrackingService
 import veeci.practicing.rts.tracking.domain.SessionId
 import java.time.Clock
+import java.util.concurrent.TimeUnit
 import kotlin.time.Duration
 import kotlin.time.toKotlinInstant
 
@@ -46,8 +49,21 @@ class DriverSocket(
     private val clock: Clock,
     private val limits: LimitsDto,
     private val handshakeTimeout: Duration,
+    metrics: MeterRegistry,
 ) {
     private val log = LoggerFactory.getLogger(DriverSocket::class.java)
+
+    /** rts_fixes_ingested_total{result}: fixes of newly stored batches; a resent batch is not counted again. */
+    private val fixesAccepted = metrics.counter("rts.fixes.ingested", "result", "accepted")
+    private val fixesRejected = metrics.counter("rts.fixes.ingested", "result", "rejected")
+
+    /** rts_ack_latency_seconds: from a batch's arrival to its ack (the commit is inside). */
+    private val ackLatency =
+        Timer
+            .builder("rts.ack.latency")
+            .description("Time from receiving a fix batch to sending its ack")
+            .publishPercentileHistogram()
+            .register(metrics)
 
     suspend fun serve(
         socket: DefaultWebSocketServerSession,
@@ -117,9 +133,15 @@ class DriverSocket(
         session: SessionId,
         batch: FixBatch,
     ) {
+        val started = System.nanoTime()
         answer(correlatesTo = batch.seq) {
             val result = tracking.ingest(DriverMessageMapper.ingest(session, batch))
             send(Ack(result.seq, result.accepted, result.rejected.map { RejectionDto(it.index, it.reason.name) }))
+            ackLatency.record(System.nanoTime() - started, TimeUnit.NANOSECONDS)
+            if (!result.duplicate) {
+                fixesAccepted.increment(result.accepted.toDouble())
+                fixesRejected.increment(result.rejected.size.toDouble())
+            }
         }
     }
 

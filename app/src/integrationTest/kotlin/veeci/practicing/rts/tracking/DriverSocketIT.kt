@@ -8,6 +8,8 @@ import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.client.request.bearerAuth
+import io.ktor.client.request.get
+import io.ktor.client.statement.bodyAsText
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
 import kotlinx.coroutines.CompletableDeferred
@@ -204,6 +206,32 @@ class DriverSocketIT {
                 closeReason.await()?.code shouldBe WsCloseCodes.HANDSHAKE_TIMEOUT
             }
         }
+
+    @Test
+    fun `TC-4-MET-01 after 3 acked batches the metrics count their fixes, their ack times and the open session`() =
+        socketApp {
+            driver {
+                handshake()
+                for (seq in 1L..3L) {
+                    sendMessage(batch(seq))
+                    receiveMessage().shouldBeInstanceOf<Ack>()
+                }
+                metric("rts_driver_sessions_active") shouldBe 1.0
+            }
+
+            metric("""rts_fixes_ingested_total{result="accepted"}""") shouldBe 6.0 // 2 fixes per batch
+            metric("rts_ack_latency_seconds_count") shouldBe 3.0
+        }
+
+    /** The value of one line of /metrics, found by its name and labels. */
+    private suspend fun SocketTestApp.metric(series: String): Double =
+        client
+            .get("/metrics")
+            .bodyAsText()
+            .lines()
+            .single { it.startsWith("$series ") }
+            .substringAfterLast(' ')
+            .toDouble()
 
     @Test
     fun `TC-2-WS-08 an oversized batch gets BATCH_TOO_LARGE for its seq and no ack`() =

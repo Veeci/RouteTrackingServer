@@ -63,7 +63,7 @@ class WsSession internal constructor(
 
 /** Every open session: shutdown says goodbye to each (step 10), and /metrics shows how many there are. */
 class WsSessionRegistry(
-    metrics: MeterRegistry,
+    private val metrics: MeterRegistry,
 ) {
     private val sessions = ConcurrentHashMap.newKeySet<WsSession>()
 
@@ -73,7 +73,18 @@ class WsSessionRegistry(
 
     val size: Int get() = sessions.size
 
-    internal fun add(session: WsSession) = sessions.add(session)
+    private val endpointGauges = ConcurrentHashMap.newKeySet<String>()
+
+    internal fun add(session: WsSession): Boolean {
+        // rts_driver_sessions_active, rts_guest_sessions_active: one gauge per endpoint, made on its first session.
+        if (endpointGauges.add(session.endpoint)) {
+            metrics.gauge(
+                "rts.${session.endpoint}.sessions.active",
+                sessions,
+            ) { all -> all.count { it.endpoint == session.endpoint }.toDouble() }
+        }
+        return sessions.add(session)
+    }
 
     internal fun remove(session: WsSession) = sessions.remove(session)
 

@@ -12,6 +12,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeoutOrNull
 import veeci.practicing.rts.protocol.Ack
 import veeci.practicing.rts.protocol.ClientMessage
+import veeci.practicing.rts.protocol.DeviceStatus
 import veeci.practicing.rts.protocol.ErrorMessage
 import veeci.practicing.rts.protocol.FixBatch
 import veeci.practicing.rts.protocol.FixDto
@@ -44,6 +45,9 @@ class DriverClient(
     private val onAck: (Ack) -> Unit = {},
     private val onConnectionFailed: (Exception) -> Unit = {},
 ) {
+    /** What the phone does around each batch besides sending it: heartbeats, silences. */
+    var hooks: BatchHooks = BatchHooks.NONE
+
     private val outbox = ArrayDeque<FixBatch>()
     private var nextSeq = 1L
 
@@ -117,8 +121,9 @@ class DriverClient(
             }
             var acked = 0
             while (outbox.isNotEmpty() && acked < maxBatches) {
-                delay(pace)
                 val batch = outbox.first()
+                delay(pace + hooks.pauseBefore(batch))
+                hooks.statusBefore(batch)?.let { sendMessage(it) }
                 sendMessage(batch)
                 when (val reply = receiveMessage()) {
                     is Ack -> {
@@ -155,5 +160,24 @@ class DriverClient(
         const val DEFAULT_MAX_FAILURES = 5
         val DEFAULT_ACK_TIMEOUT = 10.seconds
         val MAX_RETRY_DELAY = 30.seconds
+    }
+}
+
+/** What a simulated phone does before sending a batch, besides waiting for its pace. */
+interface BatchHooks {
+    /** A `device_status` to send right before [batch], when one is due. The server sends no reply to it. */
+    fun statusBefore(batch: FixBatch): DeviceStatus?
+
+    /** Extra silence before [batch]: a phone without network for a while. */
+    fun pauseBefore(batch: FixBatch): Duration
+
+    companion object {
+        /** Only batches, no heartbeats and no silences: the behaviour before phase 4. */
+        val NONE =
+            object : BatchHooks {
+                override fun statusBefore(batch: FixBatch): DeviceStatus? = null
+
+                override fun pauseBefore(batch: FixBatch) = Duration.ZERO
+            }
     }
 }

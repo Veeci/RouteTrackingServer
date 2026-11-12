@@ -1,5 +1,6 @@
 package veeci.practicing.rts.live.adapter.inbound.event
 
+import io.micrometer.core.instrument.MeterRegistry
 import kotlinx.serialization.json.JsonElement
 import veeci.practicing.rts.live.application.api.LiveUpdates
 import veeci.practicing.rts.live.application.api.TripStatusUpdate
@@ -13,11 +14,13 @@ import veeci.practicing.rts.trip.domain.event.TripStatusChangedV1
  */
 class TripStatusListener(
     private val live: LiveUpdates,
+    private val metrics: MeterRegistry,
 ) : OutboxEventHandler {
     override val eventType = TripStatusChangedV1.TYPE
 
     override suspend fun handle(payload: JsonElement) {
         val event = EventJson.decodeFromJsonElement(TripStatusChangedV1.serializer(), payload).toEvent()
+        metrics.counter("rts.trip.events", "type", "status_changed").increment()
         live.publish(TripStatusUpdate(event.tripId, event.to, event.at))
     }
 }

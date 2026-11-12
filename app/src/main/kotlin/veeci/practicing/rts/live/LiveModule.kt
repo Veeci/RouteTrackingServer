@@ -16,7 +16,7 @@ import veeci.practicing.rts.platform.events.OutboxEventHandler
 fun liveModule(): Module =
     module {
         single { InMemoryLiveUpdateBus() } binds arrayOf(LiveUpdateBus::class, LiveUpdates::class)
-        single { TripStatusListener(get()) } bind OutboxEventHandler::class
-        single { TripMomentListener(get()) } bind OutboxEventHandler::class
+        single { TripStatusListener(get(), get()) } bind OutboxEventHandler::class
+        single { TripMomentListener(get(), get()) } bind OutboxEventHandler::class
         single { GuestSocket(get(), get(), get()) }
     }

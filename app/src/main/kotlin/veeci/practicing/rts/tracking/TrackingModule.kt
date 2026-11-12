@@ -44,6 +44,6 @@ fun trackingModule(
         single<DriverPresence> { TrackingPresence(get(), get()) }
         single {
             val limits = LimitsDto(config.maxFixesPerBatch, ws.maxFrameBytes, ws.messagesPerSecond)
-            DriverSocket(get(), get(), get(), limits, config.handshakeTimeout)
+            DriverSocket(get(), get(), get(), limits, config.handshakeTimeout, get())
         }
     }

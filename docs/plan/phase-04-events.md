@@ -164,6 +164,28 @@ end-to-end tests pass.
 Found on the way: a JUnit test written as `fun test() = runBlocking { ... x shouldBe y }` returns the Boolean of
 its last line, and JUnit skips non-void methods without a word. The lock test declares `: Unit`.
 
+## As built: slice 4d (metrics and simulator)
+
+Metrics on `/metrics` (Prometheus names):
+
+| Metric | Type | Where |
+|---|---|---|
+| `rts_driver_sessions_active`, `rts_guest_sessions_active` | gauge | `WsSessionRegistry`, one gauge per endpoint, made on its first session |
+| `rts_fixes_ingested_total{result=accepted\|rejected}` | counter | `DriverSocket`, for newly stored batches only (a resend is not counted again) |
+| `rts_ack_latency_seconds` | histogram | `DriverSocket`, from a batch's arrival to its ack, with the commit inside |
+| `rts_trip_events_total{type}` | counter | live listeners, on delivery to guests (`status_changed`, `driver_arriving`, ...). A delivery the relay retries counts again |
+
+Simulator (`simulator driver`):
+- A `device_status` every 30 s of route time, like the SDK's heartbeat. `--battery N` sets the start level
+  (default 80) and `--battery-drain P` the percent lost per minute of route time.
+- `--pause-at S:D`: after S seconds of route, the phone sends nothing for D real seconds. With the server's
+  60 s stale time, `--pause-at 120:70` shows `driver_stale`, then `driver_back`.
+- `DeviceScript` decides both; `DriverClient.hooks` (`BatchHooks`) runs them before each batch.
+- `simulator guest` prints every `trip_event` kind in words.
+
+Tests: TC-4-MET-01 (3 acked batches give 6 accepted fixes, 3 ack timings and 1 open driver session), the trip
+events counter after arriving, and `DeviceScriptTest`. Check: 246 unit, 183 integration and 9 end-to-end tests pass.
+
 ## Tasks
 
 - [x] T4.1 (4a: arriving and arrived rules) `TripEvent` hierarchy, rule functions, `EventRulesConfig`.
@@ -173,8 +195,8 @@ its last line, and JUnit skips non-void methods without a word. The lock test de
 - [x] T4.5 `platform/jobs` scheduler with advisory lock; `StaleDriverJob`; `PresenceStore`.
 - [x] T4.6 (V8, V9) V5 migration, repositories, contract tests.
 - [x] T4.7 (without the dedupe) `live`: `TripEventRaised` → `trip_event` frames, dedupe by event id.
-- [ ] T4.8 Domain metrics.
-- [ ] T4.9 Simulator: `--battery-drain` and `--pause-at <seconds>:<duration>` to trigger low-battery and stale.
+- [x] T4.8 Domain metrics.
+- [x] T4.9 Simulator: `--battery-drain` and `--pause-at <seconds>:<duration>` to trigger low-battery and stale.
 
 ## Test plan
 

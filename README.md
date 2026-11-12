@@ -49,6 +49,7 @@ Every `/api/v1/trips` route and both WebSockets need an access token. In dev, ge
 | `./gradlew koverHtmlReport` | Coverage report → `build/reports/kover/html/index.html` | yes |
 | `./gradlew :tools:simulator:run --args="token --role DRIVER"` | Create a user and print an access token (dev and test servers) | server running |
 | `./gradlew :tools:simulator:run --args="driver --token T --gpx routes/city_loop.gpx"` | Fake driver that replays a GPX route against the server | server running |
+| `... --args="driver --token T --battery 20 --battery-drain 2 --pause-at 120:70"` | Same, with a draining battery (low-battery notice) and a 70 s silence (stale, then back) | server running |
 | `./gradlew :tools:simulator:run --args="guest --token T --trip ID"` | Fake guest that prints a trip's live positions, ETA and stages | server running |
 
 Local stack:
