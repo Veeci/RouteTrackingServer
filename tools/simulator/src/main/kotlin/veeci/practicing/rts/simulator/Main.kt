@@ -14,12 +14,14 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import veeci.practicing.rts.protocol.Ack
 import veeci.practicing.rts.protocol.DriverPosition
+import veeci.practicing.rts.protocol.FixBatch
 import veeci.practicing.rts.protocol.GuestServerMessage
 import veeci.practicing.rts.protocol.ProtocolJson
 import veeci.practicing.rts.protocol.Subscribed
 import veeci.practicing.rts.protocol.TripEvent
 import veeci.practicing.rts.protocol.TripProgress
 import kotlin.system.exitProcess
+import kotlin.time.Duration
 import kotlin.time.Instant
 
 private const val USAGE = """Usage: simulator <command> [options]
@@ -36,6 +38,10 @@ simulator driver --token TOKEN [options]
   --speedup N               replay N times faster  (default 10)
   --disconnect-every N      reconnect after N acks (default 0 = never)
   --device ID               device id              (default dev-sim-1)
+  --battery N               battery at the start   (default 80); a device_status every 30 s of route time
+  --battery-drain P         percent lost per minute of route time (default 0); try --battery 20 --battery-drain 2
+  --pause-at S:D            after S seconds of route, send nothing for D real seconds (default none);
+                            with the server's 60 s stale time, 120:70 shows driver_stale, then driver_back
 
 simulator guest --token TOKEN --trip TRIP_ID [--url URL]
   Watches a trip live and prints every position, progress update and status change.
@@ -93,10 +99,28 @@ private suspend fun watch(options: Map<String, String>): Boolean {
 
 private fun GuestServerMessage.describe(): String =
     when (this) {
-        is Subscribed -> "Watching trip ${trip.tripId}: ${trip.status}"
-        is DriverPosition -> "Driver at ${lat.rounded()}, ${lng.rounded()} (${speedMps?.let { "${it.rounded(1)} m/s" } ?: "speed unknown"})"
-        is TripProgress -> "${remainingM.toInt()} m to the ${target.lowercase()}, about ${etaS.toInt()} s (${basis.lowercase()})"
-        is TripEvent -> "Trip is now $status"
+        is Subscribed -> {
+            "Watching trip ${trip.tripId}: ${trip.status}"
+        }
+
+        is DriverPosition -> {
+            "Driver at ${lat.rounded()}, ${lng.rounded()} (${speedMps?.let { "${it.rounded(1)} m/s" } ?: "speed unknown"})"
+        }
+
+        is TripProgress -> {
+            "${remainingM.toInt()} m to the ${target.lowercase()}, about ${etaS.toInt()} s (${basis.lowercase()})"
+        }
+
+        is TripEvent -> {
+            when (event) {
+                TripEvent.STATUS_CHANGED -> "Trip is now $status"
+                TripEvent.DRIVER_ARRIVING -> "Driver arriving: ${remainingM?.toInt()} m to the pickup"
+                TripEvent.DRIVER_LOW_BATTERY -> "Driver's phone battery is low: $levelPercent %"
+                TripEvent.DRIVER_STALE -> "Connection to the driver lost (last heard $lastSeenAt)"
+                TripEvent.DRIVER_BACK -> "Driver is back online"
+                else -> "Trip event $event"
+            }
+        }
     }
 
 private fun Double.rounded(decimals: Int = 5): String = "%.${decimals}f".format(this)
@@ -109,6 +133,7 @@ private class DriverOptions(
     val disconnectEvery: Int,
     val device: String,
     val token: String?,
+    val phone: DeviceSettings,
 ) {
     companion object {
         fun of(values: Map<String, String>) =
@@ -120,6 +145,12 @@ private class DriverOptions(
                 disconnectEvery = values["disconnect-every"]?.toInt() ?: 0,
                 device = values["device"] ?: "dev-sim-1",
                 token = values["token"],
+                phone =
+                    DeviceSettings(
+                        battery = values["battery"]?.toInt() ?: DeviceScript.DEFAULT_BATTERY,
+                        batteryDrain = values["battery-drain"]?.toDouble() ?: 0.0,
+                        pause = values["pause-at"]?.let(DeviceScript::parsePause),
+                    ),
             )
     }
 }
@@ -130,6 +161,22 @@ private suspend fun replay(options: DriverOptions): Boolean {
     val interval = (points.last().time - points.first().time) / (points.size - 1)
     val pace = interval * options.batchSize / options.speedup
     val stats = Stats()
+    val script =
+        DeviceScript(
+            routeStart = fixes.first().recordedAt,
+            batteryPercent = options.phone.battery,
+            drainPerMinute = options.phone.batteryDrain,
+            pauseAt = options.phone.pause?.first,
+            pauseFor = options.phone.pause?.second ?: Duration.ZERO,
+        )
+    // The script, plus a line on the console for each heartbeat and silence.
+    val hooks =
+        object : BatchHooks {
+            override fun statusBefore(batch: FixBatch) =
+                script.statusBefore(batch)?.also { println("Battery ${it.battery.levelPercent} %") }
+
+            override fun pauseBefore(batch: FixBatch) = script.pauseBefore(batch).also { if (it > Duration.ZERO) println("Silent for $it") }
+        }
     HttpClient(CIO) { install(WebSockets) }.use { http ->
         val client =
             DriverClient(
@@ -140,7 +187,7 @@ private suspend fun replay(options: DriverOptions): Boolean {
                 onWelcome = { println("Connected; the server resumes from seq ${it.resumeFromSeq}") },
                 onAck = stats::record,
                 onConnectionFailed = { println("Connection failed (${it.message}); trying again") },
-            )
+            ).also { it.hooks = hooks }
         fixes.chunked(options.batchSize).forEach(client::enqueue)
         println("Session ${client.sessionId}: ${fixes.size} fixes in ${client.pending} batches, one batch every $pace")
         val succeeded = client.sendAll(pace, batchesPerConnection = options.disconnectEvery.takeIf { it > 0 } ?: Int.MAX_VALUE)
@@ -148,6 +195,13 @@ private suspend fun replay(options: DriverOptions): Boolean {
         return succeeded
     }
 }
+
+/** `--battery`, `--battery-drain` and `--pause-at`. */
+private class DeviceSettings(
+    val battery: Int,
+    val batteryDrain: Double,
+    val pause: Pair<Duration, Duration>?,
+)
 
 private class Stats {
     private var batches = 0
