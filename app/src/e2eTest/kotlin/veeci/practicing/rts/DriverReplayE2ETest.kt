@@ -10,7 +10,7 @@ import veeci.practicing.rts.simulator.DriverClient
 import veeci.practicing.rts.simulator.GpxReader
 import veeci.practicing.rts.simulator.toFixes
 import veeci.practicing.rts.testing.TestTokens
-import veeci.practicing.rts.testing.testApp
+import veeci.practicing.rts.testing.socketApp
 import kotlin.time.Duration.Companion.seconds
 
 /** The simulator's driver client replays recorded routes against the real application and Postgres. */
@@ -18,7 +18,7 @@ import kotlin.time.Duration.Companion.seconds
 class DriverReplayE2ETest {
     @Test
     fun `TC-2-E2E-01 a 2 km route is stored completely, and its running total is 2 km`() =
-        testApp {
+        socketApp {
             val acks = mutableListOf<Ack>()
             val client =
                 DriverClient(
@@ -41,7 +41,7 @@ class DriverReplayE2ETest {
 
     @Test
     fun `reconnecting every 5 batches stores each batch exactly once`() =
-        testApp {
+        socketApp {
             val client = DriverClient(createClient { install(WebSockets) }, DRIVER_PATH, "e2e-reconnect", token = TestTokens.driver())
             routeFixes("routes/city_loop.gpx").chunked(10).forEach(client::enqueue)
 
@@ -53,7 +53,7 @@ class DriverReplayE2ETest {
 
     @Test
     fun `TC-2-E2E-03 a 90 s gap in a tunnel is accepted, because the speed across it is plausible`() =
-        testApp {
+        socketApp {
             val points = GpxReader.load("routes/tunnel_gap.gpx")
             points.zipWithNext { a, b -> b.time - a.time }.max() shouldBe 90.seconds // the fixture really has the gap
             val fixes = points.toFixes(now())
