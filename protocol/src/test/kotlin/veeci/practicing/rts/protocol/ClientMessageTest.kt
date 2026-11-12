@@ -52,7 +52,7 @@ class ClientMessageTest {
 
     @Test
     fun `an unknown message type fails decoding, so the socket can answer UNKNOWN_MESSAGE`() {
-        shouldThrow<SerializationException> { decode("""{"type":"device_status","at":"2026-09-30T02:15:04Z"}""") }
+        shouldThrow<SerializationException> { decode("""{"type":"sky_view","at":"2026-09-30T02:15:04Z"}""") }
     }
 
     @Test

@@ -117,12 +117,34 @@ Tests: TC-4-ARV-01 to 05, TC-4-ARD-01 to 04, TC-4-PER-01 and 02, TC-4-WS-01 (arr
 TC-4-E2E-01 (inside TC-3-E2E-01, which now waits for the automatic ARRIVED). Check: 206 unit, 173 integration and
 9 end-to-end tests pass.
 
+## As built: slice 4b (device_status and low battery)
+
+| Plan | As built | Why |
+|---|---|---|
+| `device_status` with a bad value gets `error{VALIDATION_FAILED}` | `error{INVALID_MESSAGE}` | The socket has no VALIDATION_FAILED code; INVALID_MESSAGE already means "valid JSON, wrong content" |
+| The battery `profile` is an enum (`BatteryProfile`) | Free strings for `profile` and `motion`; the rule only knows `CRITICAL` | A new SDK value cannot break an older server |
+| Separate stores per rule | One `RuleStateStore` port (`lockArrival`, `lockBattery`, ...) and one `ExposedRuleStateStore` over `trip_rule_state` | Same table, lock and transaction for every rule |
+
+How it works:
+- The driver socket maps `device_status` (`DriverMessageMapper.reportStatus`, null for a level outside 0 to 100)
+  and calls `TrackingService.reportStatus`. It moves the session's `last_seen_at` to the server's time (4c reads it
+  for presence) and writes `DeviceStatusReported` (payload `DeviceStatusReportedV1`) to the outbox. No reply.
+- `BatteryListener` (trip) calls `TripEventService.onDeviceStatus`. For the driver's active trip (ACCEPTED,
+  ARRIVED or IN_PROGRESS) it runs `BatteryRules` with the stored state and raises `DriverLowBattery`.
+- `BatteryRules` is pure: low at 15 % or less and not charging, or profile CRITICAL; reset at 25 % or charging;
+  low wins over reset, so a CRITICAL profile while charging is still low. A status at or before the last one
+  counted is skipped.
+
+Tests: TC-4-BAT-01 to 04, TC-4-WS-01 (guest gets driver_low_battery), TC-4-WS-02 (150 % gets INVALID_MESSAGE),
+plus no reply to `device_status`, 4401 before hello, and the last-seen time. Check: 225 unit, 177 integration
+and 9 end-to-end tests pass.
+
 ## Tasks
 
 - [x] T4.1 (4a: arriving and arrived rules) `TripEvent` hierarchy, rule functions, `EventRulesConfig`.
 - [ ] T4.2 `TripEventService` + listeners for `FixesAccepted` / `DeviceStatusReported`.
 - [x] T4.3 (as `autoArrive`) System actor + auto-arrive inside the aggregate.
-- [ ] T4.4 `device_status` message in `tracking` (socket branch, mapping, event).
+- [x] T4.4 `device_status` message in `tracking` (socket branch, mapping, event).
 - [ ] T4.5 `platform/jobs` scheduler with advisory lock; `StaleDriverJob`; `PresenceStore`.
 - [ ] T4.6 V5 migration, repositories, contract tests.
 - [ ] T4.7 `live`: `TripEventRaised` → `trip_event` frames, dedupe by event id.

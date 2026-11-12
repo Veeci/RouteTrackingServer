@@ -14,6 +14,7 @@ import veeci.practicing.rts.tracking.domain.AcceptedFix
 import veeci.practicing.rts.tracking.domain.DeviceId
 import veeci.practicing.rts.tracking.domain.SessionId
 import veeci.practicing.rts.tracking.domain.TrackingSession
+import veeci.practicing.rts.tracking.domain.event.DeviceStatusReported
 import veeci.practicing.rts.tracking.domain.event.FixesAccepted
 import kotlin.time.Instant
 
@@ -96,4 +97,11 @@ class InMemoryTrackingEventOutbox : TrackingEventOutbox {
     val events: List<FixesAccepted> get() = added.toList()
 
     override suspend fun add(event: FixesAccepted) = mutex.withLock { added += event }
+
+    private val statusesAdded = mutableListOf<DeviceStatusReported>()
+
+    /** Every device status added so far, in order. */
+    val statuses: List<DeviceStatusReported> get() = statusesAdded.toList()
+
+    override suspend fun add(event: DeviceStatusReported) = mutex.withLock { statusesAdded += event }
 }

@@ -145,6 +145,15 @@ class GoldenFilesTest {
                     ClientMessage.serializer(),
                 ),
                 Sample(
+                    "device_status",
+                    DeviceStatus(
+                        at = Instant.parse("2026-09-30T02:15:30Z"),
+                        battery = BatteryDto(levelPercent = 14, isCharging = false, temperatureC = 38.5, profile = "LOW"),
+                        motion = "IN_VEHICLE",
+                    ),
+                    ClientMessage.serializer(),
+                ),
+                Sample(
                     "welcome",
                     Welcome(
                         SESSION,
@@ -199,6 +208,12 @@ class GoldenFilesTest {
                     TripEvent(TRIP, TripEvent.DRIVER_ARRIVING, "ACCEPTED", Instant.parse("2026-09-30T02:16:58Z"), remainingM = 184.2),
                     GuestServerMessage.serializer(),
                     file = "trip_event_driver_arriving",
+                ),
+                Sample(
+                    "trip_event",
+                    TripEvent(TRIP, TripEvent.DRIVER_LOW_BATTERY, "IN_PROGRESS", Instant.parse("2026-09-30T02:30:00Z"), levelPercent = 14),
+                    GuestServerMessage.serializer(),
+                    file = "trip_event_driver_low_battery",
                 ),
             )
     }

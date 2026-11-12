@@ -17,12 +17,21 @@ class TripMomentListener(
     override suspend fun handle(payload: JsonElement) {
         // A kind this version does not know (from a newer writer) is skipped.
         val moment = EventJson.decodeFromJsonElement(TripMomentRaisedV1.serializer(), payload).toMoment() ?: return
-        val remainingM = (moment as? TripMoment.DriverArriving)?.remainingM
-        live.publish(TripMomentUpdate(moment.tripId, moment.kind(), moment.status, moment.at, remainingM))
+        live.publish(
+            TripMomentUpdate(
+                moment.tripId,
+                moment.kind(),
+                moment.status,
+                moment.at,
+                remainingM = (moment as? TripMoment.DriverArriving)?.remainingM,
+                levelPercent = (moment as? TripMoment.DriverLowBattery)?.levelPercent,
+            ),
+        )
     }
 
     private fun TripMoment.kind() =
         when (this) {
             is TripMoment.DriverArriving -> TripMomentRaisedV1.KIND_DRIVER_ARRIVING
+            is TripMoment.DriverLowBattery -> TripMomentRaisedV1.KIND_DRIVER_LOW_BATTERY
         }
 }

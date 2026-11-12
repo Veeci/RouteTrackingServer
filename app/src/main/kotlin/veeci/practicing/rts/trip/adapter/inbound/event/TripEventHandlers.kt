@@ -3,6 +3,7 @@ package veeci.practicing.rts.trip.adapter.inbound.event
 import kotlinx.serialization.json.JsonElement
 import veeci.practicing.rts.platform.events.EventJson
 import veeci.practicing.rts.platform.events.OutboxEventHandler
+import veeci.practicing.rts.tracking.domain.event.DeviceStatusReportedV1
 import veeci.practicing.rts.tracking.domain.event.FixesAcceptedV1
 import veeci.practicing.rts.trip.application.TripEventService
 import veeci.practicing.rts.trip.application.TripProgressService
@@ -40,5 +41,16 @@ class ArrivalListener(
 
     override suspend fun handle(payload: JsonElement) {
         events.onFixesAccepted(EventJson.decodeFromJsonElement(FixesAcceptedV1.serializer(), payload).toEvent())
+    }
+}
+
+/** The driver's device reported its status (tracking context): check the battery. */
+class BatteryListener(
+    private val events: TripEventService,
+) : OutboxEventHandler {
+    override val eventType = DeviceStatusReportedV1.TYPE
+
+    override suspend fun handle(payload: JsonElement) {
+        events.onDeviceStatus(EventJson.decodeFromJsonElement(DeviceStatusReportedV1.serializer(), payload).toEvent())
     }
 }

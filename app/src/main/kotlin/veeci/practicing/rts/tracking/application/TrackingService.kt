@@ -18,6 +18,7 @@ import veeci.practicing.rts.tracking.domain.Rejection
 import veeci.practicing.rts.tracking.domain.SessionId
 import veeci.practicing.rts.tracking.domain.TrackingError
 import veeci.practicing.rts.tracking.domain.TrackingSession
+import veeci.practicing.rts.tracking.domain.event.DeviceStatusReported
 import veeci.practicing.rts.tracking.domain.event.FixesAccepted
 import java.time.Clock
 import kotlin.time.Instant
@@ -41,6 +42,14 @@ data class IngestBatch(
     val sessionId: SessionId,
     val seq: Long,
     val fixes: List<FixReading>,
+)
+
+/** A device_status message: the values the device read at [at]. */
+data class ReportStatus(
+    val sessionId: SessionId,
+    val at: Instant,
+    val battery: DeviceStatusReported.Battery,
+    val motion: String?,
 )
 
 data class BatchResult(
@@ -89,6 +98,30 @@ class TrackingService(
         return transactions.inTransaction {
             batches.find(command.sessionId, command.seq)?.toResult()
                 ?: store(command)
+        }
+    }
+
+    /**
+     * Records that the device is alive (the session's last-seen time moves to now, which is what presence reads)
+     * and announces its battery and motion to other contexts. Nothing else is stored (telemetry, phase 9).
+     */
+    suspend fun reportStatus(command: ReportStatus) {
+        transactions.inTransaction {
+            val session =
+                sessions.find(command.sessionId)
+                    ?: throw DomainException(TrackingError.SESSION_NOT_FOUND, "Send hello before device_status")
+            session.touch(now())
+            sessions.save(session)
+            outbox.add(
+                DeviceStatusReported(
+                    session.id.value,
+                    session.deviceId.value,
+                    session.driverId?.value,
+                    command.at,
+                    command.battery,
+                    command.motion,
+                ),
+            )
         }
     }
 

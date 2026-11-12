@@ -35,6 +35,8 @@ channels:
         $ref: '#/components/messages/hello'
       fix_batch:
         $ref: '#/components/messages/fix_batch'
+      device_status:
+        $ref: '#/components/messages/device_status'
       welcome:
         $ref: '#/components/messages/welcome'
       ack:
@@ -89,6 +91,13 @@ operations:
         $ref: '#/channels/driver'
       messages:
         - $ref: '#/channels/driver/messages/ack'
+  receiveDeviceStatus:
+    action: receive
+    channel:
+      $ref: '#/channels/driver'
+    summary: The device's battery and motion, every 30 s; also the driver's heartbeat. No reply.
+    messages:
+      - $ref: '#/channels/driver/messages/device_status'
   sendError:
     action: send
     channel:
@@ -140,6 +149,12 @@ components:
       summary: A numbered batch of fixes.
       payload:
         $ref: '#/components/schemas/FixBatch'
+    device_status:
+      name: device_status
+      title: Device status
+      summary: Battery and motion of the driver's device, every 30 s. Also the driver's heartbeat.
+      payload:
+        $ref: '#/components/schemas/DeviceStatus'
     welcome:
       name: welcome
       title: Welcome
@@ -320,10 +335,12 @@ components:
           format: uuid
         event:
           type: string
-          enum: [status_changed, driver_arriving]
+          enum: [status_changed, driver_arriving, driver_low_battery]
           description: >-
             What happened. `status_changed`: the trip moved to `status`. `driver_arriving`: the driver came within
-            200 m of the pickup (2 fixes in a row); sent again only after the driver went beyond 300 m. A later
+            200 m of the pickup (2 fixes in a row); sent again only after the driver went beyond 300 m.
+            `driver_low_battery`: the driver's phone is at 15 % or less and not charging, or its profile is
+            CRITICAL; sent again only after it reached 25 % or was charging. A later
             server may add values, so a client ignores values it does not know.
         status:
           $ref: '#/components/schemas/TripStatus'
@@ -335,6 +352,11 @@ components:
           type: number
           minimum: 0
           description: '`driver_arriving` only: the straight-line distance to the pickup, in meters.'
+        levelPercent:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: '`driver_low_battery` only: the battery level of the driver''s phone.'
 
     Hello:
       type: object
@@ -360,6 +382,41 @@ components:
           description: Highest seq that the client received an ack for. Absent before the first ack. Informational only.
         sdkVersion:
           type: string
+
+    DeviceStatus:
+      type: object
+      additionalProperties: false
+      required: [type, at, battery]
+      properties:
+        type:
+          const: device_status
+        at:
+          type: string
+          format: date-time
+          description: When the device read these values.
+        battery:
+          $ref: '#/components/schemas/Battery'
+        motion:
+          type: string
+          description: The detected activity (STILL, WALKING, IN_VEHICLE, ...). Absent when unknown.
+
+    Battery:
+      type: object
+      additionalProperties: false
+      required: [levelPercent, isCharging]
+      properties:
+        levelPercent:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Another value gets `error{INVALID_MESSAGE}`; the session stays open.
+        isCharging:
+          type: boolean
+        temperatureC:
+          type: number
+        profile:
+          type: string
+          description: The SDK's battery profile name, for example CRITICAL. Unknown names count as normal.
 
     FixBatch:
       type: object

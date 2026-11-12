@@ -20,7 +20,7 @@ import veeci.practicing.rts.testing.trip.TripSamples
 import veeci.practicing.rts.testing.trip.TripSamples.PICKUP
 import veeci.practicing.rts.testing.trip.TripSamples.T0
 import veeci.practicing.rts.tracking.domain.event.FixesAccepted
-import veeci.practicing.rts.trip.adapter.out.persistence.ExposedArrivalStateStore
+import veeci.practicing.rts.trip.adapter.out.persistence.ExposedRuleStateStore
 import veeci.practicing.rts.trip.adapter.out.persistence.ExposedTripEventOutbox
 import veeci.practicing.rts.trip.adapter.out.persistence.ExposedTripMomentRepository
 import veeci.practicing.rts.trip.adapter.out.persistence.ExposedTripRepository
@@ -41,7 +41,7 @@ class TripMomentsIT {
     private val dataSource = createDataSource(TestConfig.load(TestDatabase.freshDatabaseEnv()).db).also { Migrations.run(it) }
     private val transactions = ExposedTransactionRunner(Database.connect(dataSource))
     private val trips = ExposedTripRepository()
-    private val states = ExposedArrivalStateStore()
+    private val states = ExposedRuleStateStore()
     private val moments = ExposedTripMomentRepository()
     private val outbox = ExposedTripEventOutbox(OutboxWriter())
     private val driver = TripSamples.driver()
@@ -93,13 +93,13 @@ class TripMomentsIT {
             val trip = acceptedTrip()
             val saved = ArrivalState(near = 2, far = 0, announced = true, atPickup = 1, slowSince = T0, lastAt = T0 + 5.seconds)
 
-            transactions.inTransaction { states.lock(trip.id) } shouldBe ArrivalState()
+            transactions.inTransaction { states.lockArrival(trip.id) } shouldBe ArrivalState()
             transactions.inTransaction {
-                states.lock(trip.id)
-                states.save(trip.id, saved)
+                states.lockArrival(trip.id)
+                states.saveArrival(trip.id, saved)
             }
 
-            transactions.inTransaction { states.lock(trip.id) } shouldBe saved
+            transactions.inTransaction { states.lockArrival(trip.id) } shouldBe saved
         }
 
     @Test

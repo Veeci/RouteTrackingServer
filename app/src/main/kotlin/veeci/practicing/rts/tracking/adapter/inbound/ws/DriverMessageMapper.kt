@@ -1,16 +1,19 @@
 package veeci.practicing.rts.tracking.adapter.inbound.ws
 
+import veeci.practicing.rts.protocol.DeviceStatus
 import veeci.practicing.rts.protocol.FixBatch
 import veeci.practicing.rts.protocol.FixDto
 import veeci.practicing.rts.protocol.Hello
 import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.tracking.application.IngestBatch
 import veeci.practicing.rts.tracking.application.OpenSession
+import veeci.practicing.rts.tracking.application.ReportStatus
 import veeci.practicing.rts.tracking.domain.DeviceId
 import veeci.practicing.rts.tracking.domain.FixReading
 import veeci.practicing.rts.tracking.domain.LocationProvider
 import veeci.practicing.rts.tracking.domain.SatelliteHealth
 import veeci.practicing.rts.tracking.domain.SessionId
+import veeci.practicing.rts.tracking.domain.event.DeviceStatusReported
 import java.util.UUID
 
 /** Turns wire messages into service commands. The only place where protocol types meet tracking types. */
@@ -56,4 +59,21 @@ internal object DriverMessageMapper {
         } catch (_: IllegalArgumentException) {
             null
         }
+
+    /** Null when the battery level is outside 0 to 100. */
+    fun reportStatus(
+        session: SessionId,
+        status: DeviceStatus,
+    ): ReportStatus? =
+        status.battery.takeIf { it.levelPercent in BATTERY_PERCENT }?.let {
+            ReportStatus(
+                session,
+                status.at,
+                DeviceStatusReported.Battery(it.levelPercent, it.isCharging, it.temperatureC, it.profile),
+                status.motion,
+            )
+        }
+
+    private const val MAX_BATTERY_PERCENT = 100
+    private val BATTERY_PERCENT = 0..MAX_BATTERY_PERCENT
 }
