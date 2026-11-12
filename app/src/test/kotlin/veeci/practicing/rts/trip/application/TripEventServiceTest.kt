@@ -8,6 +8,7 @@ import io.kotest.matchers.types.shouldBeInstanceOf
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import veeci.practicing.rts.shared.DomainException
+import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.shared.geo.GeoPoint
 import veeci.practicing.rts.testing.tracking.DirectTransactionRunner
 import veeci.practicing.rts.testing.trip.InMemoryRuleStateStore
@@ -17,6 +18,7 @@ import veeci.practicing.rts.testing.trip.InMemoryTripRepository
 import veeci.practicing.rts.testing.trip.TripSamples
 import veeci.practicing.rts.testing.trip.TripSamples.PICKUP
 import veeci.practicing.rts.testing.trip.TripSamples.T0
+import veeci.practicing.rts.tracking.application.api.DriverPresence
 import veeci.practicing.rts.tracking.domain.event.DeviceStatusReported
 import veeci.practicing.rts.tracking.domain.event.FixesAccepted
 import veeci.practicing.rts.trip.application.port.out.TripRepository
@@ -29,7 +31,9 @@ import java.time.Clock
 import java.time.ZoneOffset
 import java.util.UUID
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Instant
 import kotlin.time.toJavaInstant
+import kotlin.time.toKotlinInstant
 
 class TripEventServiceTest {
     private val trips = InMemoryTripRepository()
@@ -39,8 +43,14 @@ class TripEventServiceTest {
     private val clock = Clock.fixed((T0 + 1.seconds * 600).toJavaInstant(), ZoneOffset.UTC)
     private val driver = TripSamples.driver()
 
+    private val lastSeen = mutableMapOf<UserId, Instant>()
+    private val presence =
+        object : DriverPresence {
+            override suspend fun lastSeen(drivers: Collection<UserId>) = lastSeen.filterKeys { it in drivers }
+        }
+
     private fun service(repository: TripRepository = trips) =
-        TripEventService(repository, states, moments, outbox, DirectTransactionRunner, clock)
+        TripEventService(repository, states, moments, outbox, presence, DirectTransactionRunner, clock)
 
     private suspend fun tripIn(status: TripStatus) = TripSamples.inStatus(status, driver = driver).also { trips.insert(it) }
 
@@ -195,6 +205,56 @@ class TripEventServiceTest {
             tripIn(TripStatus.COMPLETED)
 
             service().onDeviceStatus(status(5))
+
+            moments.moments.shouldBeEmpty()
+        }
+
+    @Test
+    fun `a driver silent for more than 60 s is reported stale, with when they were last heard`() =
+        runTest {
+            val trip = tripIn(TripStatus.IN_PROGRESS)
+            val heard = clock.instant().toKotlinInstant() - 61.seconds
+            lastSeen[driver.userId] = heard
+
+            service().detectStale()
+
+            val stale = moments.moments.single().shouldBeInstanceOf<TripMoment.DriverStale>()
+            stale.tripId shouldBe trip.id.value
+            stale.lastSeenAt shouldBe heard
+            stale.status shouldBe TripStatus.IN_PROGRESS
+        }
+
+    @Test
+    fun `a stale driver heard again is reported back, once`() =
+        runTest {
+            tripIn(TripStatus.ACCEPTED)
+            lastSeen[driver.userId] = clock.instant().toKotlinInstant() - 61.seconds
+            service().detectStale()
+
+            lastSeen[driver.userId] = clock.instant().toKotlinInstant()
+            service().detectStale()
+            service().detectStale()
+
+            moments.moments.map { it::class } shouldBe listOf(TripMoment.DriverStale::class, TripMoment.DriverBack::class)
+        }
+
+    @Test
+    fun `a driver never heard on the trip counts from the trip's last change`() =
+        runTest {
+            tripIn(TripStatus.ACCEPTED) // TripSamples changes it at T0 + 1 min; the clock is T0 + 10 min
+
+            service().detectStale()
+
+            moments.moments.single().shouldBeInstanceOf<TripMoment.DriverStale>()
+        }
+
+    @Test
+    fun `finished trips are not checked`() =
+        runTest {
+            tripIn(TripStatus.COMPLETED)
+            lastSeen[driver.userId] = T0
+
+            service().detectStale()
 
             moments.moments.shouldBeEmpty()
         }

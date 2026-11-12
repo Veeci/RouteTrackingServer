@@ -34,6 +34,23 @@ sealed interface TripMoment {
         override val at: Instant,
         val levelPercent: Int,
     ) : TripMoment
+
+    /** Nothing came from the driver's phone for the stale time. [lastSeenAt] is when it was last heard. */
+    data class DriverStale(
+        override val tripId: UUID,
+        override val guestId: UUID,
+        override val status: TripStatus,
+        override val at: Instant,
+        val lastSeenAt: Instant,
+    ) : TripMoment
+
+    /** The driver's phone is heard again after a [DriverStale]. */
+    data class DriverBack(
+        override val tripId: UUID,
+        override val guestId: UUID,
+        override val status: TripStatus,
+        override val at: Instant,
+    ) : TripMoment
 }
 
 /**
@@ -50,6 +67,7 @@ data class TripMomentRaisedV1(
     val at: Instant,
     val remainingM: Double? = null,
     val levelPercent: Int? = null,
+    val lastSeenAt: Instant? = null,
 ) {
     fun toMoment(): TripMoment? =
         when (kind) {
@@ -73,6 +91,20 @@ data class TripMomentRaisedV1(
                 )
             }
 
+            KIND_DRIVER_STALE -> {
+                TripMoment.DriverStale(
+                    UUID.fromString(tripId),
+                    UUID.fromString(guestId),
+                    TripStatus.valueOf(status),
+                    at,
+                    checkNotNull(lastSeenAt) { "$KIND_DRIVER_STALE needs lastSeenAt" },
+                )
+            }
+
+            KIND_DRIVER_BACK -> {
+                TripMoment.DriverBack(UUID.fromString(tripId), UUID.fromString(guestId), TripStatus.valueOf(status), at)
+            }
+
             else -> {
                 null
             }
@@ -82,6 +114,8 @@ data class TripMomentRaisedV1(
         const val TYPE = "trip.TripMomentRaised.v1"
         const val KIND_DRIVER_ARRIVING = "DRIVER_ARRIVING"
         const val KIND_DRIVER_LOW_BATTERY = "DRIVER_LOW_BATTERY"
+        const val KIND_DRIVER_STALE = "DRIVER_STALE"
+        const val KIND_DRIVER_BACK = "DRIVER_BACK"
 
         fun of(moment: TripMoment) =
             when (moment) {
@@ -105,6 +139,21 @@ data class TripMomentRaisedV1(
                         moment.at,
                         levelPercent = moment.levelPercent,
                     )
+                }
+
+                is TripMoment.DriverStale -> {
+                    TripMomentRaisedV1(
+                        moment.tripId.toString(),
+                        moment.guestId.toString(),
+                        KIND_DRIVER_STALE,
+                        moment.status.name,
+                        moment.at,
+                        lastSeenAt = moment.lastSeenAt,
+                    )
+                }
+
+                is TripMoment.DriverBack -> {
+                    TripMomentRaisedV1(moment.tripId.toString(), moment.guestId.toString(), KIND_DRIVER_BACK, moment.status.name, moment.at)
                 }
             }
     }

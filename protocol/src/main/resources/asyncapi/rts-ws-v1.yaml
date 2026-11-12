@@ -335,12 +335,14 @@ components:
           format: uuid
         event:
           type: string
-          enum: [status_changed, driver_arriving, driver_low_battery]
+          enum: [status_changed, driver_arriving, driver_low_battery, driver_stale, driver_back]
           description: >-
             What happened. `status_changed`: the trip moved to `status`. `driver_arriving`: the driver came within
             200 m of the pickup (2 fixes in a row); sent again only after the driver went beyond 300 m.
             `driver_low_battery`: the driver's phone is at 15 % or less and not charging, or its profile is
-            CRITICAL; sent again only after it reached 25 % or was charging. A later
+            CRITICAL; sent again only after it reached 25 % or was charging. `driver_stale`: nothing came from the
+            driver's phone for 60 s (connection lost). `driver_back`: the phone is heard again; it follows every
+            `driver_stale`, never two `driver_stale` in a row. A later
             server may add values, so a client ignores values it does not know.
         status:
           $ref: '#/components/schemas/TripStatus'
@@ -357,6 +359,10 @@ components:
           minimum: 0
           maximum: 100
           description: '`driver_low_battery` only: the battery level of the driver''s phone.'
+        lastSeenAt:
+          type: string
+          format: date-time
+          description: '`driver_stale` only: when the server last heard from the driver''s phone.'
 
     Hello:
       type: object

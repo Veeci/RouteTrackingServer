@@ -2,6 +2,7 @@ package veeci.practicing.rts.trip.application.port.out
 
 import veeci.practicing.rts.trip.domain.ArrivalState
 import veeci.practicing.rts.trip.domain.BatteryState
+import veeci.practicing.rts.trip.domain.PresenceState
 import veeci.practicing.rts.trip.domain.TripId
 import veeci.practicing.rts.trip.domain.event.TripMoment
 
@@ -27,5 +28,12 @@ interface RuleStateStore {
     suspend fun saveBattery(
         trip: TripId,
         state: BatteryState,
+    )
+
+    suspend fun lockPresence(trip: TripId): PresenceState
+
+    suspend fun savePresence(
+        trip: TripId,
+        state: PresenceState,
     )
 }

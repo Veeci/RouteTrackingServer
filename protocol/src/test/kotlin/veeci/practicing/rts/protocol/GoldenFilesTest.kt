@@ -113,7 +113,7 @@ class GoldenFilesTest {
         private val at = Instant.parse("2026-09-30T02:15:04.120Z")
 
         @JvmStatic
-        fun samples(): List<Sample<*>> = driverSamples() + guestSamples()
+        fun samples(): List<Sample<*>> = driverSamples() + guestSamples() + tripEventSamples()
 
         private fun driverSamples(): List<Sample<*>> =
             listOf(
@@ -198,6 +198,11 @@ class GoldenFilesTest {
                     TripProgress(TRIP, "PICKUP", remainingM = 1240.5, etaS = 112.0, basis = "STRAIGHT_LINE"),
                     GuestServerMessage.serializer(),
                 ),
+            )
+
+        /** One file per `trip_event` kind: the frame differs by its optional fields. */
+        private fun tripEventSamples(): List<Sample<*>> =
+            listOf(
                 Sample(
                     "trip_event",
                     TripEvent(TRIP, TripEvent.STATUS_CHANGED, "ARRIVED", Instant.parse("2026-09-30T02:17:30Z")),
@@ -214,6 +219,24 @@ class GoldenFilesTest {
                     TripEvent(TRIP, TripEvent.DRIVER_LOW_BATTERY, "IN_PROGRESS", Instant.parse("2026-09-30T02:30:00Z"), levelPercent = 14),
                     GuestServerMessage.serializer(),
                     file = "trip_event_driver_low_battery",
+                ),
+                Sample(
+                    "trip_event",
+                    TripEvent(
+                        TRIP,
+                        TripEvent.DRIVER_STALE,
+                        "IN_PROGRESS",
+                        Instant.parse("2026-09-30T02:31:05Z"),
+                        lastSeenAt = Instant.parse("2026-09-30T02:30:02Z"),
+                    ),
+                    GuestServerMessage.serializer(),
+                    file = "trip_event_driver_stale",
+                ),
+                Sample(
+                    "trip_event",
+                    TripEvent(TRIP, TripEvent.DRIVER_BACK, "IN_PROGRESS", Instant.parse("2026-09-30T02:32:10Z")),
+                    GuestServerMessage.serializer(),
+                    file = "trip_event_driver_back",
                 ),
             )
     }

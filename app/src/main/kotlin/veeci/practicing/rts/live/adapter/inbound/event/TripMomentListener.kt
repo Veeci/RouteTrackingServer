@@ -25,6 +25,7 @@ class TripMomentListener(
                 moment.at,
                 remainingM = (moment as? TripMoment.DriverArriving)?.remainingM,
                 levelPercent = (moment as? TripMoment.DriverLowBattery)?.levelPercent,
+                lastSeenAt = (moment as? TripMoment.DriverStale)?.lastSeenAt,
             ),
         )
     }
@@ -33,5 +34,7 @@ class TripMomentListener(
         when (this) {
             is TripMoment.DriverArriving -> TripMomentRaisedV1.KIND_DRIVER_ARRIVING
             is TripMoment.DriverLowBattery -> TripMomentRaisedV1.KIND_DRIVER_LOW_BATTERY
+            is TripMoment.DriverStale -> TripMomentRaisedV1.KIND_DRIVER_STALE
+            is TripMoment.DriverBack -> TripMomentRaisedV1.KIND_DRIVER_BACK
         }
 }

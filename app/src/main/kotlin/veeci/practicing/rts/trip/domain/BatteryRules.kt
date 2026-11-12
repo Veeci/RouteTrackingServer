@@ -66,4 +66,5 @@ class BatteryRules(
 data class TripRules(
     val arrival: ArrivalRules = ArrivalRules(),
     val battery: BatteryRules = BatteryRules(),
+    val presence: PresenceRules = PresenceRules(),
 )

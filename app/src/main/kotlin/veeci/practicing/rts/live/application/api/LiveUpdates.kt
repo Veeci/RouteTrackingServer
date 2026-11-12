@@ -46,6 +46,8 @@ data class TripMomentUpdate(
     val remainingM: Double? = null,
     /** DRIVER_LOW_BATTERY: the battery level of the driver's phone. */
     val levelPercent: Int? = null,
+    /** DRIVER_STALE: when the driver's phone was last heard. */
+    val lastSeenAt: Instant? = null,
 ) : LiveUpdate
 
 /** The live context's public API: other contexts hand it updates; it delivers them to the watching guests. */

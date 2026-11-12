@@ -19,6 +19,8 @@ import veeci.practicing.rts.testing.TestDatabase
 import veeci.practicing.rts.testing.trip.TripSamples
 import veeci.practicing.rts.testing.trip.TripSamples.PICKUP
 import veeci.practicing.rts.testing.trip.TripSamples.T0
+import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedTrackingSessionRepository
+import veeci.practicing.rts.tracking.application.TrackingPresence
 import veeci.practicing.rts.tracking.domain.event.FixesAccepted
 import veeci.practicing.rts.trip.adapter.out.persistence.ExposedRuleStateStore
 import veeci.practicing.rts.trip.adapter.out.persistence.ExposedTripEventOutbox
@@ -27,6 +29,7 @@ import veeci.practicing.rts.trip.adapter.out.persistence.ExposedTripRepository
 import veeci.practicing.rts.trip.application.TripEventService
 import veeci.practicing.rts.trip.application.port.out.TripRepository
 import veeci.practicing.rts.trip.domain.ArrivalState
+import veeci.practicing.rts.trip.domain.PresenceState
 import veeci.practicing.rts.trip.domain.Trip
 import veeci.practicing.rts.trip.domain.event.TripMoment
 import veeci.practicing.rts.trip.domain.event.TripMomentRaisedV1
@@ -50,7 +53,15 @@ class TripMomentsIT {
     fun closePool() = dataSource.close()
 
     private fun service(repository: TripRepository = trips) =
-        TripEventService(repository, states, moments, outbox, transactions, Clock.systemUTC())
+        TripEventService(
+            repository,
+            states,
+            moments,
+            outbox,
+            TrackingPresence(ExposedTrackingSessionRepository(), transactions),
+            transactions,
+            Clock.systemUTC(),
+        )
 
     private suspend fun acceptedTrip(): Trip =
         TripSamples.inStatus(TripStatus.ACCEPTED, driver = driver).also {
@@ -100,6 +111,19 @@ class TripMomentsIT {
             }
 
             transactions.inTransaction { states.lockArrival(trip.id) } shouldBe saved
+        }
+
+    @Test
+    fun `TC-4-STL-07 presence state survives a new connection, so a restart raises no second stale`() =
+        runTest {
+            val trip = acceptedTrip()
+            transactions.inTransaction {
+                states.lockPresence(trip.id)
+                states.savePresence(trip.id, PresenceState(stale = true))
+            }
+            val afterRestart = ExposedTransactionRunner(Database.connect(dataSource))
+
+            afterRestart.inTransaction { ExposedRuleStateStore().lockPresence(trip.id) } shouldBe PresenceState(stale = true)
         }
 
     @Test

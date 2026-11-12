@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test
 import org.koin.ktor.ext.get
 import org.testcontainers.junit.jupiter.Testcontainers
 import veeci.practicing.rts.platform.events.OutboxRelay
+import veeci.practicing.rts.platform.jobs.JobScheduler
 import veeci.practicing.rts.platform.ws.WsSessionRegistry
 import veeci.practicing.rts.testing.SocketTestApp
 import veeci.practicing.rts.testing.shouldMatchContract
@@ -54,12 +55,14 @@ class GracefulShutdownIT {
                 val relay = application.get<OutboxRelay>()
                 val sockets = application.get<WsSessionRegistry>()
                 relay.isRunning shouldBe true
+                application.get<JobScheduler>().isRunning shouldBe true
                 sockets.size shouldBe 1
 
                 beginShutdown()
 
                 // Koin closes the pool at ApplicationStopping, which comes after this event: nothing may be left.
                 relay.isRunning shouldBe false
+                application.get<JobScheduler>().isRunning shouldBe false
                 sockets.size shouldBe 0
             }
         }

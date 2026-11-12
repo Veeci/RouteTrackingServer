@@ -4,6 +4,7 @@ import veeci.practicing.rts.platform.db.TransactionRunner
 import veeci.practicing.rts.shared.DomainException
 import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.shared.geo.Haversine
+import veeci.practicing.rts.tracking.application.api.DriverPresence
 import veeci.practicing.rts.tracking.domain.event.DeviceStatusReported
 import veeci.practicing.rts.tracking.domain.event.FixesAccepted
 import veeci.practicing.rts.trip.application.port.out.RuleStateStore
@@ -20,8 +21,8 @@ import veeci.practicing.rts.trip.domain.event.TripStatus
 import java.time.Clock
 
 /**
- * Notices moments in the driver's stream and raises them: "driver arriving", auto-arrive and "low battery"
- * (phase 4).
+ * Notices moments in the driver's stream and raises them: "driver arriving", auto-arrive, "low battery", and
+ * "driver gone" and "driver back" (phase 4).
  *
  * Runs in the outbox relay's transaction (TransactionRunner joins it), so the rule state, the stored moments,
  * the status change and the new outbox rows commit together with "this batch is delivered". A batch delivered
@@ -32,6 +33,7 @@ class TripEventService(
     private val states: RuleStateStore,
     private val moments: TripMomentRepository,
     private val outbox: TripEventOutbox,
+    private val presence: DriverPresence,
     private val transactions: TransactionRunner,
     private val clock: Clock,
     private val rules: TripRules = TripRules(),
@@ -75,6 +77,26 @@ class TripEventService(
                 )
             outcome.low?.let { raise(TripMoment.DriverLowBattery(trip.id.value, trip.guestId.value, trip.status, it.at, it.levelPercent)) }
             states.saveBattery(trip.id, outcome.state)
+        }
+    }
+
+    /**
+     * Checks every active trip's driver: silent for the stale time raises DriverStale, heard again raises
+     * DriverBack. The stale-driver job calls it on one instance at a time. A driver never heard on this trip
+     * counts from the trip's last change.
+     */
+    suspend fun detectStale() {
+        transactions.inTransaction {
+            val active = trips.findActive()
+            val lastSeen = presence.lastSeen(active.mapNotNull { it.driverId })
+            val now = clock.now()
+            for (trip in active) {
+                val seen = trip.driverId?.let(lastSeen::get) ?: trip.updatedAt
+                val outcome = rules.presence.evaluate(states.lockPresence(trip.id), seen, now)
+                outcome.staleSince?.let { raise(TripMoment.DriverStale(trip.id.value, trip.guestId.value, trip.status, now, it)) }
+                if (outcome.back) raise(TripMoment.DriverBack(trip.id.value, trip.guestId.value, trip.status, now))
+                states.savePresence(trip.id, outcome.state)
+            }
         }
     }
 

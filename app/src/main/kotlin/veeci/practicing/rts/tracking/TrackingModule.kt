@@ -10,7 +10,9 @@ import veeci.practicing.rts.tracking.adapter.inbound.ws.DriverSocket
 import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedFixBatchRepository
 import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedTrackingEventOutbox
 import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedTrackingSessionRepository
+import veeci.practicing.rts.tracking.application.TrackingPresence
 import veeci.practicing.rts.tracking.application.TrackingService
+import veeci.practicing.rts.tracking.application.api.DriverPresence
 import veeci.practicing.rts.tracking.application.port.out.FixBatchRepository
 import veeci.practicing.rts.tracking.application.port.out.TrackingEventOutbox
 import veeci.practicing.rts.tracking.application.port.out.TrackingSessionRepository
@@ -38,6 +40,8 @@ fun trackingModule(
             )
         }
         single { TrackingService(get(), get(), get(), get(), get(), get(), config.maxFixesPerBatch) }
+        // Presence, read by the trip context's stale-driver job.
+        single<DriverPresence> { TrackingPresence(get(), get()) }
         single {
             val limits = LimitsDto(config.maxFixesPerBatch, ws.maxFrameBytes, ws.messagesPerSecond)
             DriverSocket(get(), get(), get(), limits, config.handshakeTimeout)

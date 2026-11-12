@@ -53,6 +53,14 @@ class InMemoryTrackingSessionRepository : TrackingSessionRepository {
             rows[session.id] =
                 Row(session.id, session.deviceId, session.sdkVersion, session.startedAt, session.lastSeenAt, session.driverId)
         }
+
+    override suspend fun lastSeenByDriver(drivers: Collection<UserId>): Map<UserId, Instant> =
+        mutex.withLock {
+            rows.values
+                .filter { it.driverId != null && it.driverId in drivers }
+                .groupBy { it.driverId!! }
+                .mapValues { (_, sessions) -> sessions.maxOf { it.lastSeenAt } }
+        }
 }
 
 class InMemoryFixBatchRepository : FixBatchRepository {

@@ -12,6 +12,7 @@ import veeci.practicing.rts.trip.application.port.out.TripMomentRepository
 import veeci.practicing.rts.trip.application.port.out.TripRepository
 import veeci.practicing.rts.trip.domain.ArrivalState
 import veeci.practicing.rts.trip.domain.BatteryState
+import veeci.practicing.rts.trip.domain.PresenceState
 import veeci.practicing.rts.trip.domain.Trip
 import veeci.practicing.rts.trip.domain.TripError
 import veeci.practicing.rts.trip.domain.TripId
@@ -67,6 +68,8 @@ class InMemoryTripRepository : TripRepository {
                 .map { it.toTrip() }
         }
 
+    override suspend fun findActive(): List<Trip> = mutex.withLock { rows.values.filter { it.status.isActive }.map { it.toTrip() } }
+
     override suspend fun findActiveForDriver(driver: UserId): Trip? =
         mutex.withLock { rows.values.firstOrNull { it.driverId == driver && it.status.isActive }?.toTrip() }
 
@@ -118,6 +121,16 @@ class InMemoryTripMomentRepository : TripMomentRepository {
 class InMemoryRuleStateStore : RuleStateStore {
     val arrival = mutableMapOf<TripId, ArrivalState>()
     val battery = mutableMapOf<TripId, BatteryState>()
+    val presence = mutableMapOf<TripId, PresenceState>()
+
+    override suspend fun lockPresence(trip: TripId): PresenceState = presence[trip] ?: PresenceState()
+
+    override suspend fun savePresence(
+        trip: TripId,
+        state: PresenceState,
+    ) {
+        presence[trip] = state
+    }
 
     override suspend fun lockArrival(trip: TripId): ArrivalState = arrival[trip] ?: ArrivalState()
 

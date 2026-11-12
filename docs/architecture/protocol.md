@@ -155,7 +155,7 @@ client → subscribe        { tripId }
 server → subscribed       { trip: { tripId, status, pickup, destination, driverId?, updatedAt } }
 server → driver_position  { tripId, lat, lng, bearingDeg?, speedMps?, recordedAt }
 server → trip_progress    { tripId, target: PICKUP | DESTINATION, remainingM, etaS, basis: STRAIGHT_LINE }
-server → trip_event       { tripId, event: status_changed | driver_arriving | driver_low_battery, status, at, remainingM?, levelPercent? }
+server → trip_event       { tripId, event: status_changed | driver_arriving | driver_low_battery | driver_stale | driver_back, status, at, remainingM?, levelPercent?, lastSeenAt? }
 server → route_updated    { tripId, polyline, distanceM }                    // phase 7
 ```
 
@@ -178,6 +178,9 @@ server → route_updated    { tripId, polyline, distanceM }                    /
 - `trip_event` with `event: driver_low_battery` (phase 4) says the driver's phone is at 15 % or less and not
   charging, or reports the CRITICAL profile. `levelPercent` is the level. It is sent again only after the phone
   reached 25 % or was charging. It is sent for an ACCEPTED, ARRIVED or IN_PROGRESS trip.
+- `trip_event` with `event: driver_stale` (phase 4) says nothing came from the driver's phone for 60 s;
+  `lastSeenAt` is when it was last heard. `driver_back` follows when the phone is heard again, within 10 s. They
+  come in pairs, never two `driver_stale` in a row.
 - When the arrival rules see the driver at the pickup, the server moves the trip to ARRIVED itself, and the guest
   gets the usual `status_changed` with `status: ARRIVED`.
 - After a final stage (COMPLETED, CANCELLED) the server sends that `trip_event` and closes the socket with 1000.
@@ -213,8 +216,10 @@ the `Error` schema of the AsyncAPI document.
 
 ## Keepalive
 
-WebSocket ping every 15 s, timeout 15 s (Ktor `pingPeriod`/`timeout`). A driver with no frames and
-no pong for `staleAfter` (default 60 s) is reported `DRIVER_STALE` to guests (phase 4).
+WebSocket ping every 15 s, timeout 15 s (Ktor `pingPeriod`/`timeout`). Ktor does not tell the application
+about pongs, so presence counts stored batches and `device_status` only: a driver with neither for
+`events.staleAfter` (default 60 s) is reported to guests as `trip_event{driver_stale}` (phase 4). The SDK
+therefore sends `device_status` every 30 s, also while parked.
 
 ## Limits
 

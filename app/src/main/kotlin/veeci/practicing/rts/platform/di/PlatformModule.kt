@@ -16,6 +16,9 @@ import veeci.practicing.rts.platform.db.createDataSource
 import veeci.practicing.rts.platform.events.OutboxRelay
 import veeci.practicing.rts.platform.events.OutboxWriter
 import veeci.practicing.rts.platform.http.Idempotency
+import veeci.practicing.rts.platform.jobs.JobLock
+import veeci.practicing.rts.platform.jobs.JobScheduler
+import veeci.practicing.rts.platform.jobs.PostgresJobLock
 import veeci.practicing.rts.platform.observability.HealthIndicator
 import veeci.practicing.rts.platform.observability.HealthRegistry
 import veeci.practicing.rts.platform.security.AccessTokens
@@ -46,6 +49,8 @@ fun platformModule(
         single { OutboxWriter() }
         // Every context's OutboxEventHandler definitions, found with getAll().
         single { OutboxRelay(get(), getAll(), config.events) }
+        single<JobLock> { PostgresJobLock(get()) }
+        single { JobScheduler(get()) }
         single { Idempotency(get(), get()) }
 
         // Contexts add their own dependencies (Redis, ...) the same way: bind them as HealthIndicator.
