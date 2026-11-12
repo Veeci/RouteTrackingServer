@@ -75,14 +75,43 @@ Debounce: at most one `SetConstraint` per session per 10 s (guest reconnect loop
 
 `device_commands(id uuid pk, session_id, kind, payload jsonb, status, created_at, expires_at, updated_at)` + index `(session_id, status)`.
 
+## As built: slice 5a (commands, storage, admin API, expiry)
+
+Phase 5 is built in three slices: 5a commands, storage, admin API and expiry; 5b `command` and `command_ack` on
+the driver socket with live delivery and resending after `welcome`; 5c automatic policies. 5a differs from the
+design above in these ways:
+
+| Plan | As built | Why |
+|---|---|---|
+| A command targets a `sessionId` | It targets the driver (`UserId`, column `driver_id`); the admin path is `/api/v1/admin/drivers/{driverId}/commands` | The SDK starts a new session each time tracking starts; a command for an old session would never be delivered |
+| `V6__device_commands.sql` | `V10__device_commands.sql`, with an index for a driver's commands and a partial index of open commands by expiry | V6 to V9 were taken |
+| Policies issue as a system actor | `CommandService.issueAsServer(driver, payload)` takes no actor; `issue(..., actor)` requires ADMIN (COMMAND_FORBIDDEN otherwise) | Same as auto-arrive: no fake user that a token could name |
+| Expiry time not set | `commands.expireAfter` = 10 min, checked every `commands.expiryCheckEvery` = 30 s by `CommandExpiryJob` (lock key 5001) | A constraint older than that belongs to a trip that moved on |
+| Supersede: older undelivered SetConstraints expire | Only PENDING ones (never sent); a SENT one stays and may still be applied | The device may already be applying it; the newer one follows anyway |
+
+Notes:
+- `DeviceCommand` is the aggregate: PENDING, SENT, then APPLIED, REJECTED or EXPIRED. A repeated or late ack
+  changes nothing and is no error (`acknowledge` returns false and the service logs it at WARN).
+- `CommandIssued` (`CommandIssuedV1`, `devicecontrol.CommandIssued.v1`) goes to the outbox with every new command.
+  Nothing handles it yet; 5b delivers it to a connected driver.
+- Command ids are UUID version 7 (time-ordered), like trip ids.
+- The admin body is one flat shape for every kind (`kind` says which fields apply), validated field by field.
+
+Found on the way: the request body class kept its constants in a `private companion object`. `@Serializable`
+puts `serializer()` in the companion, so Ktor could not find it, and every request failed as MALFORMED_REQUEST.
+The constants are now top-level.
+
+Tests: TC-5-CMD-02 to 07 (service), TC-5-DB-01 (contract against memory and Postgres), TC-5-API-01 and 02, plus
+admin round trip, forbidden list, bad driver id and 401. Check: 260 unit, 194 integration and 9 end-to-end tests pass.
+
 ## Tasks
 
-- [ ] T5.1 Model, payloads, `CommandService` (`issue`, `acknowledge`, `expire`, `pendingFor`).
-- [ ] T5.2 `DeviceCommandRepository` port + Exposed impl + contract tests.
+- [x] T5.1 Model, payloads, `CommandService` (`issue`, `acknowledge`, `expire`, `pendingFor`).
+- [x] T5.2 `DeviceCommandRepository` port + Exposed impl + contract tests.
 - [ ] T5.3 `DeviceChannel` port; `ConnectedDevices` (session → socket outbound channel, per instance) in the tracking WS adapter; listener delivering after commit.
 - [ ] T5.4 Protocol `command`, `command_ack`; handler: redeliver after welcome; ack branch.
 - [ ] T5.5 `CommandPolicies` + debounce, subscribed to hub updates.
-- [ ] T5.6 Admin routes.
+- [x] T5.6 Admin routes.
 - [ ] T5.7 Simulator: print received commands, auto-ack `applied` (flag `--reject-commands` for tests).
 - [ ] T5.8 protocol.md: idempotency note and command payload schemas.
 

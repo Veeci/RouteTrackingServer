@@ -97,6 +97,15 @@ is closed, and sign-up and login for real users.
 | 39 | Older app versions | New notices reuse the `trip_event` message and keep `status`, so an older SDK ignores what it does not know. The SDK must ignore unknown `event` values | Built P4 (4a) |
 | 40 | Showing whether "arrived" was automatic | Stored as `cause` for history, not sent to the guest | Built P4 (4a) |
 
+## Phase 5 (5a built)
+
+| # | Problem | What happens now | Source |
+|---|---|---|---|
+| 41 | Who a device command is for | The driver, not one tracking session, so it reaches whichever session the driver opens next | Built P5 (5a) |
+| 42 | Who may send commands by hand | Only an admin. The server's own policies (5c) need no user | Built P5 (5a) |
+| 43 | How long a command waits | 10 minutes without an ack, then it expires and is never sent | Built P5 (5a) |
+| 44 | Two accuracy commands in a row | The newer one cancels the older one if it was not sent yet | Built P5 (5a) |
+
 ## Open questions, most important first
 
 1. Login: who issues tokens in production, and how do guests and drivers sign up (row 27)?

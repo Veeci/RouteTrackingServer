@@ -2,6 +2,7 @@ package veeci.practicing.rts.platform.config
 
 import com.sksamuel.hoplite.Secret
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
 enum class AppEnv { DEV, TEST, STAGING, PROD }
@@ -14,6 +15,7 @@ data class AppConfig(
     val jwt: JwtConfig,
     val tracking: TrackingConfig,
     val events: EventsConfig,
+    val commands: CommandsConfig = CommandsConfig(),
 )
 
 data class AppInfo(
@@ -76,6 +78,14 @@ data class EventsConfig(
     val staleAfter: Duration = 60.seconds,
     /** How often the stale-driver job looks for silent drivers; "back" shows within this time. */
     val staleCheckEvery: Duration = 10.seconds,
+)
+
+/** Device commands (phase 5). */
+data class CommandsConfig(
+    /** How long a command may wait for the device's ack before it expires and is never sent again. */
+    val expireAfter: Duration = 10.minutes,
+    /** How often the expiry job looks for overdue commands. */
+    val expiryCheckEvery: Duration = 30.seconds,
 )
 
 /** The tracking context's limits. The tracking module turns them into its own types. */
