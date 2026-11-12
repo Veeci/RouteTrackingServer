@@ -4,21 +4,24 @@ import veeci.practicing.rts.platform.db.TransactionRunner
 import veeci.practicing.rts.shared.DomainException
 import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.shared.geo.Haversine
+import veeci.practicing.rts.tracking.domain.event.DeviceStatusReported
 import veeci.practicing.rts.tracking.domain.event.FixesAccepted
-import veeci.practicing.rts.trip.application.port.out.ArrivalStateStore
+import veeci.practicing.rts.trip.application.port.out.RuleStateStore
 import veeci.practicing.rts.trip.application.port.out.TripEventOutbox
 import veeci.practicing.rts.trip.application.port.out.TripMomentRepository
 import veeci.practicing.rts.trip.application.port.out.TripRepository
-import veeci.practicing.rts.trip.domain.ArrivalRules
 import veeci.practicing.rts.trip.domain.ArrivalSample
+import veeci.practicing.rts.trip.domain.BatterySample
 import veeci.practicing.rts.trip.domain.Trip
 import veeci.practicing.rts.trip.domain.TripError
+import veeci.practicing.rts.trip.domain.TripRules
 import veeci.practicing.rts.trip.domain.event.TripMoment
 import veeci.practicing.rts.trip.domain.event.TripStatus
 import java.time.Clock
 
 /**
- * Notices moments in the driver's stream and raises them: "driver arriving", and auto-arrive (phase 4).
+ * Notices moments in the driver's stream and raises them: "driver arriving", auto-arrive and "low battery"
+ * (phase 4).
  *
  * Runs in the outbox relay's transaction (TransactionRunner joins it), so the rule state, the stored moments,
  * the status change and the new outbox rows commit together with "this batch is delivered". A batch delivered
@@ -26,12 +29,12 @@ import java.time.Clock
  */
 class TripEventService(
     private val trips: TripRepository,
-    private val arrivalStates: ArrivalStateStore,
+    private val states: RuleStateStore,
     private val moments: TripMomentRepository,
     private val outbox: TripEventOutbox,
     private val transactions: TransactionRunner,
     private val clock: Clock,
-    private val rules: ArrivalRules = ArrivalRules(),
+    private val rules: TripRules = TripRules(),
 ) {
     suspend fun onFixesAccepted(event: FixesAccepted) {
         val driver = event.driverId ?: return
@@ -39,10 +42,10 @@ class TripEventService(
             val trip = trips.findActiveForDriver(UserId(driver))
             // Arrival matters only on the way to the pickup.
             if (trip == null || trip.status != TripStatus.ACCEPTED) return@inTransaction
-            var state = arrivalStates.lock(trip.id)
+            var state = states.lockArrival(trip.id)
             for (position in event.positions) {
                 val sample = ArrivalSample(Haversine.distance(position.point, trip.pickup).value, position.speedMps, position.recordedAt)
-                val outcome = rules.evaluate(state, sample)
+                val outcome = rules.arrival.evaluate(state, sample)
                 state = outcome.state
                 outcome.arriving?.let {
                     raise(
@@ -54,7 +57,24 @@ class TripEventService(
                     break
                 }
             }
-            arrivalStates.save(trip.id, state)
+            states.saveArrival(trip.id, state)
+        }
+    }
+
+    /** The driver's device reported its battery: tell the guest of the driver's active trip when it is low. */
+    suspend fun onDeviceStatus(event: DeviceStatusReported) {
+        val driver = event.driverId ?: return
+        transactions.inTransaction {
+            // Any active trip: the guest cares on the way to the pickup and during the ride.
+            val trip = trips.findActiveForDriver(UserId(driver)) ?: return@inTransaction
+            val battery = event.battery
+            val outcome =
+                rules.battery.evaluate(
+                    states.lockBattery(trip.id),
+                    BatterySample(battery.levelPercent, battery.isCharging, battery.profile, event.at),
+                )
+            outcome.low?.let { raise(TripMoment.DriverLowBattery(trip.id.value, trip.guestId.value, trip.status, it.at, it.levelPercent)) }
+            states.saveBattery(trip.id, outcome.state)
         }
     }
 

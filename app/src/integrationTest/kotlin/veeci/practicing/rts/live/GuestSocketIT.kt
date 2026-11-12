@@ -22,7 +22,9 @@ import veeci.practicing.rts.live.adapter.out.bus.InMemoryLiveUpdateBus
 import veeci.practicing.rts.live.application.api.LiveUpdates
 import veeci.practicing.rts.live.application.port.out.LiveUpdateBus
 import veeci.practicing.rts.protocol.Ack
+import veeci.practicing.rts.protocol.BatteryDto
 import veeci.practicing.rts.protocol.ClientMessage
+import veeci.practicing.rts.protocol.DeviceStatus
 import veeci.practicing.rts.protocol.DriverPosition
 import veeci.practicing.rts.protocol.ErrorMessage
 import veeci.practicing.rts.protocol.FixBatch
@@ -88,7 +90,7 @@ class GuestSocketIT {
         }
 
     @Test
-    fun `TC-4-WS-01 the guest is told the driver is arriving, then sees ARRIVED without the driver tapping`() =
+    fun `TC-4-WS-03 the guest is told the driver is arriving, then sees ARRIVED without the driver tapping`() =
         socketApp {
             val trip = api().created(guest)
             api().act(trip.id, "accept", driver)
@@ -107,6 +109,24 @@ class GuestSocketIT {
                 receiveEvent(TripEvent.STATUS_CHANGED).status shouldBe "ARRIVED"
             }
             api().get(trip.id, guest).trip().status shouldBe "ARRIVED"
+        }
+
+    @Test
+    fun `TC-4-WS-01 a device status at 10 percent tells the guest the driver's battery is low`() =
+        socketApp {
+            val trip = api().created(guest)
+            api().act(trip.id, "accept", driver)
+
+            watch(guest) {
+                subscribe(trip.id)
+                receiveGuest().shouldBeInstanceOf<Subscribed>()
+
+                sendDeviceStatus(levelPercent = 10)
+
+                val low = receiveEvent(TripEvent.DRIVER_LOW_BATTERY)
+                low.levelPercent shouldBe 10
+                low.status shouldBe "ACCEPTED"
+            }
         }
 
     @Test
@@ -280,6 +300,17 @@ class GuestSocketIT {
             receiveDriver().shouldBeInstanceOf<Welcome>()
             sendDriver(FixBatch(1, fixes))
             receiveDriver().shouldBeInstanceOf<Ack>().accepted shouldBe 3
+        }
+    }
+
+    /** The assigned driver opens a session and reports its battery over their own socket. */
+    private suspend fun SocketTestApp.sendDeviceStatus(levelPercent: Int) {
+        wsClient().webSocket(DRIVER, request = { bearerAuth(driver) }) {
+            sendDriver(Hello(1, "phone-1", UUID.randomUUID().toString(), sdkVersion = "0.9.0"))
+            receiveDriver().shouldBeInstanceOf<Welcome>()
+            sendDriver(
+                DeviceStatus(Instant.fromEpochMilliseconds(System.currentTimeMillis()), BatteryDto(levelPercent, isCharging = false)),
+            )
         }
     }
 

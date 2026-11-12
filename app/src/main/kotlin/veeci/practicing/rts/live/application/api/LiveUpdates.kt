@@ -42,7 +42,10 @@ data class TripMomentUpdate(
     /** The trip's stage when it happened. */
     val status: TripStatus,
     val at: Instant,
-    val remainingM: Double?,
+    /** DRIVER_ARRIVING: the straight-line distance to the pickup. */
+    val remainingM: Double? = null,
+    /** DRIVER_LOW_BATTERY: the battery level of the driver's phone. */
+    val levelPercent: Int? = null,
 ) : LiveUpdate
 
 /** The live context's public API: other contexts hand it updates; it delivers them to the watching guests. */

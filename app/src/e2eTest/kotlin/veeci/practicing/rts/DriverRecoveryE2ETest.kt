@@ -36,7 +36,7 @@ import veeci.practicing.rts.simulator.DriverClient
 import veeci.practicing.rts.testing.TestConfig
 import veeci.practicing.rts.testing.TestDatabase
 import veeci.practicing.rts.testing.TestTokens
-import veeci.practicing.rts.testing.testApp
+import veeci.practicing.rts.testing.socketApp
 import java.net.ServerSocket
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
@@ -55,7 +55,7 @@ class DriverRecoveryE2ETest {
 
     @Test
     fun `TC-2-E2E-02 a batch whose ack was lost is stored once after the reconnect`() =
-        testApp {
+        socketApp {
             val http = createClient { install(WebSockets) }
             val welcomes = mutableListOf<Welcome>()
             val token = TestTokens.driver()
@@ -128,7 +128,7 @@ class DriverRecoveryE2ETest {
             val database = TestDatabase.envFor(postgres)
             val paused = AtomicBoolean(false)
             try {
-                testApp(env = database) {
+                socketApp(env = database) {
                     val pausedNow = CompletableDeferred<Unit>()
                     val acksWhilePaused = AtomicInteger()
                     val client =

@@ -1,5 +1,6 @@
 package veeci.practicing.rts.tracking.application.port.out
 
+import veeci.practicing.rts.tracking.domain.event.DeviceStatusReported
 import veeci.practicing.rts.tracking.domain.event.FixesAccepted
 
 /**
@@ -8,4 +9,6 @@ import veeci.practicing.rts.tracking.domain.event.FixesAccepted
  */
 interface TrackingEventOutbox {
     suspend fun add(event: FixesAccepted)
+
+    suspend fun add(event: DeviceStatusReported)
 }

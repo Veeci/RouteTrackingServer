@@ -63,7 +63,15 @@ server → welcome  { sessionId, resumeFromSeq, serverTime, limits: { maxFixesPe
 ```
 client → fix_batch      { seq, fixes: [Fix, ...] }            // 1..maxFixesPerBatch fixes
 server → ack            { seq, accepted, rejected: [{index, reason}] }
-client → device_status  { at, battery: {...}, gnss: {...}?, motion? }   // phase 4 / 9
+client → device_status  { at, battery: { levelPercent, isCharging, temperatureC?, profile? }, motion? }   // phase 4; gnss in phase 9
+```
+
+`device_status` is sent every 30 s while tracking runs, also while the driver is parked: it is the driver's
+heartbeat, and it moves the session's last-seen time. The server sends no reply. A `levelPercent` outside 0 to
+100 gets `error{INVALID_MESSAGE}` and the session stays open. Before `hello` it closes the socket with 4401.
+`profile` and `motion` are free strings; a server treats a value it does not know as normal.
+
+```
 ```
 
 `Fix`:
@@ -147,7 +155,7 @@ client → subscribe        { tripId }
 server → subscribed       { trip: { tripId, status, pickup, destination, driverId?, updatedAt } }
 server → driver_position  { tripId, lat, lng, bearingDeg?, speedMps?, recordedAt }
 server → trip_progress    { tripId, target: PICKUP | DESTINATION, remainingM, etaS, basis: STRAIGHT_LINE }
-server → trip_event       { tripId, event: status_changed | driver_arriving, status, at, remainingM? }
+server → trip_event       { tripId, event: status_changed | driver_arriving | driver_low_battery, status, at, remainingM?, levelPercent? }
 server → route_updated    { tripId, polyline, distanceM }                    // phase 7
 ```
 
@@ -167,6 +175,9 @@ server → route_updated    { tripId, polyline, distanceM }                    /
   a row. `status` is the stage at that time and `remainingM` the straight-line distance. It is sent again only
   after the driver was beyond 300 m for 2 fixes in a row. Phase 4 adds more `event` values, so a client must
   ignore values it does not know; `status` is always present, so older clients keep decoding the message.
+- `trip_event` with `event: driver_low_battery` (phase 4) says the driver's phone is at 15 % or less and not
+  charging, or reports the CRITICAL profile. `levelPercent` is the level. It is sent again only after the phone
+  reached 25 % or was charging. It is sent for an ACCEPTED, ARRIVED or IN_PROGRESS trip.
 - When the arrival rules see the driver at the pickup, the server moves the trip to ARRIVED itself, and the guest
   gets the usual `status_changed` with `status: ARRIVED`.
 - After a final stage (COMPLETED, CANCELLED) the server sends that `trip_event` and closes the socket with 1000.

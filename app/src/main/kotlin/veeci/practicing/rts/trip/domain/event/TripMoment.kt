@@ -25,6 +25,15 @@ sealed interface TripMoment {
         override val at: Instant,
         val remainingM: Double,
     ) : TripMoment
+
+    /** The driver's phone battery is low: [levelPercent] or a CRITICAL profile. */
+    data class DriverLowBattery(
+        override val tripId: UUID,
+        override val guestId: UUID,
+        override val status: TripStatus,
+        override val at: Instant,
+        val levelPercent: Int,
+    ) : TripMoment
 }
 
 /**
@@ -40,6 +49,7 @@ data class TripMomentRaisedV1(
     val status: String,
     val at: Instant,
     val remainingM: Double? = null,
+    val levelPercent: Int? = null,
 ) {
     fun toMoment(): TripMoment? =
         when (kind) {
@@ -53,6 +63,16 @@ data class TripMomentRaisedV1(
                 )
             }
 
+            KIND_DRIVER_LOW_BATTERY -> {
+                TripMoment.DriverLowBattery(
+                    UUID.fromString(tripId),
+                    UUID.fromString(guestId),
+                    TripStatus.valueOf(status),
+                    at,
+                    checkNotNull(levelPercent) { "$KIND_DRIVER_LOW_BATTERY needs levelPercent" },
+                )
+            }
+
             else -> {
                 null
             }
@@ -61,6 +81,7 @@ data class TripMomentRaisedV1(
     companion object {
         const val TYPE = "trip.TripMomentRaised.v1"
         const val KIND_DRIVER_ARRIVING = "DRIVER_ARRIVING"
+        const val KIND_DRIVER_LOW_BATTERY = "DRIVER_LOW_BATTERY"
 
         fun of(moment: TripMoment) =
             when (moment) {
@@ -72,6 +93,17 @@ data class TripMomentRaisedV1(
                         moment.status.name,
                         moment.at,
                         moment.remainingM,
+                    )
+                }
+
+                is TripMoment.DriverLowBattery -> {
+                    TripMomentRaisedV1(
+                        moment.tripId.toString(),
+                        moment.guestId.toString(),
+                        KIND_DRIVER_LOW_BATTERY,
+                        moment.status.name,
+                        moment.at,
+                        levelPercent = moment.levelPercent,
                     )
                 }
             }

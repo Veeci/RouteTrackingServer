@@ -1,0 +1,11 @@
+{
+  "type": "device_status",
+  "at": "2026-09-30T02:15:30Z",
+  "battery": {
+    "levelPercent": 14,
+    "isCharging": false,
+    "temperatureC": 38.5,
+    "profile": "LOW"
+  },
+  "motion": "IN_VEHICLE"
+}

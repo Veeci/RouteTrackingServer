@@ -7,7 +7,6 @@ import io.kotest.matchers.doubles.shouldBeLessThan
 import io.kotest.matchers.ints.shouldBeLessThan
 import io.kotest.matchers.shouldBe
 import io.ktor.client.plugins.websocket.WebSockets
-import io.ktor.server.testing.ApplicationTestBuilder
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -28,9 +27,10 @@ import veeci.practicing.rts.protocol.TripProgress
 import veeci.practicing.rts.shared.geo.GeoPoint
 import veeci.practicing.rts.simulator.DriverClient
 import veeci.practicing.rts.simulator.GuestClient
+import veeci.practicing.rts.testing.SocketTestApp
 import veeci.practicing.rts.testing.TestDatabase
 import veeci.practicing.rts.testing.TestTokens
-import veeci.practicing.rts.testing.testApp
+import veeci.practicing.rts.testing.socketApp
 import veeci.practicing.rts.testing.trip.TripApi
 import java.sql.DriverManager
 import java.util.UUID
@@ -52,7 +52,7 @@ class TripLiveE2ETest {
 
     @Test
     fun `TC-3-E2E-01 TC-4-E2E-01 the guest sees the driver come closer, arriving, then arrived without the driver tapping`() =
-        testApp {
+        socketApp {
             val trip = api().created(guest, pickup = pickup, destination = GeoPoint(10.80, 106.70))
             api().act(trip.id, "accept", driver)
             val messages = ConcurrentLinkedQueue<GuestServerMessage>()
@@ -84,7 +84,7 @@ class TripLiveE2ETest {
     @Test
     fun `TC-3-E2E-02 a guest who cancels gets CANCELLED, and the driver's later batches are stored but not shown`() {
         val bus = RecordingBus()
-        testApp(overrides = listOf(module { single { bus } binds arrayOf(LiveUpdateBus::class, LiveUpdates::class) })) {
+        socketApp(overrides = listOf(module { single { bus } binds arrayOf(LiveUpdateBus::class, LiveUpdates::class) })) {
             val trip = api().created(guest, pickup = pickup, destination = GeoPoint(10.80, 106.70))
             api().act(trip.id, "accept", driver)
             val messages = ConcurrentLinkedQueue<GuestServerMessage>()
@@ -112,12 +112,12 @@ class TripLiveE2ETest {
 
     // ---- helpers -----------------------------------------------------------------------------------------------
 
-    private fun ApplicationTestBuilder.api() = TripApi(client)
+    private fun SocketTestApp.api() = TripApi(client)
 
-    private fun ApplicationTestBuilder.driverClient() =
+    private fun SocketTestApp.driverClient() =
         DriverClient(createClient { install(WebSockets) }, DRIVER_PATH, "e2e-trip-driver", token = driver)
 
-    private suspend fun ApplicationTestBuilder.watch(
+    private suspend fun SocketTestApp.watch(
         tripId: String,
         into: ConcurrentLinkedQueue<GuestServerMessage>,
     ) = GuestClient(createClient { install(WebSockets) }, GUEST_PATH, guest).watch(tripId) { into += it }

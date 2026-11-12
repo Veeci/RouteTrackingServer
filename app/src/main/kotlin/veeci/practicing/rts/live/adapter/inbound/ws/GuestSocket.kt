@@ -133,7 +133,16 @@ class GuestSocket(
 
             is TripMomentUpdate -> {
                 // The protocol names events in lower case: DRIVER_ARRIVING travels as driver_arriving.
-                send(TripEvent(update.tripId.toString(), update.kind.lowercase(), update.status.name, update.at, update.remainingM))
+                send(
+                    TripEvent(
+                        update.tripId.toString(),
+                        update.kind.lowercase(),
+                        update.status.name,
+                        update.at,
+                        update.remainingM,
+                        update.levelPercent,
+                    ),
+                )
                 true
             }
 

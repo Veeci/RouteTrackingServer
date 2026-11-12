@@ -29,6 +29,7 @@ import veeci.practicing.rts.tracking.domain.Rejection
 import veeci.practicing.rts.tracking.domain.RejectionReason
 import veeci.practicing.rts.tracking.domain.SessionId
 import veeci.practicing.rts.tracking.domain.TrackingError
+import veeci.practicing.rts.tracking.domain.event.DeviceStatusReported
 import java.time.Clock
 import java.time.ZoneOffset
 import java.util.UUID
@@ -102,6 +103,33 @@ class TrackingServiceTest {
             open()
 
             shouldThrow<DomainException> { open(by = UserId(UUID.randomUUID())) }.code shouldBe TrackingError.SESSION_DEVICE_MISMATCH
+        }
+
+    @Test
+    fun `a device status moves the session's last-seen time to now and is announced with the driver`() =
+        runTest {
+            service(now = NOW - 1.minutes).openSession(OpenSession(sessionId, phone, sdkVersion = "0.9.0", driverId = driver))
+            val battery = DeviceStatusReported.Battery(40, isCharging = false, temperatureC = 31.0, profile = "NORMAL")
+
+            service.reportStatus(ReportStatus(sessionId, at = NOW - 2.seconds, battery, motion = "STILL"))
+
+            sessions.find(sessionId)!!.lastSeenAt shouldBe NOW
+            val reported = outbox.statuses.single()
+            reported.driverId shouldBe driver.value
+            reported.at shouldBe NOW - 2.seconds
+            reported.battery shouldBe battery
+            reported.motion shouldBe "STILL"
+        }
+
+    @Test
+    fun `a device status before hello is refused`() =
+        runTest {
+            val error =
+                shouldThrow<DomainException> {
+                    service.reportStatus(ReportStatus(sessionId, NOW, DeviceStatusReported.Battery(40, false, null, null), null))
+                }
+
+            error.code shouldBe TrackingError.SESSION_NOT_FOUND
         }
 
     @Test

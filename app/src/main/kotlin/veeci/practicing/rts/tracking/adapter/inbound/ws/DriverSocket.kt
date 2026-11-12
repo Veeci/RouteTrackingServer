@@ -13,6 +13,7 @@ import veeci.practicing.rts.platform.ws.WsSession
 import veeci.practicing.rts.platform.ws.WsSessionRunner
 import veeci.practicing.rts.protocol.Ack
 import veeci.practicing.rts.protocol.ClientMessage
+import veeci.practicing.rts.protocol.DeviceStatus
 import veeci.practicing.rts.protocol.FixBatch
 import veeci.practicing.rts.protocol.Hello
 import veeci.practicing.rts.protocol.LimitsDto
@@ -69,6 +70,7 @@ class DriverSocket(
                     message is Hello && current == null -> session = hello(message, actor)?.also { handshake.cancel() }
                     message is Hello -> sendError(WsErrorCodes.INVALID_MESSAGE, "This socket already sent its hello.")
                     message is FixBatch && current != null -> batch(current, message)
+                    message is DeviceStatus && current != null -> status(current, message)
                     else -> close(CloseReason(WsCloseCodes.HANDSHAKE_TIMEOUT, "The first message must be hello"))
                 }
             }
@@ -119,6 +121,19 @@ class DriverSocket(
             val result = tracking.ingest(DriverMessageMapper.ingest(session, batch))
             send(Ack(result.seq, result.accepted, result.rejected.map { RejectionDto(it.index, it.reason.name) }))
         }
+    }
+
+    /** No reply when it is stored; a level outside 0 to 100 gets INVALID_MESSAGE and the session stays open. */
+    private suspend fun WsSession.status(
+        session: SessionId,
+        status: DeviceStatus,
+    ) {
+        val command = DriverMessageMapper.reportStatus(session, status)
+        if (command == null) {
+            sendError(WsErrorCodes.INVALID_MESSAGE, "battery.levelPercent must be 0 to 100.")
+            return
+        }
+        answer { tracking.reportStatus(command) }
     }
 
     /**

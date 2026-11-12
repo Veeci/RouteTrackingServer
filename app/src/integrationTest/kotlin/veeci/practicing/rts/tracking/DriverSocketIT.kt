@@ -19,7 +19,9 @@ import org.junit.jupiter.api.Test
 import org.koin.dsl.module
 import org.testcontainers.junit.jupiter.Testcontainers
 import veeci.practicing.rts.protocol.Ack
+import veeci.practicing.rts.protocol.BatteryDto
 import veeci.practicing.rts.protocol.ClientMessage
+import veeci.practicing.rts.protocol.DeviceStatus
 import veeci.practicing.rts.protocol.ErrorMessage
 import veeci.practicing.rts.protocol.FixBatch
 import veeci.practicing.rts.protocol.FixDto
@@ -158,11 +160,48 @@ class DriverSocketIT {
             driver {
                 handshake()
 
-                send(Frame.Text("""{"type":"device_status","battery":80}"""))
+                send(Frame.Text("""{"type":"sky_view","satellites":9}"""))
                 receiveError().code shouldBe WsErrorCodes.UNKNOWN_MESSAGE
 
                 sendMessage(batch(1))
                 receiveMessage().shouldBeInstanceOf<Ack>().seq shouldBe 1
+            }
+        }
+
+    @Test
+    fun `a device status gets no reply, and the session goes on`() =
+        socketApp {
+            driver {
+                handshake()
+
+                sendMessage(DeviceStatus(now, BatteryDto(levelPercent = 40, isCharging = false), motion = "STILL"))
+                sendMessage(batch(1))
+
+                receiveMessage().shouldBeInstanceOf<Ack>().seq shouldBe 1 // the first reply is the batch's ack
+            }
+        }
+
+    @Test
+    fun `TC-4-WS-02 a battery level of 150 gets INVALID_MESSAGE and the session stays open`() =
+        socketApp {
+            driver {
+                handshake()
+
+                sendMessage(DeviceStatus(now, BatteryDto(levelPercent = 150, isCharging = false)))
+                receiveError().code shouldBe WsErrorCodes.INVALID_MESSAGE
+
+                sendMessage(batch(1))
+                receiveMessage().shouldBeInstanceOf<Ack>().seq shouldBe 1
+            }
+        }
+
+    @Test
+    fun `a device status before hello closes the socket with 4401`() =
+        socketApp {
+            driver {
+                sendMessage(DeviceStatus(now, BatteryDto(levelPercent = 40, isCharging = false)))
+
+                closeReason.await()?.code shouldBe WsCloseCodes.HANDSHAKE_TIMEOUT
             }
         }
 

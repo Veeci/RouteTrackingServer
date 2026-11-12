@@ -10,13 +10,14 @@ import org.junit.jupiter.api.Test
 import veeci.practicing.rts.shared.DomainException
 import veeci.practicing.rts.shared.geo.GeoPoint
 import veeci.practicing.rts.testing.tracking.DirectTransactionRunner
-import veeci.practicing.rts.testing.trip.InMemoryArrivalStateStore
+import veeci.practicing.rts.testing.trip.InMemoryRuleStateStore
 import veeci.practicing.rts.testing.trip.InMemoryTripEventOutbox
 import veeci.practicing.rts.testing.trip.InMemoryTripMomentRepository
 import veeci.practicing.rts.testing.trip.InMemoryTripRepository
 import veeci.practicing.rts.testing.trip.TripSamples
 import veeci.practicing.rts.testing.trip.TripSamples.PICKUP
 import veeci.practicing.rts.testing.trip.TripSamples.T0
+import veeci.practicing.rts.tracking.domain.event.DeviceStatusReported
 import veeci.practicing.rts.tracking.domain.event.FixesAccepted
 import veeci.practicing.rts.trip.application.port.out.TripRepository
 import veeci.practicing.rts.trip.domain.Trip
@@ -32,7 +33,7 @@ import kotlin.time.toJavaInstant
 
 class TripEventServiceTest {
     private val trips = InMemoryTripRepository()
-    private val states = InMemoryArrivalStateStore()
+    private val states = InMemoryRuleStateStore()
     private val moments = InMemoryTripMomentRepository()
     private val outbox = InMemoryTripEventOutbox()
     private val clock = Clock.fixed((T0 + 1.seconds * 600).toJavaInstant(), ZoneOffset.UTC)
@@ -120,7 +121,7 @@ class TripEventServiceTest {
 
             moments.moments.shouldBeEmpty()
             outbox.events.shouldBeEmpty()
-            states.states[trip.id] shouldBe null
+            states.arrival[trip.id] shouldBe null
         }
 
     @Test
@@ -148,6 +149,54 @@ class TripEventServiceTest {
 
             error.code shouldBe TripError.CONCURRENT_MODIFICATION
             outbox.events.shouldBeEmpty()
+        }
+
+    private fun status(
+        level: Int,
+        atS: Int = 0,
+        charging: Boolean = false,
+    ) = DeviceStatusReported(
+        UUID.randomUUID(),
+        "phone-1",
+        driver.userId.value,
+        T0 + atS.seconds,
+        DeviceStatusReported.Battery(level, charging, temperatureC = null, profile = null),
+        motion = null,
+    )
+
+    @Test
+    fun `low battery during the ride is stored and sent with the trip's stage`() =
+        runTest {
+            val trip = tripIn(TripStatus.IN_PROGRESS)
+
+            service().onDeviceStatus(status(14))
+
+            val moment = moments.moments.single().shouldBeInstanceOf<TripMoment.DriverLowBattery>()
+            moment.tripId shouldBe trip.id.value
+            moment.status shouldBe TripStatus.IN_PROGRESS
+            moment.levelPercent shouldBe 14
+            outbox.moments shouldBe moments.moments
+        }
+
+    @Test
+    fun `the battery state carries over, so a second low status raises nothing`() =
+        runTest {
+            tripIn(TripStatus.ACCEPTED)
+
+            service().onDeviceStatus(status(14))
+            service().onDeviceStatus(status(13, atS = 30))
+
+            moments.moments shouldHaveSize 1
+        }
+
+    @Test
+    fun `a driver without an active trip gets no battery notice`() =
+        runTest {
+            tripIn(TripStatus.COMPLETED)
+
+            service().onDeviceStatus(status(5))
+
+            moments.moments.shouldBeEmpty()
         }
 
     @Test

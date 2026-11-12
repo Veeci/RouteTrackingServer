@@ -5,12 +5,13 @@ import kotlinx.coroutines.sync.withLock
 import veeci.practicing.rts.shared.DomainException
 import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.shared.geo.GeoPoint
-import veeci.practicing.rts.trip.application.port.out.ArrivalStateStore
+import veeci.practicing.rts.trip.application.port.out.RuleStateStore
 import veeci.practicing.rts.trip.application.port.out.TripCursor
 import veeci.practicing.rts.trip.application.port.out.TripEventOutbox
 import veeci.practicing.rts.trip.application.port.out.TripMomentRepository
 import veeci.practicing.rts.trip.application.port.out.TripRepository
 import veeci.practicing.rts.trip.domain.ArrivalState
+import veeci.practicing.rts.trip.domain.BatteryState
 import veeci.practicing.rts.trip.domain.Trip
 import veeci.practicing.rts.trip.domain.TripError
 import veeci.practicing.rts.trip.domain.TripId
@@ -113,16 +114,26 @@ class InMemoryTripMomentRepository : TripMomentRepository {
     }
 }
 
-/** Arrival state per trip. No locking: the unit tests run one batch at a time. */
-class InMemoryArrivalStateStore : ArrivalStateStore {
-    val states = mutableMapOf<TripId, ArrivalState>()
+/** Rule state per trip. No locking: the unit tests run one batch at a time. */
+class InMemoryRuleStateStore : RuleStateStore {
+    val arrival = mutableMapOf<TripId, ArrivalState>()
+    val battery = mutableMapOf<TripId, BatteryState>()
 
-    override suspend fun lock(trip: TripId): ArrivalState = states[trip] ?: ArrivalState()
+    override suspend fun lockArrival(trip: TripId): ArrivalState = arrival[trip] ?: ArrivalState()
 
-    override suspend fun save(
+    override suspend fun saveArrival(
         trip: TripId,
         state: ArrivalState,
     ) {
-        states[trip] = state
+        arrival[trip] = state
+    }
+
+    override suspend fun lockBattery(trip: TripId): BatteryState = battery[trip] ?: BatteryState()
+
+    override suspend fun saveBattery(
+        trip: TripId,
+        state: BatteryState,
+    ) {
+        battery[trip] = state
     }
 }

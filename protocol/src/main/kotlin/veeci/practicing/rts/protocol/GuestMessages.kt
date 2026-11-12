@@ -82,9 +82,12 @@ data class TripEvent(
     val at: Instant,
     /** DRIVER_ARRIVING: the straight-line distance to the pickup, in meters. */
     val remainingM: Double? = null,
+    /** DRIVER_LOW_BATTERY: the battery level of the driver's phone, 0 to 100. */
+    val levelPercent: Int? = null,
 ) : GuestServerMessage {
     companion object {
         const val STATUS_CHANGED = "status_changed"
         const val DRIVER_ARRIVING = "driver_arriving"
+        const val DRIVER_LOW_BATTERY = "driver_low_battery"
     }
 }
