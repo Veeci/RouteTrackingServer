@@ -2,6 +2,7 @@ package veeci.practicing.rts.platform.config
 
 import com.sksamuel.hoplite.Secret
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 enum class AppEnv { DEV, TEST, STAGING, PROD }
 
@@ -71,6 +72,10 @@ data class EventsConfig(
     val relayInterval: Duration,
     /** The most events the relay delivers in one transaction. */
     val relayBatchSize: Int,
+    /** A driver silent for longer than this is reported as gone to guests (phase 4). */
+    val staleAfter: Duration = 60.seconds,
+    /** How often the stale-driver job looks for silent drivers; "back" shows within this time. */
+    val staleCheckEvery: Duration = 10.seconds,
 )
 
 /** The tracking context's limits. The tracking module turns them into its own types. */

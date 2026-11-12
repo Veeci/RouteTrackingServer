@@ -24,6 +24,9 @@ interface TripRepository {
         limit: Int,
     ): List<Trip>
 
+    /** Every trip that has a driver and is not finished yet (ACCEPTED, ARRIVED, IN_PROGRESS). */
+    suspend fun findActive(): List<Trip>
+
     /** The trip that [driver] is assigned to and that is not finished yet, if any. */
     suspend fun findActiveForDriver(driver: UserId): Trip?
 

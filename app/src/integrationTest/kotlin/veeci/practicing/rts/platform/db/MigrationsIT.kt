@@ -15,7 +15,7 @@ class MigrationsIT {
         dataSource.use {
             Migrations.run(it)
 
-            appliedVersions() shouldBe listOf("1", "2", "3", "4", "5", "6", "7", "8")
+            appliedVersions() shouldBe listOf("1", "2", "3", "4", "5", "6", "7", "8", "9")
         }
     }
 

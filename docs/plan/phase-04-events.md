@@ -139,15 +139,40 @@ Tests: TC-4-BAT-01 to 04, TC-4-WS-01 (guest gets driver_low_battery), TC-4-WS-02
 plus no reply to `device_status`, 4401 before hello, and the last-seen time. Check: 225 unit, 177 integration
 and 9 end-to-end tests pass.
 
+## As built: slice 4c (stale and back)
+
+| Plan | As built | Why |
+|---|---|---|
+| `PresenceStore` in memory in the live context | `DriverPresence` in `tracking.application.api`, reading `tracking_sessions.last_seen_at` (index in V9) | With several instances, the instance that runs the job cannot see the others' memory; the database is shared. Redis in phase 10 |
+| `pg_try_advisory_lock` per run | `pg_try_advisory_xact_lock` inside the run's transaction (`PostgresJobLock`) | A session lock stays on a pooled connection when the unlock is skipped and stops the job everywhere; a transaction lock ends with the transaction |
+| TC-4-STL-06: one instance runs per period | One instance at a time; a second run in the same period finds nothing new | The transaction lock serializes runs. `detectStale` raises nothing twice, because the presence state pairs stale and back |
+| "Back" when the next frame arrives | "Back" at the job's next run, within `events.staleCheckEvery` (10 s) | One place decides both; no extra work per batch |
+
+How it works:
+- `platform/jobs`: `ScheduledJob`, `JobLock`, `JobScheduler`. The scheduler waits a period, then runs the job
+  only if the lock is free. A failed run is logged and the next one happens on time. Graceful shutdown stops the
+  scheduler before the relay, so no job uses the pool after it closes.
+- `StaleDriverJob` (trip, lock key 4001) calls `TripEventService.detectStale()`: for each active trip it reads
+  the driver's last-seen time (a driver never heard on the trip counts from the trip's last change), runs
+  `PresenceRules` with the stored state, and raises `DriverStale(lastSeenAt)` or `DriverBack`.
+- `events.staleAfter` (60 s) and `events.staleCheckEvery` (10 s) are in `base.conf`.
+
+Tests: TC-4-STL-01 to 07 (STL-04 and 05 with virtual time; STL-06 with two pools against Postgres),
+TC-4-E2E-02 as a socket test (stale after 1 s, back when heard again). Check: 242 unit, 182 integration and 9
+end-to-end tests pass.
+
+Found on the way: a JUnit test written as `fun test() = runBlocking { ... x shouldBe y }` returns the Boolean of
+its last line, and JUnit skips non-void methods without a word. The lock test declares `: Unit`.
+
 ## Tasks
 
 - [x] T4.1 (4a: arriving and arrived rules) `TripEvent` hierarchy, rule functions, `EventRulesConfig`.
 - [ ] T4.2 `TripEventService` + listeners for `FixesAccepted` / `DeviceStatusReported`.
 - [x] T4.3 (as `autoArrive`) System actor + auto-arrive inside the aggregate.
 - [x] T4.4 `device_status` message in `tracking` (socket branch, mapping, event).
-- [ ] T4.5 `platform/jobs` scheduler with advisory lock; `StaleDriverJob`; `PresenceStore`.
-- [ ] T4.6 V5 migration, repositories, contract tests.
-- [ ] T4.7 `live`: `TripEventRaised` → `trip_event` frames, dedupe by event id.
+- [x] T4.5 `platform/jobs` scheduler with advisory lock; `StaleDriverJob`; `PresenceStore`.
+- [x] T4.6 (V8, V9) V5 migration, repositories, contract tests.
+- [x] T4.7 (without the dedupe) `live`: `TripEventRaised` → `trip_event` frames, dedupe by event id.
 - [ ] T4.8 Domain metrics.
 - [ ] T4.9 Simulator: `--battery-drain` and `--pause-at <seconds>:<duration>` to trigger low-battery and stale.
 

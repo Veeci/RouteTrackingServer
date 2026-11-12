@@ -8,6 +8,7 @@ import org.koin.ktor.ext.get
 import org.slf4j.LoggerFactory
 import veeci.practicing.rts.platform.config.HttpConfig
 import veeci.practicing.rts.platform.events.OutboxRelay
+import veeci.practicing.rts.platform.jobs.JobScheduler
 import veeci.practicing.rts.platform.observability.HealthRegistry
 import veeci.practicing.rts.platform.ws.WsSessionRegistry
 import java.util.concurrent.atomic.AtomicBoolean
@@ -20,7 +21,7 @@ private val log = LoggerFactory.getLogger("veeci.practicing.rts.platform.lifecyc
  * http.shutdownTimeout to finish; only after that does Koin close the connection pool. At that first
  * moment, while connections still work:
  * 1. readiness turns DOWN, so load balancers stop routing new traffic here;
- * 2. the outbox relay stops, so no new event reaches a socket;
+ * 2. the periodic jobs and the outbox relay stop, so nothing new uses the pool or reaches a socket;
  * 3. every WebSocket gets close 1001 (going away), so clients reconnect with backoff, to another
  *    instance, instead of seeing a dropped connection; sessions still open after
  *    [HttpConfig.shutdownGracePeriod] are cancelled.
@@ -30,6 +31,7 @@ private val log = LoggerFactory.getLogger("veeci.practicing.rts.platform.lifecyc
 fun Application.configureGracefulShutdown(config: HttpConfig) {
     val health = get<HealthRegistry>()
     val relay = get<OutboxRelay>()
+    val jobs = get<JobScheduler>()
     val sockets = get<WsSessionRegistry>()
     val started = AtomicBoolean(false)
     // Ktor raises this event from more than one layer of its stop sequence; act on the first only.
@@ -39,6 +41,7 @@ fun Application.configureGracefulShutdown(config: HttpConfig) {
         // A plain event handler: block this (shutdown) thread until both have stopped.
         val asked =
             runBlocking {
+                jobs.stop()
                 relay.stop()
                 sockets.closeAll(CloseReason(CloseReason.Codes.GOING_AWAY, "Server shutting down"), config.shutdownGracePeriod)
             }

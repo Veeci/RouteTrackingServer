@@ -1,0 +1,8 @@
+{
+  "type": "trip_event",
+  "tripId": "3b241101-e2bb-4255-8caf-4136c566a962",
+  "event": "driver_stale",
+  "status": "IN_PROGRESS",
+  "at": "2026-09-30T02:31:05Z",
+  "lastSeenAt": "2026-09-30T02:30:02Z"
+}

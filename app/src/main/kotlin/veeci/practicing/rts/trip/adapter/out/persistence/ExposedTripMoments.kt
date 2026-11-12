@@ -19,6 +19,7 @@ import veeci.practicing.rts.trip.application.port.out.RuleStateStore
 import veeci.practicing.rts.trip.application.port.out.TripMomentRepository
 import veeci.practicing.rts.trip.domain.ArrivalState
 import veeci.practicing.rts.trip.domain.BatteryState
+import veeci.practicing.rts.trip.domain.PresenceState
 import veeci.practicing.rts.trip.domain.TripId
 import veeci.practicing.rts.trip.domain.event.TripMoment
 import veeci.practicing.rts.trip.domain.event.TripMomentRaisedV1
@@ -76,6 +77,14 @@ class ExposedRuleStateStore : RuleStateStore {
         trip: TripId,
         state: BatteryState,
     ) = save(trip, BATTERY, StoredBatteryState.serializer(), StoredBatteryState.of(state))
+
+    override suspend fun lockPresence(trip: TripId): PresenceState =
+        lock(trip, PRESENCE, StoredPresenceState.serializer(), StoredPresenceState()).let { PresenceState(it.stale) }
+
+    override suspend fun savePresence(
+        trip: TripId,
+        state: PresenceState,
+    ) = save(trip, PRESENCE, StoredPresenceState.serializer(), StoredPresenceState(state.stale))
 
     private fun <S> lock(
         trip: TripId,
@@ -141,8 +150,15 @@ class ExposedRuleStateStore : RuleStateStore {
         }
     }
 
+    /** Fields may be added with defaults. */
+    @Serializable
+    private data class StoredPresenceState(
+        val stale: Boolean = false,
+    )
+
     private companion object {
         const val ARRIVAL = "arrival"
         const val BATTERY = "battery"
+        const val PRESENCE = "presence"
     }
 }

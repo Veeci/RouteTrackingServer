@@ -15,6 +15,7 @@ import io.micrometer.prometheusmetrics.PrometheusMeterRegistry
 import org.koin.core.module.Module
 import org.koin.dsl.module
 import org.koin.ktor.ext.get
+import org.koin.ktor.ext.getKoin
 import org.koin.ktor.plugin.KoinIsolated
 import org.koin.logger.slf4jLogger
 import org.slf4j.LoggerFactory
@@ -31,6 +32,8 @@ import veeci.practicing.rts.platform.events.OutboxRelay
 import veeci.practicing.rts.platform.http.configureErrorHandling
 import veeci.practicing.rts.platform.http.configureRequestGuards
 import veeci.practicing.rts.platform.http.configureSerialization
+import veeci.practicing.rts.platform.jobs.JobScheduler
+import veeci.practicing.rts.platform.jobs.ScheduledJob
 import veeci.practicing.rts.platform.lifecycle.configureGracefulShutdown
 import veeci.practicing.rts.platform.observability.configureMetrics
 import veeci.practicing.rts.platform.observability.configureRequestLogging
@@ -82,6 +85,8 @@ fun Application.module(
     configureGracefulShutdown(config.http)
     // Delivers stored events to the contexts that react to them; stops with the application.
     get<OutboxRelay>().start(this)
+    // Periodic jobs (the stale-driver check); each run happens on one instance only.
+    get<JobScheduler>().start(this, getKoin().getAll<ScheduledJob>())
 
     configureRequestLogging()
     configureMetrics(metrics)
@@ -116,7 +121,7 @@ fun appModule(
             platformModule(config, metrics),
             identityModule(),
             trackingModule(config.tracking, config.ws),
-            tripModule(),
+            tripModule(config.events),
             liveModule(),
         )
     }

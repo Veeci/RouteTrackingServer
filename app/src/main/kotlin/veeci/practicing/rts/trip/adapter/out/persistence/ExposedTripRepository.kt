@@ -78,6 +78,12 @@ class ExposedTripRepository : TripRepository {
             .limit(limit)
             .map { it.toTrip() }
 
+    override suspend fun findActive(): List<Trip> =
+        TripsTable
+            .selectAll()
+            .where { TripsTable.status inList ACTIVE }
+            .map { it.toTrip() }
+
     override suspend fun findActiveForDriver(driver: UserId): Trip? =
         TripsTable
             .selectAll()

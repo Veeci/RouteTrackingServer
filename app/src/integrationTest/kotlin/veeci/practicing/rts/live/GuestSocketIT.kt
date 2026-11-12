@@ -1,5 +1,6 @@
 package veeci.practicing.rts.live
 
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import io.ktor.client.HttpClient
@@ -126,6 +127,25 @@ class GuestSocketIT {
                 val low = receiveEvent(TripEvent.DRIVER_LOW_BATTERY)
                 low.levelPercent shouldBe 10
                 low.status shouldBe "ACCEPTED"
+            }
+        }
+
+    @Test
+    fun `TC-4-E2E-02 a driver silent for the stale time is reported gone, then back when heard again`() =
+        socketApp(env = mapOf("EVENTS_STALEAFTER" to "1s", "EVENTS_STALECHECKEVERY" to "200ms")) {
+            val trip = api().created(guest)
+            api().act(trip.id, "accept", driver)
+
+            watch(guest) {
+                subscribe(trip.id)
+                receiveGuest().shouldBeInstanceOf<Subscribed>()
+                sendDeviceStatus(levelPercent = 80) // the driver is heard now
+
+                val stale = receiveEvent(TripEvent.DRIVER_STALE) // about 1 s later
+                stale.lastSeenAt.shouldNotBeNull()
+
+                sendDeviceStatus(levelPercent = 80)
+                receiveEvent(TripEvent.DRIVER_BACK).status shouldBe "ACCEPTED"
             }
         }
 

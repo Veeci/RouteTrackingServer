@@ -141,6 +141,7 @@ class GuestSocket(
                         update.at,
                         update.remainingM,
                         update.levelPercent,
+                        update.lastSeenAt,
                     ),
                 )
                 true
