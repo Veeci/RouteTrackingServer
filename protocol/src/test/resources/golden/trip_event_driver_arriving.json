@@ -1,0 +1,8 @@
+{
+  "type": "trip_event",
+  "tripId": "3b241101-e2bb-4255-8caf-4136c566a962",
+  "event": "driver_arriving",
+  "status": "ACCEPTED",
+  "at": "2026-09-30T02:16:58Z",
+  "remainingM": 184.2
+}

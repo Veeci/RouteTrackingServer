@@ -84,11 +84,44 @@ dedupes by event id).
 Domain metrics on the phase 1 registry: `rts_driver_sessions_active`, `rts_guest_sessions_active`,
 `rts_fixes_ingested_total{result}`, `rts_ack_latency_seconds` (histogram), `rts_trip_events_total{type}`.
 
+## As built: slice 4a (arriving and auto-arrive)
+
+Phase 4 is built in four slices, one PR each: 4a arriving and auto-arrive, 4b `device_status` and low battery,
+4c stale and back, 4d metrics and simulator flags. Slice 4a differs from the design above in these ways:
+
+| Plan | As built | Why |
+|---|---|---|
+| A system actor (`Actor.System`) performs `arrive` | `Trip.autoArrive(now)`, with no actor. The change is recorded with `cause = AUTO` (`StatusCause`, new field `cause` in `TripStatusChangedV1`) | No person acts, so there is nobody to authorize. A SYSTEM role would let the dev token endpoint issue system tokens |
+| One sealed `TripEvent` with `StatusChanged` and `DriverArrived` | `TripStatusChanged` stays the only status event. New sealed `TripMoment` (`DriverArriving` now; stale, back and low battery in 4b and 4c), payload `TripMomentRaisedV1` | Two events for one status change could disagree. `TripEvent` is already the guest message's name. Arriving at the pickup is the status change itself |
+| `V5__trip_events.sql` | `V8__trip_moments.sql`: `trip_moments` and `trip_rule_state(trip_id, rule, state jsonb)` | V5 to V7 were taken in phase 3 |
+| `TripEventService` opens its own transaction | It runs in the outbox relay's transaction (`TransactionRunner` joins it) | Rule state, moment, status change, new outbox rows and "batch delivered" commit together |
+| `trip_event` gets new events and an optional `status` | `status` stays required. `remainingM` is added. The AsyncAPI document says clients ignore unknown `event` values | An older SDK keeps decoding the message |
+
+How it works:
+- `ArrivalListener` (trip) handles `FixesAccepted`, next to the progress listener. `TripEventService` loads the
+  driver's active trip, and only for an ACCEPTED trip it locks the arrival state (`INSERT ... ON CONFLICT DO
+  NOTHING`, then `SELECT ... FOR UPDATE`), runs `ArrivalRules` over every fix of the batch, stores
+  `DriverArriving` in `trip_moments` and the outbox, and calls `autoArrive` when the rule says arrived.
+- `ArrivalRules` is pure. It skips a fix at or before the last fix it counted, so a batch the relay delivers
+  twice raises nothing the second time. A fix without a measured speed counts only for the fixes-in-a-row rule.
+- When the trip changed in between (the driver tapped "arrived" at the same moment), the optimistic update fails,
+  the service throws CONCURRENT_MODIFICATION, and the relay rolls everything back and delivers the batch again.
+  The next attempt sees ARRIVED and does nothing.
+- `TripMomentListener` (live) turns `TripMomentRaisedV1` into a `TripMomentUpdate`. The guest socket sends it as
+  `trip_event{event: driver_arriving}`.
+
+Not done in 4a: the guest socket does not drop a moment delivered twice (the plan's dedupe by event id), the
+thresholds are `ArrivalConfig` defaults and not in HOCON yet, and `trip_rule_state` rows stay after a trip ends.
+
+Tests: TC-4-ARV-01 to 05, TC-4-ARD-01 to 04, TC-4-PER-01 and 02, TC-4-WS-01 (arriving, then ARRIVED) and
+TC-4-E2E-01 (inside TC-3-E2E-01, which now waits for the automatic ARRIVED). Check: 206 unit, 173 integration and
+9 end-to-end tests pass.
+
 ## Tasks
 
-- [ ] T4.1 `TripEvent` hierarchy, rule functions, `EventRulesConfig`.
+- [x] T4.1 (4a: arriving and arrived rules) `TripEvent` hierarchy, rule functions, `EventRulesConfig`.
 - [ ] T4.2 `TripEventService` + listeners for `FixesAccepted` / `DeviceStatusReported`.
-- [ ] T4.3 System actor + auto-arrive inside the aggregate.
+- [x] T4.3 (as `autoArrive`) System actor + auto-arrive inside the aggregate.
 - [ ] T4.4 `device_status` message in `tracking` (socket branch, mapping, event).
 - [ ] T4.5 `platform/jobs` scheduler with advisory lock; `StaleDriverJob`; `PresenceStore`.
 - [ ] T4.6 V5 migration, repositories, contract tests.

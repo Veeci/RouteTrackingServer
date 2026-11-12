@@ -44,6 +44,7 @@ import veeci.practicing.rts.testing.TestTokens
 import veeci.practicing.rts.testing.socketApp
 import veeci.practicing.rts.testing.trip.TripApi
 import veeci.practicing.rts.testing.trip.TripSamples.PICKUP
+import veeci.practicing.rts.testing.trip.trip
 import java.util.UUID
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
@@ -84,6 +85,28 @@ class GuestSocketIT {
                 subscribe(own.id)
                 receiveGuest().shouldBeInstanceOf<Subscribed>()
             }
+        }
+
+    @Test
+    fun `TC-4-WS-01 the guest is told the driver is arriving, then sees ARRIVED without the driver tapping`() =
+        socketApp {
+            val trip = api().created(guest)
+            api().act(trip.id, "accept", driver)
+
+            watch(guest) {
+                subscribe(trip.id)
+                receiveGuest().shouldBeInstanceOf<Subscribed>()
+
+                sendDriverBatch(metersFromPickup = 150.0) // fixes at 170, 160 and 150 m
+                val arriving = receiveEvent(TripEvent.DRIVER_ARRIVING)
+                arriving.status shouldBe "ACCEPTED"
+                (arriving.remainingM!! in 155.0..165.0) shouldBe true // the second fix in a row within 200 m
+
+                // fixes at 25, 15 and 5 m, all after the first batch's fixes
+                sendDriverBatch(metersFromPickup = 5.0, endsAt = Instant.fromEpochMilliseconds(System.currentTimeMillis()) + 3.seconds)
+                receiveEvent(TripEvent.STATUS_CHANGED).status shouldBe "ARRIVED"
+            }
+            api().get(trip.id, guest).trip().status shouldBe "ARRIVED"
         }
 
     @Test
@@ -223,9 +246,24 @@ class GuestSocketIT {
         }
     }
 
-    /** The assigned driver sends one batch of 3 fixes, [metersFromPickup] south of the pickup, over their own socket. */
-    private suspend fun SocketTestApp.sendDriverBatch(metersFromPickup: Double) {
-        val now = Instant.fromEpochMilliseconds(System.currentTimeMillis())
+    /** The next `trip_event` with [event], skipping everything else (positions, progress, older events). */
+    private suspend fun DefaultClientWebSocketSession.receiveEvent(event: String): TripEvent {
+        while (true) {
+            val message = receiveGuest()
+            if (message is TripEvent && message.event == event) return message
+        }
+    }
+
+    /**
+     * The assigned driver sends one batch of 3 fixes, [metersFromPickup] south of the pickup, over their own socket.
+     * The fixes are 1 s apart and the last is 1 s before [endsAt]; a later batch needs a later [endsAt], or the
+     * rules skip its fixes as repeats.
+     */
+    private suspend fun SocketTestApp.sendDriverBatch(
+        metersFromPickup: Double,
+        endsAt: Instant = Instant.fromEpochMilliseconds(System.currentTimeMillis()),
+    ) {
+        val now = endsAt
         val fixes =
             (0..2).map {
                 FixDto(

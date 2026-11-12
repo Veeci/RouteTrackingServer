@@ -130,7 +130,7 @@ class TripService(
 
 // Postgres keeps microseconds and rounds the rest. A Linux JVM clock has nanoseconds, so without the truncation a
 // trip's times would read back different from what the API answered when it was created.
-private fun Clock.now(): Instant = instant().truncatedTo(ChronoUnit.MICROS).toKotlinInstant()
+internal fun Clock.now(): Instant = instant().truncatedTo(ChronoUnit.MICROS).toKotlinInstant()
 
 // Time-ordered ids (UUID version 7) keep new rows at the end of the primary key index.
 @OptIn(ExperimentalUuidApi::class)

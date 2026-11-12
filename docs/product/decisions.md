@@ -86,16 +86,16 @@ is closed, and sign-up and login for real users.
 | 33 | Flaky tests blocked releases and hid real bugs | Fixed. Socket tests run on Netty, as in production | #12 to #15 |
 | 34 | 21 library updates (Ktor 3.6.1, Gradle 9.8.2) | Merged. Gradle 10 deprecation warnings remain in the build scripts | #10 |
 
-## Phase 4 proposals
+## Phase 4 (4a built, the rest proposed)
 
 | # | Problem | Proposal | Source |
 |---|---|---|---|
-| 35 | Marking "driver arrived" without the driver | The server moves the trip to ARRIVED when the driver is within 30 m for 3 fixes in a row, or within 30 m and slower than 1.5 m/s for 10 s. A driver parked next door could be marked arrived, and ARRIVED cannot be undone. **Open** | Proposed |
-| 36 | When the guest sees "arriving" | Within 200 m for 2 fixes in a row. It resets only beyond 300 m, so GPS noise cannot make it flicker | Proposed |
+| 35 | Marking "driver arrived" without the driver | The server moves the trip to ARRIVED when the driver is within 30 m for 3 fixes in a row, or within 30 m and slower than 1.5 m/s for 10 s. A driver parked next door could be marked arrived, and ARRIVED cannot be undone. **Open** | Built P4 (4a) |
+| 36 | When the guest sees "arriving" | Within 200 m for 2 fixes in a row. It resets only beyond 300 m, so GPS noise cannot make it flicker | Built P4 (4a) |
 | 37 | When the driver counts as gone | After 60 s with no frame from the phone. The SDK must send `device_status` every 30 s, also while parked. Aggressive OEM battery savers will cause real "connection lost" notices | Proposed |
 | 38 | When the battery counts as low | At 15 % or below and not charging. It resets at 25 % or when charging | Proposed |
-| 39 | Older app versions | New notices reuse the `trip_event` message and keep `status`, so an older SDK ignores what it does not know. The SDK must ignore unknown `event` values | Proposed |
-| 40 | Showing whether "arrived" was automatic | Stored as `cause` for history, not sent to the guest | Proposed |
+| 39 | Older app versions | New notices reuse the `trip_event` message and keep `status`, so an older SDK ignores what it does not know. The SDK must ignore unknown `event` values | Built P4 (4a) |
+| 40 | Showing whether "arrived" was automatic | Stored as `cause` for history, not sent to the guest | Built P4 (4a) |
 
 ## Open questions, most important first
 

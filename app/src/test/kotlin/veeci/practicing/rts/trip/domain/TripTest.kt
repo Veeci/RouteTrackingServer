@@ -9,6 +9,7 @@ import org.junit.jupiter.params.provider.EnumSource
 import veeci.practicing.rts.shared.DomainException
 import veeci.practicing.rts.testing.trip.TripSamples
 import veeci.practicing.rts.testing.trip.TripSamples.T0
+import veeci.practicing.rts.trip.domain.event.StatusCause
 import veeci.practicing.rts.trip.domain.event.TripStatus
 import veeci.practicing.rts.trip.domain.event.TripStatus.ACCEPTED
 import veeci.practicing.rts.trip.domain.event.TripStatus.ARRIVED
@@ -152,6 +153,30 @@ class TripTest {
         taken.isVisibleTo(driver) shouldBe true
         taken.isVisibleTo(TripSamples.driver()) shouldBe false
         taken.isVisibleTo(TripSamples.admin()) shouldBe true
+    }
+
+    @Test
+    fun `auto-arrive moves an ACCEPTED trip to ARRIVED and records cause AUTO`() {
+        val trip = TripSamples.inStatus(ACCEPTED, driver = driver)
+        val at = T0 + 2.hours
+
+        trip.autoArrive(at) shouldBe true
+
+        trip.status shouldBe ARRIVED
+        trip.updatedAt shouldBe at
+        trip.pullEvents() shouldBe
+            listOf(TripStatusChanged(trip.id.value, trip.guestId.value, driver.userId.value, ACCEPTED, ARRIVED, at, StatusCause.AUTO))
+    }
+
+    @ParameterizedTest
+    @EnumSource(TripStatus::class, names = ["ACCEPTED"], mode = EnumSource.Mode.EXCLUDE)
+    fun `auto-arrive changes nothing when the trip is not ACCEPTED`(status: TripStatus) {
+        val trip = TripSamples.inStatus(status, driver = driver)
+
+        trip.autoArrive(T0 + 2.hours) shouldBe false
+
+        trip.status shouldBe status
+        trip.pullEvents() shouldBe emptyList()
     }
 
     /** Someone the table allows to do [action], so a refusal can only come from the trip's stage. */

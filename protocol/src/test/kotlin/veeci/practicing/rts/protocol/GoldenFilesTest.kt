@@ -60,7 +60,7 @@ class GoldenFilesTest {
         val goldenFiles = File(javaClass.getResource("/golden")!!.toURI()).list()!!.map { it.removeSuffix(".json") }.toSet()
 
         samples().map { it.type }.toSet() shouldBe inCode
-        goldenFiles shouldBe inCode
+        goldenFiles shouldBe samples().map { it.file }.toSet()
         asyncApiMessageNames() shouldBe inCode
     }
 
@@ -85,19 +85,23 @@ class GoldenFilesTest {
     @OptIn(ExperimentalSerializationApi::class)
     private fun SerialDescriptor.subclassNames(): Set<String> = getElementDescriptor(1).elementNames.toSet()
 
-    /** A message, the serializer of its sealed family (which writes `type`), and its golden file `golden/<type>.json`. */
+    /**
+     * A message, the serializer of its sealed family (which writes `type`), and its golden file `golden/<file>.json`.
+     * [file] differs from [type] when one type has several shapes worth pinning (a `trip_event` per event).
+     */
     class Sample<T : Any>(
         val type: String,
         val message: T,
         private val serializer: KSerializer<T>,
+        val file: String = type,
     ) {
-        fun golden(): String = Sample::class.java.getResource("/golden/$type.json")!!.readText()
+        fun golden(): String = Sample::class.java.getResource("/golden/$file.json")!!.readText()
 
         fun encode() = ProtocolJson.encodeToJsonElement(serializer, message)
 
         fun decode(frame: String): T = ProtocolJson.decodeFromString(serializer, frame)
 
-        override fun toString() = type
+        override fun toString() = file
     }
 
     companion object {
@@ -189,6 +193,12 @@ class GoldenFilesTest {
                     "trip_event",
                     TripEvent(TRIP, TripEvent.STATUS_CHANGED, "ARRIVED", Instant.parse("2026-09-30T02:17:30Z")),
                     GuestServerMessage.serializer(),
+                ),
+                Sample(
+                    "trip_event",
+                    TripEvent(TRIP, TripEvent.DRIVER_ARRIVING, "ACCEPTED", Instant.parse("2026-09-30T02:16:58Z"), remainingM = 184.2),
+                    GuestServerMessage.serializer(),
+                    file = "trip_event_driver_arriving",
                 ),
             )
     }

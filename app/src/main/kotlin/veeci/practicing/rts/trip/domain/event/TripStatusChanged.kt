@@ -4,6 +4,15 @@ import kotlinx.serialization.Serializable
 import java.util.UUID
 import kotlin.time.Instant
 
+/** Why a trip changed its stage. */
+enum class StatusCause {
+    /** A guest or driver asked for it. */
+    USER,
+
+    /** The server's rules decided it, for example auto-arrive (phase 4). */
+    AUTO,
+}
+
 /** A trip moved to another stage. [from] is null when the trip was just requested. */
 data class TripStatusChanged(
     val tripId: UUID,
@@ -12,6 +21,7 @@ data class TripStatusChanged(
     val from: TripStatus?,
     val to: TripStatus,
     val at: Instant,
+    val cause: StatusCause = StatusCause.USER,
 )
 
 /**
@@ -26,6 +36,8 @@ data class TripStatusChangedV1(
     val from: String? = null,
     val to: String,
     val at: Instant,
+    /** Added in phase 4. Absent in older events, which were all USER. */
+    val cause: String? = null,
 ) {
     fun toEvent() =
         TripStatusChanged(
@@ -35,6 +47,7 @@ data class TripStatusChangedV1(
             from = from?.let(TripStatus::valueOf),
             to = TripStatus.valueOf(to),
             at = at,
+            cause = cause?.let(StatusCause::valueOf) ?: StatusCause.USER,
         )
 
     companion object {
@@ -48,6 +61,7 @@ data class TripStatusChangedV1(
                 from = event.from?.name,
                 to = event.to.name,
                 at = event.at,
+                cause = event.cause.name,
             )
     }
 }

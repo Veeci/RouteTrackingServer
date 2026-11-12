@@ -1,8 +1,10 @@
 package veeci.practicing.rts
 
 import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.doubles.shouldBeLessThan
+import io.kotest.matchers.ints.shouldBeLessThan
 import io.kotest.matchers.shouldBe
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.server.testing.ApplicationTestBuilder
@@ -49,7 +51,7 @@ class TripLiveE2ETest {
     private val pickup = route.last().let { GeoPoint(it.lat, it.lng) }
 
     @Test
-    fun `TC-3-E2E-01 the guest sees the driver come closer until they are at the pickup`() =
+    fun `TC-3-E2E-01 TC-4-E2E-01 the guest sees the driver come closer, arriving, then arrived without the driver tapping`() =
         testApp {
             val trip = api().created(guest, pickup = pickup, destination = GeoPoint(10.80, 106.70))
             api().act(trip.id, "accept", driver)
@@ -60,7 +62,9 @@ class TripLiveE2ETest {
                 awaitSubscribed(messages)
                 driverClient().apply { route.chunked(10).forEach(::enqueue) }.connectAndSend()
                 eventually { lastProgress(messages)!!.remainingM shouldBeLessThan 50.0 }
-                api().moved(trip.id, driver, "arrive", "start", "complete")
+                // Phase 4: the server marks the trip arrived by itself; the driver only starts and completes.
+                eventually { messages.filterIsInstance<TripEvent>().map { it.status } shouldContain "ARRIVED" }
+                api().moved(trip.id, driver, "start", "complete")
                 watching.await()
             }
 
@@ -70,6 +74,11 @@ class TripLiveE2ETest {
             // Each update is at most a GPS accuracy radius (5 m) worse than the one before: the driver comes closer.
             remaining.zipWithNext().filter { (before, after) -> after > before + 5.0 }.shouldBeEmpty()
             messages.filterIsInstance<TripEvent>().last().status shouldBe "COMPLETED"
+            val events = messages.filterIsInstance<TripEvent>().map { it.event to it.status }
+            events shouldContain (TripEvent.DRIVER_ARRIVING to "ACCEPTED")
+            events shouldContain (TripEvent.STATUS_CHANGED to "ARRIVED")
+            events.indexOf(TripEvent.DRIVER_ARRIVING to "ACCEPTED") shouldBeLessThan events.indexOf(TripEvent.STATUS_CHANGED to "ARRIVED")
+            events.count { it.first == TripEvent.DRIVER_ARRIVING } shouldBe 1
         }
 
     @Test

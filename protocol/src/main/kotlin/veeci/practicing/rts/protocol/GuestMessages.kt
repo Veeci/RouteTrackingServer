@@ -67,7 +67,12 @@ data class TripProgress(
     val basis: String,
 ) : GuestServerMessage
 
-/** The trip moved to another stage. After a final stage (COMPLETED, CANCELLED) the server closes the socket with 1000. */
+/**
+ * Something happened on the trip. [event] says what: [STATUS_CHANGED] (the trip moved to [status]) or a moment
+ * such as [DRIVER_ARRIVING]. [status] is always the trip's stage at that time. New [event] values may be added
+ * in a later server, so a client ignores values it does not know. After a final stage (COMPLETED, CANCELLED)
+ * the server closes the socket with 1000.
+ */
 @Serializable
 @SerialName("trip_event")
 data class TripEvent(
@@ -75,8 +80,11 @@ data class TripEvent(
     val event: String,
     val status: String,
     val at: Instant,
+    /** DRIVER_ARRIVING: the straight-line distance to the pickup, in meters. */
+    val remainingM: Double? = null,
 ) : GuestServerMessage {
     companion object {
         const val STATUS_CHANGED = "status_changed"
+        const val DRIVER_ARRIVING = "driver_arriving"
     }
 }

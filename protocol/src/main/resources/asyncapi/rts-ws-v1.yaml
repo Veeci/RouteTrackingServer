@@ -320,12 +320,21 @@ components:
           format: uuid
         event:
           type: string
-          enum: [status_changed]
+          enum: [status_changed, driver_arriving]
+          description: >-
+            What happened. `status_changed`: the trip moved to `status`. `driver_arriving`: the driver came within
+            200 m of the pickup (2 fixes in a row); sent again only after the driver went beyond 300 m. A later
+            server may add values, so a client ignores values it does not know.
         status:
           $ref: '#/components/schemas/TripStatus'
+          description: The trip's stage when the event happened.
         at:
           type: string
           format: date-time
+        remainingM:
+          type: number
+          minimum: 0
+          description: '`driver_arriving` only: the straight-line distance to the pickup, in meters.'
 
     Hello:
       type: object
