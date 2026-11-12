@@ -19,6 +19,8 @@ import org.koin.ktor.ext.getKoin
 import org.koin.ktor.plugin.KoinIsolated
 import org.koin.logger.slf4jLogger
 import org.slf4j.LoggerFactory
+import veeci.practicing.rts.devicecontrol.adapter.inbound.web.adminCommandRoutes
+import veeci.practicing.rts.devicecontrol.deviceControlModule
 import veeci.practicing.rts.identity.adapter.inbound.web.devTokenRoutes
 import veeci.practicing.rts.identity.identityModule
 import veeci.practicing.rts.live.adapter.inbound.ws.guestSocket
@@ -104,6 +106,7 @@ fun Application.module(
             driverSocket(get())
             guestSocket(get())
             tripRoutes(get(), get())
+            adminCommandRoutes(get())
         }
         if (config.app.env != AppEnv.PROD) echoEndpoint(get())
         // Interactive API docs generated from the contract; local development only.
@@ -122,6 +125,7 @@ fun appModule(
             identityModule(),
             trackingModule(config.tracking, config.ws),
             tripModule(config.events),
+            deviceControlModule(config.commands),
             liveModule(),
         )
     }
