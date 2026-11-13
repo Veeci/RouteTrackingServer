@@ -1,0 +1,9 @@
+{
+  "type": "trip_progress",
+  "tripId": "3b241101-e2bb-4255-8caf-4136c566a962",
+  "target": "DESTINATION",
+  "remainingM": 640.0,
+  "etaS": 88.5,
+  "basis": "ROUTE",
+  "routeVersion": 1
+}

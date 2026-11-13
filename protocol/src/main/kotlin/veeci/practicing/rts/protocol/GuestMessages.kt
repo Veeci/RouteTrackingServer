@@ -35,6 +35,24 @@ data class GuestTrip(
     val destination: Point,
     val driverId: String? = null,
     val updatedAt: Instant,
+    /**
+     * The route the driver follows now, the one `trip_progress` measures on: driver to pickup before the ride,
+     * pickup to destination during it. Absent when there is none. Added in phase 7.
+     */
+    val route: GuestRoute? = null,
+)
+
+/** A planned road route. */
+@Serializable
+data class GuestRoute(
+    /** TRIP (pickup to destination) or APPROACH (driver to pickup). */
+    val kind: String,
+    /** Grows by 1 with each new plan of the same kind; `trip_progress.routeVersion` names the one it measures on. */
+    val routeVersion: Int,
+    /** Google Encoded Polyline, precision 5, as Android's `PolyUtil.decode` reads it. */
+    val polyline: String,
+    val distanceM: Double,
+    val durationS: Double,
 )
 
 @Serializable
@@ -63,8 +81,10 @@ data class TripProgress(
     val target: String,
     val remainingM: Double,
     val etaS: Double,
-    /** STRAIGHT_LINE until distances are measured along the road (phase 7). */
+    /** ROUTE when measured along the planned road, STRAIGHT_LINE when the trip has no route for this stage. */
     val basis: String,
+    /** With basis ROUTE: the version of the route the distance is measured on. */
+    val routeVersion: Int? = null,
 ) : GuestServerMessage
 
 /**

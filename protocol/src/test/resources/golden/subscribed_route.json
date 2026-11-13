@@ -1,0 +1,18 @@
+{
+  "type": "subscribed",
+  "trip": {
+    "tripId": "3b241101-e2bb-4255-8caf-4136c566a962",
+    "status": "IN_PROGRESS",
+    "pickup": { "lat": 10.7725, "lng": 106.698 },
+    "destination": { "lat": 10.7798, "lng": 106.699 },
+    "driverId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "updatedAt": "2026-09-30T02:15:00Z",
+    "route": {
+      "kind": "TRIP",
+      "routeVersion": 1,
+      "polyline": "_wd`Ase}iSkk@_E",
+      "distanceM": 812.4,
+      "durationS": 97.5
+    }
+  }
+}

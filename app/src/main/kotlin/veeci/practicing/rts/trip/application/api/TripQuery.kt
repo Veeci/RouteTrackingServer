@@ -20,10 +20,19 @@ data class TripSnapshot(
     val version: Long,
     /** The pickup-to-destination route. Filled where it is cheap (booking, reading one trip); null in lists. */
     val route: RouteSummary? = null,
+    /**
+     * The route the driver follows now, the one `trip_progress` measures on: the newest APPROACH route before the
+     * ride, the newest TRIP route during it. Null when there is none. Filled where [route] is.
+     */
+    val currentRoute: RouteSummary? = null,
 )
 
 /** A stored route in plain values. */
 data class RouteSummary(
+    /** TRIP (pickup to destination) or APPROACH (driver to pickup). */
+    val kind: String,
+    /** 1 for the first plan of this kind; each re-plan adds 1. */
+    val version: Int,
     /** Google Encoded Polyline, precision 5. */
     val polyline: String,
     val distanceM: Double,

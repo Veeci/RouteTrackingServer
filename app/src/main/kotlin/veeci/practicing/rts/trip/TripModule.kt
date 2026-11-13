@@ -45,7 +45,7 @@ fun tripModule(events: EventsConfig): Module =
 
         single<ProgressStateStore> { InMemoryProgressStateStore() }
         single<ProgressPublisher> { LiveProgressPublisher(get()) }
-        single { TripProgressService(get(), get(), get(), get()) }
+        single { TripProgressService(get(), get(), get(), get(), get()) }
         single { FixesAcceptedListener(get()) } bind OutboxEventHandler::class
         single { TripFinishedListener(get()) } bind OutboxEventHandler::class
 

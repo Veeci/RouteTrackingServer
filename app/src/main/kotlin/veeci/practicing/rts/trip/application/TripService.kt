@@ -90,7 +90,14 @@ class TripService(
     ): TripSnapshot =
         transactions.inTransaction {
             val trip = load(id, actor)
-            trip.snapshot(route = routes.findLatest(trip.id, RouteKind.TRIP))
+            val route = routes.findLatest(trip.id, RouteKind.TRIP)
+            val current =
+                when (val kind = RouteKind.followedIn(trip.status)) {
+                    null -> null
+                    RouteKind.TRIP -> route
+                    else -> routes.findLatest(trip.id, kind)
+                }
+            trip.snapshot(route = route, currentRoute = current)
         }
 
     override suspend fun snapshotFor(
@@ -164,6 +171,7 @@ private fun newTripId() = TripId(Uuid.generateV7().toJavaUuid())
 fun Trip.snapshot(
     version: Long = this.version,
     route: TripRoute? = null,
+    currentRoute: TripRoute? = null,
 ) = TripSnapshot(
     id.value,
     guestId.value,
@@ -174,8 +182,11 @@ fun Trip.snapshot(
     createdAt,
     updatedAt,
     version,
-    route?.let { RouteSummary(it.polyline, it.distanceM, it.durationS) },
+    route?.summary(),
+    currentRoute?.summary(),
 )
+
+private fun TripRoute.summary() = RouteSummary(kind.name, version, polyline, distanceM, durationS)
 
 private fun PlannedRoute.toTripRoute(
     tripId: TripId,

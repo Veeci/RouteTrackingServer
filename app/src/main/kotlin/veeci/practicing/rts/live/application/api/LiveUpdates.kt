@@ -24,8 +24,10 @@ data class TripProgressUpdate(
     val target: String,
     val remainingM: Double,
     val etaS: Double,
-    /** How [remainingM] was measured: "STRAIGHT_LINE" until road routing arrives (phase 7). */
+    /** How [remainingM] was measured: "ROUTE" along the planned road, or "STRAIGHT_LINE" when there is no route. */
     val basis: String,
+    /** The version of the route [remainingM] is measured on; null for "STRAIGHT_LINE". */
+    val routeVersion: Int? = null,
 ) : LiveUpdate
 
 data class TripStatusUpdate(
