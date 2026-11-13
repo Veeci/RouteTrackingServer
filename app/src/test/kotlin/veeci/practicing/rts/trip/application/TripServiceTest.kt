@@ -1,20 +1,32 @@
 package veeci.practicing.rts.trip.application
 
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.doubles.shouldBeGreaterThan
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
+import veeci.practicing.rts.routing.application.api.PlannedRoute
+import veeci.practicing.rts.routing.application.api.RouteMetric
+import veeci.practicing.rts.routing.application.api.RoutePlanner
+import veeci.practicing.rts.routing.application.api.RoutingError
 import veeci.practicing.rts.shared.DomainException
+import veeci.practicing.rts.shared.geo.GeoPoint
+import veeci.practicing.rts.shared.geo.Haversine
+import veeci.practicing.rts.shared.geo.PolylineCodec
+import veeci.practicing.rts.testing.routing.TestRouting
 import veeci.practicing.rts.testing.tracking.DirectTransactionRunner
 import veeci.practicing.rts.testing.trip.InMemoryTripEventOutbox
 import veeci.practicing.rts.testing.trip.InMemoryTripRepository
+import veeci.practicing.rts.testing.trip.InMemoryTripRouteRepository
 import veeci.practicing.rts.testing.trip.TripSamples
 import veeci.practicing.rts.testing.trip.TripSamples.DESTINATION
 import veeci.practicing.rts.testing.trip.TripSamples.PICKUP
 import veeci.practicing.rts.testing.trip.TripSamples.T0
 import veeci.practicing.rts.trip.application.port.out.TripRepository
+import veeci.practicing.rts.trip.domain.RouteKind
 import veeci.practicing.rts.trip.domain.Trip
 import veeci.practicing.rts.trip.domain.TripAction
 import veeci.practicing.rts.trip.domain.TripError
@@ -27,12 +39,15 @@ import kotlin.time.toJavaInstant
 class TripServiceTest {
     private val trips = InMemoryTripRepository()
     private val outbox = InMemoryTripEventOutbox()
+    private val routes = InMemoryTripRouteRepository()
     private val service = service(trips)
     private val guest = TripSamples.guest()
     private val driver = TripSamples.driver()
 
-    private fun service(repository: TripRepository) =
-        TripService(repository, outbox, DirectTransactionRunner, Clock.fixed(T0.toJavaInstant(), ZoneOffset.UTC))
+    private fun service(
+        repository: TripRepository,
+        planner: RoutePlanner = TestRouting.planner(),
+    ) = TripService(repository, outbox, DirectTransactionRunner, Clock.fixed(T0.toJavaInstant(), ZoneOffset.UTC), planner, routes)
 
     private suspend fun requested() = service.request(RequestTrip(PICKUP, DESTINATION), guest)
 
@@ -58,7 +73,7 @@ class TripServiceTest {
     fun `times are kept to the microsecond, like the database, also with a nanosecond clock`() =
         runTest {
             val nanos = Clock.fixed(java.time.Instant.parse("2026-10-07T09:44:48.607025568Z"), ZoneOffset.UTC)
-            val service = TripService(trips, outbox, DirectTransactionRunner, nanos)
+            val service = TripService(trips, outbox, DirectTransactionRunner, nanos, TestRouting.planner(), routes)
 
             val trip = service.request(RequestTrip(PICKUP, DESTINATION), guest)
 
@@ -170,5 +185,64 @@ class TripServiceTest {
             (first.items + second.items).map { it.id } shouldBe open.sortedBy { it.toString() } // same createdAt, so id order
             second.next.shouldBeNull()
             shouldThrow<DomainException> { service.listOpen(guest, null, 10) }.code shouldBe TripError.TRIP_ACTION_FORBIDDEN
+        }
+
+    @Test
+    fun `TC-6-API-04 booking plans the road route, stores it as TRIP version 1 and returns it`() =
+        runTest {
+            val trip = requested()
+
+            val route = trip.route.shouldNotBeNull()
+            val stored = routes.findLatest(TripId(trip.id), RouteKind.TRIP).shouldNotBeNull()
+            stored.version shouldBe 1
+            stored.polyline shouldBe route.polyline
+            stored.distanceM shouldBe route.distanceM
+            val points = PolylineCodec.decode(route.polyline)
+            points.first() shouldBe PICKUP // both sample points have 4 decimals, so precision 5 keeps them exactly
+            points.last() shouldBe DESTINATION
+            route.distanceM shouldBeGreaterThan Haversine.distance(PICKUP, DESTINATION).value // roads are never shorter
+            service.get(TripId(trip.id), guest).route shouldBe route
+        }
+
+    @Test
+    fun `TC-6-API-04 an unroutable booking fails with the routing error and stores nothing`() =
+        runTest {
+            val inHanoi = GeoPoint(21.0285, 105.8542) // outside the test map, which covers part of Ho Chi Minh City
+
+            shouldThrow<DomainException> { service.request(RequestTrip(inHanoi, DESTINATION), guest) }.code shouldBe
+                RoutingError.OUTSIDE_COVERAGE
+
+            trips.findByStatus(TripStatus.REQUESTED, after = null, limit = 10).shouldBeEmpty()
+            routes.routes.shouldBeEmpty()
+            outbox.events.shouldBeEmpty()
+        }
+
+    @Test
+    fun `a driver's booking is refused before any route is planned`() =
+        runTest {
+            val mustNotPlan =
+                object : RoutePlanner {
+                    override suspend fun plan(
+                        from: GeoPoint,
+                        to: GeoPoint,
+                        metric: RouteMetric,
+                    ): PlannedRoute = error("planned a route for a caller who may not book")
+                }
+
+            shouldThrow<DomainException> { service(trips, mustNotPlan).request(RequestTrip(PICKUP, DESTINATION), driver) }.code shouldBe
+                TripError.TRIP_ACTION_FORBIDDEN
+        }
+
+    @Test
+    fun `listed trips carry no route, so a page costs no extra query per trip`() =
+        runTest {
+            requested()
+
+            service
+                .listOpen(driver, after = null, limit = 10)
+                .items
+                .single()
+                .route
+                .shouldBeNull()
         }
 }

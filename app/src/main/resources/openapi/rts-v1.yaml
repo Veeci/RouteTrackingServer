@@ -27,6 +27,11 @@ tags:
       Stages: REQUESTED → ACCEPTED → ARRIVED → IN_PROGRESS → COMPLETED, or CANCELLED before IN_PROGRESS.
   - name: admin
     description: Operator endpoints; every route needs an ADMIN token. Device commands (phase 5).
+  - name: routing
+    description: |
+      Road routes inside the city the server has a map for (phase 6). Points are snapped to the nearest road within
+      300 m. Routing errors are 422 with code OUTSIDE_COVERAGE, NO_ROAD_NEARBY or NO_ROUTE_FOUND, and 503 with
+      ROUTING_NOT_READY or ROUTING_TIMEOUT.
 paths:
   /api/v1/dev/tokens:
     post:
@@ -56,8 +61,10 @@ paths:
       operationId: requestTrip
       summary: Book a trip (GUEST)
       description: |
-        Creates a trip in stage REQUESTED. Send a new random Idempotency-Key per booking: a retry with the same key
-        and body returns the first response (header `Idempotent-Replayed: true`) and books nothing new.
+        Creates a trip in stage REQUESTED with its road route from pickup to destination. Send a new random
+        Idempotency-Key per booking: a retry with the same key and body returns the first response (header
+        `Idempotent-Replayed: true`) and books nothing new. When no road route exists the booking fails with 422
+        and no trip is created.
       security: [{ bearerAuth: [] }]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -82,11 +89,14 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422':
-          description: IDEMPOTENCY_KEY_REUSED, the key was used before for a different request.
+          description: |
+            IDEMPOTENCY_KEY_REUSED, the key was used before for a different request; or no road route joins pickup
+            and destination: OUTSIDE_COVERAGE, NO_ROAD_NEARBY or NO_ROUTE_FOUND.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/RoutingUnavailable' }
     get:
       tags: [trips]
       operationId: listOpenTrips
@@ -224,6 +234,45 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '412': { $ref: '#/components/responses/PreconditionFailed' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/routes:
+    get:
+      tags: [routing]
+      operationId: planRoute
+      summary: Plan a road route between two points
+      description: |
+        The cheapest road route under `metric`. The polyline starts at `from`, follows the roads and ends at `to`;
+        `distanceM` and `durationS` include the short legs between each point and its road.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: from
+          in: query
+          required: true
+          description: The start as `lat,lng` in degrees.
+          schema: { type: string, examples: ['21.0285,105.8542'] }
+        - name: to
+          in: query
+          required: true
+          description: The end as `lat,lng` in degrees.
+          schema: { type: string, examples: ['21.0368,105.8346'] }
+        - name: metric
+          in: query
+          description: What the route minimises.
+          schema: { type: string, enum: [distance, time], default: distance }
+      responses:
+        '200':
+          description: The route.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlannedRoute' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422':
+          description: OUTSIDE_COVERAGE, NO_ROAD_NEARBY or NO_ROUTE_FOUND; `detail` names the point (`from` or `to`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/RoutingUnavailable' }
   /api/v1/admin/drivers/{driverId}/commands:
     post:
       tags: [admin]
@@ -288,7 +337,8 @@ paths:
       summary: Readiness probe
       description: |
         Whether this instance should receive traffic now. Runs every dependency check in parallel with a
-        2-second deadline. 503 while a dependency is down or while the instance is shutting down.
+        2-second deadline. 503 while a dependency is down or while the instance is shutting down. Checks: `db`
+        (Postgres answers) and `graph` (the road map has loaded; DOWN for the first seconds after a start).
       responses:
         '200':
           description: Ready; every check is UP.
@@ -391,6 +441,13 @@ components:
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
+    RoutingUnavailable:
+      description: |
+        ROUTING_NOT_READY (the road map is still loading) or ROUTING_TIMEOUT (planning took longer than its budget).
+        Retry a little later.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
     TooManyRequests:
       description: Rate limit exceeded for this client IP.
       headers:
@@ -437,6 +494,36 @@ components:
           type: integer
           minimum: 1
           description: Increases by 1 with every change; the same value as the ETag.
+        route:
+          $ref: '#/components/schemas/TripRoute'
+          description: The road route from pickup to destination. Sent by POST /trips and GET /trips/{id} only.
+    TripRoute:
+      type: object
+      required: [polyline, distanceM, durationS]
+      additionalProperties: false
+      properties:
+        polyline:
+          description: Google Encoded Polyline (precision 5) from pickup to destination.
+          type: string
+        distanceM: { type: number, minimum: 0 }
+        durationS:
+          description: At default road speeds, without traffic.
+          type: number
+          minimum: 0
+    PlannedRoute:
+      type: object
+      required: [polyline, distanceM, durationS, metric]
+      additionalProperties: false
+      properties:
+        polyline:
+          description: Google Encoded Polyline (precision 5) from `from` to `to`.
+          type: string
+        distanceM: { type: number, minimum: 0 }
+        durationS:
+          description: At default road speeds, without traffic.
+          type: number
+          minimum: 0
+        metric: { type: string, enum: [distance, time] }
     TripPage:
       type: object
       required: [items]

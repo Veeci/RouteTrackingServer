@@ -18,6 +18,16 @@ data class TripSnapshot(
     val updatedAt: Instant,
     /** Increases by 1 with every change; the web layer sends it as the ETag. */
     val version: Long,
+    /** The pickup-to-destination route. Filled where it is cheap (booking, reading one trip); null in lists. */
+    val route: RouteSummary? = null,
+)
+
+/** A stored route in plain values. */
+data class RouteSummary(
+    /** Google Encoded Polyline, precision 5. */
+    val polyline: String,
+    val distanceM: Double,
+    val durationS: Double,
 )
 
 /** The trip context's public read API, for other contexts (the live context checks access with it). */

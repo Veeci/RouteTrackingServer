@@ -28,6 +28,7 @@ internal class LabelSettingSearch(
     private val graph: RoadGraph,
     private val metric: Metric,
     private val heuristic: Heuristic,
+    private val checkpoint: () -> Unit = {},
 ) {
     private val n = graph.nodeCount
     private val cost = DoubleArray(n) { Double.POSITIVE_INFINITY }
@@ -51,6 +52,7 @@ internal class LabelSettingSearch(
             if (settled[v]) continue
             settled[v] = true
             settledCount++
+            if ((settledCount and CHECKPOINT_MASK) == 0) checkpoint()
             if (v == to) return SearchResult(pathTo(to), lengthM[to], timeS[to], settledCount)
             relaxEdgesOf(v)
         }
@@ -91,5 +93,6 @@ internal class LabelSettingSearch(
 
     private companion object {
         const val NONE = -1
+        const val CHECKPOINT_MASK = ShortestPath.CHECKPOINT_INTERVAL - 1
     }
 }

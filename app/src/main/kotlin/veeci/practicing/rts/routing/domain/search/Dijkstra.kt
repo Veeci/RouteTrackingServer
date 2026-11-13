@@ -13,5 +13,6 @@ class Dijkstra : ShortestPath {
         from: Int,
         to: Int,
         metric: Metric,
-    ): SearchResult? = LabelSettingSearch(graph, metric, Heuristic.ZERO).run(from, to)
+        checkpoint: () -> Unit,
+    ): SearchResult? = LabelSettingSearch(graph, metric, Heuristic.ZERO, checkpoint).run(from, to)
 }

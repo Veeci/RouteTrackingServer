@@ -11,6 +11,7 @@ import io.ktor.server.netty.Netty
 import kotlinx.coroutines.runBlocking
 import org.koin.core.module.Module
 import veeci.practicing.rts.module
+import veeci.practicing.rts.testing.routing.TestRouting
 
 /**
  * Like [testApp], but the application runs on Netty and clients connect over a real socket (CIO), as in
@@ -25,9 +26,10 @@ fun socketApp(
     runBlocking {
         val server =
             embeddedServer(Netty, configure = { connector { port = 0 } }) {
-                module(TestConfig.load(TestDatabase.env() + env), overrides)
+                module(TestConfig.load(TestDatabase.env() + env), listOf(TestRouting.module()) + overrides)
             }.startSuspend()
         try {
+            server.application.awaitRoadGraph()
             val port =
                 server.engine
                     .resolvedConnectors()

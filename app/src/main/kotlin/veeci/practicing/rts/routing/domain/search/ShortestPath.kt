@@ -19,6 +19,10 @@ enum class Metric {
 interface ShortestPath {
     /**
      * Returns the cheapest path from [from] to [to] under [metric], or null when [to] cannot be reached.
+     *
+     * The search calls [checkpoint] once every [CHECKPOINT_INTERVAL] settled nodes. A caller that wants to stop
+     * a long search (a deadline, a cancelled request) throws from it; the exception leaves this function as is.
+     * The domain knows nothing about coroutines, so this plain callback is how cancellation reaches the loop.
      * @throws IllegalArgumentException when a node id is not in the graph.
      */
     fun search(
@@ -26,7 +30,13 @@ interface ShortestPath {
         from: Int,
         to: Int,
         metric: Metric,
+        checkpoint: () -> Unit = {},
     ): SearchResult?
+
+    companion object {
+        /** A power of two, so the loop tests it with a bit mask. About 0.1 ms of work on a city graph. */
+        const val CHECKPOINT_INTERVAL = 1024
+    }
 }
 
 /**

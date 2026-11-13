@@ -63,6 +63,16 @@ After building the graph, `RoadGraphBuilder` keeps only the largest strongly con
 Every node left can then reach every other node, so a route search between two snapped points
 never fails because one of them sits on a one-way dead end or on a separate island.
 
+## Where the server reads it
+
+The server reads the file named by `routing.graphPath` in `base.conf`, `data/osm/hanoi.osm` by default.
+Set the `ROUTING_GRAPHPATH` environment variable to use another file. A relative path is resolved from the
+process's working directory, so run the server from the repository root or give an absolute path.
+
+The graph loads in the background after startup. Until it has loaded, `/health/ready` answers 503 with the
+`graph` check DOWN, and route requests answer 503 ROUTING_NOT_READY. A missing or unreadable file is logged at
+ERROR and leaves `graph` DOWN; the process keeps running.
+
 ## Known limits
 
 - Turn restrictions (`type=restriction` relations) are ignored.
