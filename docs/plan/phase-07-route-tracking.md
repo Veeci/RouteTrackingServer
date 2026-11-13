@@ -96,11 +96,11 @@ The current route = highest version per kind.
 
 ## Tasks
 
-- [ ] T7.1 `MeasuredPolyline` + projection math.
-- [ ] T7.2 `RouteMatcher` + `MatchState` store.
-- [ ] T7.3 Route-based ETA with correction factor.
+- [x] T7.1 `MeasuredPolyline` + projection math.
+- [x] T7.2 (state in `ProgressState`) `RouteMatcher` + `MatchState` store.
+- [x] T7.3 (with the route's average speed) Route-based ETA with correction factor.
 - [ ] T7.4 Off-route rule (hysteresis + accuracy gate) and `TripRouteService.reroute` with cooldown.
-- [ ] T7.5 Replace straight-line `TrackTripProgress` path when a route exists; keep fallback.
+- [x] T7.5 Replace straight-line `TrackTripProgress` path when a route exists; keep fallback.
 - [ ] T7.6 V8 migration, route versioning; approach route switches to trip route on `start`.
 - [ ] T7.7 `route_updated` on guest and driver sockets.
 - [ ] T7.8 Fixtures: `detour_off_route.gpx`, `u_turn.gpx`, `loop_route.gpx`, `parallel_street.gpx` (drawn against `tiny_grid`).
@@ -154,3 +154,42 @@ The current route = highest version per kind.
 - The guest sees distance-left along the road decrease smoothly; a detour produces one re-route and the new line.
 - No false off-route on the tunnel and jitter fixtures.
 - All P0 cases pass.
+
+## As built: slice 7a (route matching and route ETA)
+
+Phase 7 is built in three slices, one PR each: 7a matching and the route ETA; 7b off-route, re-route and
+`route_updated` to the guest; 7c the APPROACH route, the switch on `start`, `route_updated` to the driver and the
+end-to-end cases. The design was agreed again before 7a, because this plan predates phases 3 to 6:
+
+| Plan | As built | Why |
+|---|---|---|
+| `V8__route_reason.sql` with a unique `(trip_id, kind, version)` | 7b adds `V12__route_reason.sql` with `reason` only | V8 to V11 are taken. The key is already the primary key of `trip_routes` (V11) |
+| `MatchState` in a store of its own | `ProgressState.route` (`FollowedRoute`: kind, version, decoded `MeasuredPolyline`, cursor and distance) in the existing `InMemoryProgressStateStore` | The state is derived from the fixes. A restart decodes the route again and matches from its start |
+| ETA sums per-segment durations | `RouteEta`: `durationS × remainingM ÷ distanceM × k`, k = planned average speed ÷ smoothed speed, clamped to [0.5, 3] | `trip_routes` stores only totals. Per-point times need the planner and a new column; a known limit |
+| `basis: "route"` | `basis: ROUTE` and an optional `routeVersion` on `trip_progress` | The existing value is upper case (`STRAIGHT_LINE`) |
+| The guest gets the route only from `route_updated` | `subscribed.trip.route` holds the current route too (`TripSnapshot.currentRoute`) | A guest who reconnects gets the whole state in one message |
+| Search window `[cursor − 2, cursor + 25]` | The same, and when its best match is more than 50 m away, the rest of the route ahead is searched | Finds the driver again after a gap (a tunnel) longer than the window. Without a state the window starts at segment 0 |
+| Fixtures `*.gpx` drawn against `tiny_grid` | Tracks made in test code: `polylineFrom` and `track(along, speedMps, stepS, noiseM, seed)` in `testFixtures/.../testing/geo/Tracks.kt` | The expected distance is known by construction. GPX files stay for the simulator demo (7c) |
+
+How it works:
+- `MeasuredPolyline` (`shared/geo`) adds up the distance to each point once. `projectOnSegment` works in a flat
+  frame around the segment (x = Δlng · cos(lat) · R, y = Δlat · R), clamps the foot of the perpendicular to the
+  segment, and returns the distance along, the cross-track distance and the segment's bearing.
+- `RouteKind.followedIn(status)` says which route a stage follows: APPROACH for ACCEPTED and ARRIVED, TRIP for
+  IN_PROGRESS. `TripProgressService` loads the trip and the newest route of that kind in one transaction (one more
+  query by primary key per batch). It decodes the polyline only when the kind or version changed.
+- `RouteMatcher` is pure. The score is the cross-track distance, plus 30 m when the driver moves faster than 3 m/s
+  against the segment's direction by more than 60°. On a tie the earlier segment wins. A step back of up to 20 m
+  keeps the previous distance (jitter); a larger one counts (U-turn).
+- Without a route for the stage the progress is the straight line, as in phase 3. Before 7c that is the whole time
+  before the ride.
+- The arrival rules (`TripEventService`) still use the straight line (decisions row 48).
+
+Known limits: the window counts segments, not metres, so it is shorter where the graph has many short segments.
+A driver more than 50 m off the route makes every fix search the rest of the route; 7b re-routes such a driver.
+With several instances each keeps its own matcher state (phase 10 moves it to Redis).
+
+Tests: TC-7-GEO-01 to 05, TC-7-MAT-01 to 05 (plus the second pass of a loop and the search ahead after a gap),
+TC-7-ETA-01 to 04, the current route in `TripServiceTest`, golden files `subscribed_route` and
+`trip_progress_route`, and two `GuestSocketIT` cases (route on subscribe and `basis = ROUTE` during the ride; no
+route before it).

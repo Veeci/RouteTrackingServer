@@ -1,5 +1,7 @@
 package veeci.practicing.rts.live
 
+import io.kotest.matchers.doubles.plusOrMinus
+import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -172,6 +174,48 @@ class GuestSocketIT {
                 progress.target shouldBe "PICKUP"
                 progress.basis shouldBe "STRAIGHT_LINE"
                 (progress.remainingM in 790.0..810.0) shouldBe true
+            }
+        }
+
+    @Test
+    fun `during the ride the guest gets the trip route on subscribe and progress measured along it`() =
+        socketApp {
+            val trip = api().created(guest)
+            api().moved(trip.id, driver, "accept", "arrive", "start")
+
+            watch(guest) {
+                subscribe(trip.id)
+                val route =
+                    receiveGuest()
+                        .shouldBeInstanceOf<Subscribed>()
+                        .trip.route
+                        .shouldNotBeNull()
+                route.kind shouldBe "TRIP"
+                route.routeVersion shouldBe 1
+                sendDriverBatch(metersFromPickup = 0.0) // at the pickup, where the trip route starts
+
+                receiveSkippingEvents().shouldBeInstanceOf<DriverPosition>()
+                val progress = receiveSkippingEvents().shouldBeInstanceOf<TripProgress>()
+                progress.target shouldBe "DESTINATION"
+                progress.basis shouldBe "ROUTE"
+                progress.routeVersion shouldBe 1
+                progress.remainingM shouldBe (route.distanceM plusOrMinus route.distanceM * 0.02)
+            }
+        }
+
+    @Test
+    fun `before the ride the subscribed trip has no route yet`() =
+        socketApp {
+            val trip = api().created(guest)
+            api().act(trip.id, "accept", driver)
+
+            watch(guest) {
+                subscribe(trip.id)
+
+                receiveGuest()
+                    .shouldBeInstanceOf<Subscribed>()
+                    .trip.route
+                    .shouldBeNull()
             }
         }
 

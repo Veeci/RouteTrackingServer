@@ -280,6 +280,32 @@ components:
         updatedAt:
           type: string
           format: date-time
+        route:
+          $ref: '#/components/schemas/GuestRoute'
+
+    GuestRoute:
+      type: object
+      additionalProperties: false
+      required: [kind, routeVersion, polyline, distanceM, durationS]
+      description: >-
+        The route the driver follows now, the one trip_progress measures on: APPROACH (driver to pickup) before
+        the ride, TRIP (pickup to destination) during it. Absent from the trip when there is none.
+      properties:
+        kind:
+          type: string
+          enum: [TRIP, APPROACH]
+        routeVersion:
+          type: integer
+          minimum: 1
+        polyline:
+          type: string
+          description: Google Encoded Polyline, precision 5.
+        distanceM:
+          type: number
+          minimum: 0
+        durationS:
+          type: number
+          minimum: 0
 
     TripStatus:
       type: string
@@ -349,11 +375,20 @@ components:
         etaS:
           type: number
           minimum: 0
-          description: Seconds until arrival at the target, from a smoothed speed (at least 2 m/s).
+          description: >-
+            Seconds until arrival at the target. With basis ROUTE, the route's planned time for the distance left,
+            scaled by the driver's smoothed speed against the plan (0.5 to 3 times). With STRAIGHT_LINE, distance
+            divided by the smoothed speed (at least 2 m/s).
         basis:
           type: string
           enum: [STRAIGHT_LINE, ROUTE]
-          description: STRAIGHT_LINE until distances are measured along the road (phase 7).
+          description: >-
+            ROUTE when remainingM is measured along the planned road, STRAIGHT_LINE when the trip has no route for
+            this stage.
+        routeVersion:
+          type: integer
+          minimum: 1
+          description: With basis ROUTE, the version of the route remainingM is measured on.
 
     TripEvent:
       type: object

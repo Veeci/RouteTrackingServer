@@ -8,8 +8,11 @@ import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import veeci.practicing.rts.shared.geo.GeoPoint
 import veeci.practicing.rts.shared.geo.Haversine
+import veeci.practicing.rts.shared.geo.PolylineCodec
+import veeci.practicing.rts.testing.geo.offset
 import veeci.practicing.rts.testing.tracking.DirectTransactionRunner
 import veeci.practicing.rts.testing.trip.InMemoryTripRepository
+import veeci.practicing.rts.testing.trip.InMemoryTripRouteRepository
 import veeci.practicing.rts.testing.trip.TripSamples
 import veeci.practicing.rts.testing.trip.TripSamples.DESTINATION
 import veeci.practicing.rts.testing.trip.TripSamples.PICKUP
@@ -17,10 +20,14 @@ import veeci.practicing.rts.testing.trip.TripSamples.T0
 import veeci.practicing.rts.tracking.domain.event.FixesAccepted
 import veeci.practicing.rts.trip.adapter.out.memory.InMemoryProgressStateStore
 import veeci.practicing.rts.trip.application.port.out.DriverPosition
+import veeci.practicing.rts.trip.application.port.out.ProgressBasis
 import veeci.practicing.rts.trip.application.port.out.ProgressPublisher
 import veeci.practicing.rts.trip.application.port.out.ProgressTarget
 import veeci.practicing.rts.trip.application.port.out.TripProgress
+import veeci.practicing.rts.trip.domain.RouteKind
+import veeci.practicing.rts.trip.domain.Trip
 import veeci.practicing.rts.trip.domain.TripAction
+import veeci.practicing.rts.trip.domain.TripRoute
 import veeci.practicing.rts.trip.domain.event.TripStatus
 import java.util.UUID
 import kotlin.time.Duration.Companion.seconds
@@ -39,7 +46,8 @@ class TripProgressServiceTest {
                 published += progress
             }
         }
-    private val service = TripProgressService(trips, states, publisher, DirectTransactionRunner)
+    private val routes = InMemoryTripRouteRepository()
+    private val service = TripProgressService(trips, routes, states, publisher, DirectTransactionRunner)
     private val driver = TripSamples.driver()
 
     private suspend fun tripIn(status: TripStatus) = TripSamples.inStatus(status, driver = driver).also { trips.insert(it) }
@@ -168,5 +176,88 @@ class TripProgressServiceTest {
             service.forget(trip.id)
 
             states.size shouldBe 0
+        }
+
+    /**
+     * A TRIP route for [trip]: 1000 m from the pickup due south, planned at 10 m/s. Version [version] goes
+     * [eastM] metres east first, so two versions differ.
+     */
+    private suspend fun routeFor(
+        trip: Trip,
+        version: Int = 1,
+        eastM: Double = 0.0,
+    ): TripRoute {
+        val points = listOf(PICKUP, PICKUP.offset(eastM = eastM), PICKUP.offset(northM = -1_000.0, eastM = eastM))
+        val lengthM = 1_000.0 + eastM
+        return TripRoute(trip.id, RouteKind.TRIP, version, PolylineCodec.encode(points), lengthM, lengthM / 10.0, T0)
+            .also { routes.insert(it) }
+    }
+
+    @Test
+    fun `during the ride the distance left is measured along the trip route`() =
+        runTest {
+            val trip = tripIn(TripStatus.IN_PROGRESS)
+            routeFor(trip)
+
+            service.onFixesAccepted(batch(position(400.0, 1, speedMps = 10.0)))
+
+            val progress = progress().single()
+            progress.basis shouldBe ProgressBasis.ROUTE
+            progress.routeVersion shouldBe 1
+            progress.target shouldBe ProgressTarget.DESTINATION
+            progress.remainingM shouldBe (600.0 plusOrMinus 1.0)
+            progress.etaS shouldBe (60.0 plusOrMinus 0.5) // at the planned 10 m/s, k = 1
+        }
+
+    @Test
+    fun `TC-7-ETA-02 in the service a driver at half the planned speed gets twice the planned time`() =
+        runTest {
+            val trip = tripIn(TripStatus.IN_PROGRESS)
+            routeFor(trip)
+
+            service.onFixesAccepted(batch(position(400.0, 1, speedMps = 5.0)))
+
+            progress().single().etaS shouldBe (120.0 plusOrMinus 0.5)
+        }
+
+    @Test
+    fun `TC-7-ETA-04 without a route for the stage the progress falls back to the straight line`() =
+        runTest {
+            val trip = tripIn(TripStatus.ACCEPTED)
+            routeFor(trip) // a TRIP route, but before the ride the driver follows an APPROACH route, and there is none
+
+            service.onFixesAccepted(batch(position(500.0, 1, speedMps = 10.0)))
+
+            progress().single().basis shouldBe ProgressBasis.STRAIGHT_LINE
+            progress().single().routeVersion shouldBe null
+            states.get(trip.id)!!.route shouldBe null
+        }
+
+    @Test
+    fun `the matcher's place on the route carries over to the next batch`() =
+        runTest {
+            val trip = tripIn(TripStatus.IN_PROGRESS)
+            routeFor(trip)
+            service.onFixesAccepted(batch(position(300.0, 1, speedMps = 10.0)))
+            val decoded = states.get(trip.id)!!.route!!.line
+
+            service.onFixesAccepted(batch(position(290.0, 2, speedMps = 10.0))) // 10 m back: GPS jitter
+
+            states.get(trip.id)!!.route!!.line shouldBe decoded // same version: not decoded again
+            progress().last().remainingM shouldBe (700.0 plusOrMinus 1.0)
+        }
+
+    @Test
+    fun `a newer route version replaces the old one and matching starts again on it`() =
+        runTest {
+            val trip = tripIn(TripStatus.IN_PROGRESS)
+            routeFor(trip)
+            service.onFixesAccepted(batch(position(300.0, 1, speedMps = 10.0)))
+
+            routeFor(trip, version = 2, eastM = 50.0)
+            service.onFixesAccepted(batch(position(300.0, 2, speedMps = 10.0, from = PICKUP.offset(eastM = 50.0))))
+
+            progress().last().routeVersion shouldBe 2
+            progress().last().remainingM shouldBe (700.0 plusOrMinus 1.0) // 350 m along a 1050 m route
         }
 }
