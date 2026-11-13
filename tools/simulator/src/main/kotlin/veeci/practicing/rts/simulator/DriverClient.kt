@@ -12,6 +12,8 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeoutOrNull
 import veeci.practicing.rts.protocol.Ack
 import veeci.practicing.rts.protocol.ClientMessage
+import veeci.practicing.rts.protocol.Command
+import veeci.practicing.rts.protocol.CommandAck
 import veeci.practicing.rts.protocol.DeviceStatus
 import veeci.practicing.rts.protocol.ErrorMessage
 import veeci.practicing.rts.protocol.FixBatch
@@ -125,7 +127,7 @@ class DriverClient(
                 delay(pace + hooks.pauseBefore(batch))
                 hooks.statusBefore(batch)?.let { sendMessage(it) }
                 sendMessage(batch)
-                when (val reply = receiveMessage()) {
+                when (val reply = receiveSkippingCommands()) {
                     is Ack -> {
                         check(reply.seq == batch.seq) { "Ack for seq ${reply.seq} while waiting for ${batch.seq}" }
                         outbox.removeFirst()
@@ -141,6 +143,10 @@ class DriverClient(
                     is Welcome -> {
                         error("Unexpected welcome")
                     }
+
+                    is Command -> {
+                        error("receiveSkippingCommands returned a command")
+                    }
                 }
             }
         }
@@ -148,6 +154,15 @@ class DriverClient(
 
     private suspend fun DefaultClientWebSocketSession.sendMessage(message: ClientMessage) =
         send(Frame.Text(ProtocolJson.encodeToString(ClientMessage.serializer(), message)))
+
+    /** The next message that is not a `command`; commands in between are answered with `command_ack`. */
+    private suspend fun DefaultClientWebSocketSession.receiveSkippingCommands(): ServerMessage {
+        while (true) {
+            val message = receiveMessage()
+            if (message !is Command) return message
+            sendMessage(CommandAck(message.commandId, hooks.answer(message)))
+        }
+    }
 
     /** The next message, or an error if none arrives within [ackTimeout] (for example while the server's database hangs). */
     private suspend fun DefaultClientWebSocketSession.receiveMessage(): ServerMessage {
@@ -170,6 +185,9 @@ interface BatchHooks {
 
     /** Extra silence before [batch]: a phone without network for a while. */
     fun pauseBefore(batch: FixBatch): Duration
+
+    /** The answer to a server [command]: applied (the default) or rejected. */
+    fun answer(command: Command): String = CommandAck.APPLIED
 
     companion object {
         /** Only batches, no heartbeats and no silences: the behaviour before phase 4. */

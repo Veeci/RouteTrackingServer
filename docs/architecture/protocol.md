@@ -142,11 +142,17 @@ Phone                                   Server
 ### Commands (phase 5)
 
 ```
-server → command      { commandId, kind: "set_constraint" | "register_geofences" | "flush_queue", payload, expiresAt }
-client → command_ack  { commandId, status: "applied" | "rejected", reason? }
+server → command      { commandId, kind, maxAccuracy?, minIntervalMs?, reason?, regions?: [{id, lat, lng, radiusM}] }
+client → command_ack  { commandId, result: applied | rejected, reason? }
 ```
 
-Commands are persisted until acknowledged or expired and re-sent after `welcome` on reconnect.
+- `kind` is SET_CONSTRAINT (maxAccuracy HIGH/BALANCED/LOW/PASSIVE, minIntervalMs, reason), REGISTER_GEOFENCES
+  (regions) or FLUSH_QUEUE (no fields).
+- The server sends a command live if the driver is connected, else right after the next `welcome`, before any
+  ack. It sends a command again after every reconnect until it gets `command_ack`, so **the device handles each
+  `commandId` once** and acks a repeat again. A command not acked within 10 minutes expires and is never sent.
+- No reply to `command_ack`. An unknown `commandId` gets `error{COMMAND_NOT_FOUND}`; a malformed one or another
+  `result` gets `error{INVALID_MESSAGE}`. The session stays open.
 
 ## Guest session
 

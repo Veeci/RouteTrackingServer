@@ -95,11 +95,15 @@ class CommandService(
         }
     }
 
-    /** What to send to [driver]'s device now, oldest first: open and not expired. */
-    suspend fun pendingFor(driver: UserId): List<DeviceCommand> =
+    /** [id] alone when given (a command just issued), else every command of [driver]; only the open, unexpired ones. */
+    suspend fun deliverable(
+        driver: UserId? = null,
+        id: CommandId? = null,
+    ): List<DeviceCommand> =
         transactions.inTransaction {
             val now = now()
-            commands.openFor(driver).filterNot { it.isDue(now) }
+            val candidates = if (id != null) listOfNotNull(commands.find(id)) else commands.openFor(checkNotNull(driver))
+            candidates.filter { it.status.isOpen && !it.isDue(now) }
         }
 
     /** An admin reads [driver]'s newest commands. */

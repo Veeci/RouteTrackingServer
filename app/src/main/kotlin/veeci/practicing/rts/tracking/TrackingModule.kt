@@ -1,17 +1,20 @@
 package veeci.practicing.rts.tracking
 
 import org.koin.core.module.Module
+import org.koin.dsl.bind
 import org.koin.dsl.module
 import veeci.practicing.rts.platform.config.TrackingConfig
 import veeci.practicing.rts.platform.config.WsConfig
 import veeci.practicing.rts.protocol.LimitsDto
 import veeci.practicing.rts.shared.geo.Meters
+import veeci.practicing.rts.tracking.adapter.inbound.ws.ConnectedDrivers
 import veeci.practicing.rts.tracking.adapter.inbound.ws.DriverSocket
 import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedFixBatchRepository
 import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedTrackingEventOutbox
 import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedTrackingSessionRepository
 import veeci.practicing.rts.tracking.application.TrackingPresence
 import veeci.practicing.rts.tracking.application.TrackingService
+import veeci.practicing.rts.tracking.application.api.DriverLink
 import veeci.practicing.rts.tracking.application.api.DriverPresence
 import veeci.practicing.rts.tracking.application.port.out.FixBatchRepository
 import veeci.practicing.rts.tracking.application.port.out.TrackingEventOutbox
@@ -42,8 +45,10 @@ fun trackingModule(
         single { TrackingService(get(), get(), get(), get(), get(), get(), config.maxFixesPerBatch) }
         // Presence, read by the trip context's stale-driver job.
         single<DriverPresence> { TrackingPresence(get(), get()) }
+        // The driver sockets of this instance; device control sends commands through it (phase 5).
+        single { ConnectedDrivers() } bind DriverLink::class
         single {
             val limits = LimitsDto(config.maxFixesPerBatch, ws.maxFrameBytes, ws.messagesPerSecond)
-            DriverSocket(get(), get(), get(), limits, config.handshakeTimeout, get())
+            DriverSocket(get(), get(), get(), limits, config.handshakeTimeout, get(), get())
         }
     }

@@ -58,7 +58,7 @@ class CommandServiceTest {
             command.status shouldBe CommandStatus.PENDING
             outbox.events.single().commandId shouldBe command.id.value
             outbox.events.single().kind shouldBe "SET_CONSTRAINT"
-            service.pendingFor(driver).map { it.id } shouldBe listOf(command.id)
+            service.deliverable(driver = driver).map { it.id } shouldBe listOf(command.id)
         }
 
     @Test
@@ -74,7 +74,7 @@ class CommandServiceTest {
 
             again.status shouldBe CommandStatus.APPLIED
             repository.find(command.id)!!.updatedAt shouldBe appliedAt
-            service.pendingFor(driver).shouldBeEmpty()
+            service.deliverable(driver = driver).shouldBeEmpty()
         }
 
     @Test
@@ -94,7 +94,7 @@ class CommandServiceTest {
             val command = service.issue(driver, CommandPayload.FlushQueue, admin)
             clock.advance(10.minutes)
 
-            service.pendingFor(driver).shouldBeEmpty() // overdue already, before the job ran
+            service.deliverable(driver = driver).shouldBeEmpty() // overdue already, before the job ran
             service.expireDue() shouldBe 1
 
             repository.find(command.id)!!.status shouldBe CommandStatus.EXPIRED
@@ -115,7 +115,7 @@ class CommandServiceTest {
 
             repository.find(unsent.id)!!.status shouldBe CommandStatus.EXPIRED
             repository.find(sent.id)!!.status shouldBe CommandStatus.SENT
-            service.pendingFor(driver).map { it.id } shouldBe listOf(sent.id, flush.id, newest.id)
+            service.deliverable(driver = driver).map { it.id } shouldBe listOf(sent.id, flush.id, newest.id)
         }
 
     @Test

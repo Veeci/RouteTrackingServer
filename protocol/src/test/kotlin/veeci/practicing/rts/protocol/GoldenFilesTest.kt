@@ -110,10 +110,11 @@ class GoldenFilesTest {
 
         private const val SESSION = "0f8fad5b-d9cb-469f-a165-70867728950e"
         private const val TRIP = "3b241101-e2bb-4255-8caf-4136c566a962"
+        private const val CMD = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
         private val at = Instant.parse("2026-09-30T02:15:04.120Z")
 
         @JvmStatic
-        fun samples(): List<Sample<*>> = driverSamples() + guestSamples() + tripEventSamples()
+        fun samples(): List<Sample<*>> = driverSamples() + commandSamples() + guestSamples() + tripEventSamples()
 
         private fun driverSamples(): List<Sample<*>> =
             listOf(
@@ -197,6 +198,23 @@ class GoldenFilesTest {
                     "trip_progress",
                     TripProgress(TRIP, "PICKUP", remainingM = 1240.5, etaS = 112.0, basis = "STRAIGHT_LINE"),
                     GuestServerMessage.serializer(),
+                ),
+            )
+
+        /** Commands for the device and its acks (phase 5). */
+        private fun commandSamples(): List<Sample<*>> =
+            listOf(
+                Sample("command_ack", CommandAck(CMD, CommandAck.APPLIED), ClientMessage.serializer()),
+                Sample(
+                    "command",
+                    Command(CMD, "SET_CONSTRAINT", maxAccuracy = "HIGH", minIntervalMs = 1000, reason = "guest_watching"),
+                    ServerMessage.serializer(),
+                ),
+                Sample(
+                    "command",
+                    Command(CMD, "REGISTER_GEOFENCES", regions = listOf(GeofenceDto("pickup", 10.7725, 106.698, 150.0))),
+                    ServerMessage.serializer(),
+                    file = "command_geofences",
                 ),
             )
 

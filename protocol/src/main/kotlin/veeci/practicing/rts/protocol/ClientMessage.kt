@@ -42,6 +42,25 @@ data class BatteryDto(
     val profile: String? = null,
 )
 
+/**
+ * The device's answer to a `command`: [result] is applied or rejected. Send it once the command was carried out
+ * (or refused). The server may send a command again after a reconnect until it gets this ack, so the device
+ * treats a `commandId` it already handled as done and acks it again.
+ */
+@Serializable
+@SerialName("command_ack")
+data class CommandAck(
+    val commandId: String,
+    val result: String,
+    /** Why a command was rejected; optional. */
+    val reason: String? = null,
+) : ClientMessage {
+    companion object {
+        const val APPLIED = "applied"
+        const val REJECTED = "rejected"
+    }
+}
+
 @Serializable
 @SerialName("fix_batch")
 data class FixBatch(
