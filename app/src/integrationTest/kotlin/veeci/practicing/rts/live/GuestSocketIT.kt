@@ -28,6 +28,8 @@ import veeci.practicing.rts.live.application.port.out.LiveUpdateBus
 import veeci.practicing.rts.protocol.Ack
 import veeci.practicing.rts.protocol.BatteryDto
 import veeci.practicing.rts.protocol.ClientMessage
+import veeci.practicing.rts.protocol.Command
+import veeci.practicing.rts.protocol.CommandAck
 import veeci.practicing.rts.protocol.DeviceStatus
 import veeci.practicing.rts.protocol.DriverPosition
 import veeci.practicing.rts.protocol.ErrorMessage
@@ -335,14 +337,23 @@ class GuestSocketIT {
             sendDriver(
                 DeviceStatus(Instant.fromEpochMilliseconds(System.currentTimeMillis()), BatteryDto(levelPercent, isCharging = false)),
             )
+            // device_status gets no reply. An ack for an unknown command does, and the server reads in order, so
+            // that reply proves the status was handled before this socket closes.
+            sendDriver(CommandAck(UUID.randomUUID().toString(), CommandAck.APPLIED))
+            receiveDriver().shouldBeInstanceOf<ErrorMessage>()
         }
     }
 
     private suspend fun DefaultClientWebSocketSession.sendDriver(message: ClientMessage) =
         send(Frame.Text(ProtocolJson.encodeToString(ClientMessage.serializer(), message)))
 
-    private suspend fun DefaultClientWebSocketSession.receiveDriver(): ServerMessage =
-        ProtocolJson.decodeFromString(ServerMessage.serializer(), (incoming.receive() as Frame.Text).readText())
+    /** The next driver message that is not a `command` (phase 5 policies send commands after welcome). */
+    private suspend fun DefaultClientWebSocketSession.receiveDriver(): ServerMessage {
+        while (true) {
+            val message = ProtocolJson.decodeFromString(ServerMessage.serializer(), (incoming.receive() as Frame.Text).readText())
+            if (message !is Command) return message
+        }
+    }
 
     /** Retries [assertion] for up to 5 s: subscriber counts change on other coroutines. */
     private suspend fun eventually(assertion: () -> Unit) {

@@ -127,16 +127,40 @@ How it works:
 Tests: TC-5-WS-01 to 04 and TC-5-CMD-01 on Netty (`CommandDeliveryIT`), plus a bad ack result; golden files for
 `command`, `command` with geofences and `command_ack`. Check: 269 unit, 199 integration and 9 end-to-end tests pass.
 
+## As built: slice 5c (automatic policies)
+
+| Plan | As built | Why |
+|---|---|---|
+| `GuestSubscriptionChanged` event | The guest socket calls device control's `GuestWatching` API (`firstGuestWatching`, `lastGuestLeft`) in process, when the trip's watcher count on this instance goes from 0 to 1 or to 0 | Watchers live in memory per instance; a lost signal only leaves a tracking setting as it was, so it needs no outbox |
+| Geofences need the trip's pickup and destination | `TripStatusChanged` (and `TripStatusChangedV1`) carry `pickup` and `destination`, added as optional fields | Device control may not read the trip context's tables or ask with an actor |
+| Debounce: at most one SetConstraint per session per 10 s | A constraint equal to the driver's latest one is never sent again; "no_viewers" is skipped when any constraint went out less than 10 s ago. "guest_watching" and "trip_ended" always go through | A plain 10 s window would drop the raise when a guest returns, or the passive setting at the end of a trip |
+
+`CommandPolicies` issues the commands with `issueAsServer` (no actor). `TripPolicyListener` reacts to
+`TripStatusChanged` through the outbox: ACCEPTED gives a 150 m geofence at the pickup, IN_PROGRESS one at the
+destination, COMPLETED or CANCELLED `SetConstraint(PASSIVE, 60000 ms, trip_ended)`. A policy that fails is
+logged; the guest's socket goes on.
+
+Known limit: a guest who subscribes before a driver accepted the trip does not raise the driver's accuracy
+(there is no driver yet); the ACCEPTED geofence still goes out.
+
+Test changes: driver helpers in `GuestSocketIT` skip `command` frames, which now arrive after `welcome` once a
+trip is accepted. The device-status helper waits for a reply (an ack for an unknown command) before closing, so
+the server has read the status.
+
+Tests: TC-5-POL-01 to 04 plus the debounce cases (`CommandPoliciesTest`), TC-5-E2E-01 as a socket test
+(`CommandPoliciesIT`: accept gives a pickup geofence, a watching guest a high accuracy). Check: 277 unit, 200
+integration and 9 end-to-end tests pass.
+
 ## Tasks
 
 - [x] T5.1 Model, payloads, `CommandService` (`issue`, `acknowledge`, `expire`, `pendingFor`).
 - [x] T5.2 `DeviceCommandRepository` port + Exposed impl + contract tests.
 - [x] T5.3 `DeviceChannel` port; `ConnectedDevices` (session → socket outbound channel, per instance) in the tracking WS adapter; listener delivering after commit.
 - [x] T5.4 Protocol `command`, `command_ack`; handler: redeliver after welcome; ack branch.
-- [ ] T5.5 `CommandPolicies` + debounce, subscribed to hub updates.
+- [x] T5.5 `CommandPolicies` + debounce, subscribed to hub updates.
 - [x] T5.6 Admin routes.
 - [x] T5.7 Simulator: print received commands, auto-ack `applied` (flag `--reject-commands` for tests).
-- [ ] T5.8 protocol.md: idempotency note and command payload schemas.
+- [x] T5.8 protocol.md: idempotency note and command payload schemas.
 
 ## Test plan
 

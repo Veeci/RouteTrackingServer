@@ -52,7 +52,18 @@ class TripTest {
                 trip.status shouldBe target
                 trip.updatedAt shouldBe later
                 trip.pullEvents() shouldBe
-                    listOf(TripStatusChanged(trip.id.value, guest.userId.value, trip.driverId?.value, from, target, later))
+                    listOf(
+                        TripStatusChanged(
+                            trip.id.value,
+                            guest.userId.value,
+                            trip.driverId?.value,
+                            from,
+                            target,
+                            later,
+                            pickup = trip.pickup,
+                            destination = trip.destination,
+                        ),
+                    )
             }
         }
     }
@@ -138,7 +149,19 @@ class TripTest {
     fun `a new trip records that it was requested`() {
         val trip = Trip.request(guest, TripSamples.PICKUP, TripSamples.DESTINATION, TripId(java.util.UUID.randomUUID()), T0)
 
-        trip.pullEvents() shouldBe listOf(TripStatusChanged(trip.id.value, guest.userId.value, null, null, REQUESTED, T0))
+        trip.pullEvents() shouldBe
+            listOf(
+                TripStatusChanged(
+                    trip.id.value,
+                    guest.userId.value,
+                    null,
+                    null,
+                    REQUESTED,
+                    T0,
+                    pickup = trip.pickup,
+                    destination = trip.destination,
+                ),
+            )
         trip.pullEvents() shouldBe emptyList()
     }
 
@@ -165,7 +188,19 @@ class TripTest {
         trip.status shouldBe ARRIVED
         trip.updatedAt shouldBe at
         trip.pullEvents() shouldBe
-            listOf(TripStatusChanged(trip.id.value, trip.guestId.value, driver.userId.value, ACCEPTED, ARRIVED, at, StatusCause.AUTO))
+            listOf(
+                TripStatusChanged(
+                    trip.id.value,
+                    trip.guestId.value,
+                    driver.userId.value,
+                    ACCEPTED,
+                    ARRIVED,
+                    at,
+                    StatusCause.AUTO,
+                    trip.pickup,
+                    trip.destination,
+                ),
+            )
     }
 
     @ParameterizedTest

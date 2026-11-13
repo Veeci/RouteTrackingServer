@@ -18,5 +18,5 @@ fun liveModule(): Module =
         single { InMemoryLiveUpdateBus() } binds arrayOf(LiveUpdateBus::class, LiveUpdates::class)
         single { TripStatusListener(get(), get()) } bind OutboxEventHandler::class
         single { TripMomentListener(get(), get()) } bind OutboxEventHandler::class
-        single { GuestSocket(get(), get(), get()) }
+        single { GuestSocket(get(), get(), get(), get()) }
     }

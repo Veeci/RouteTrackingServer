@@ -6,9 +6,12 @@ import io.ktor.server.websocket.webSocket
 import io.ktor.websocket.CloseReason
 import io.ktor.websocket.close
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
+import veeci.practicing.rts.devicecontrol.application.api.GuestWatching
 import veeci.practicing.rts.live.application.api.DriverPositionUpdate
 import veeci.practicing.rts.live.application.api.LiveUpdate
 import veeci.practicing.rts.live.application.api.TripMomentUpdate
@@ -32,9 +35,11 @@ import veeci.practicing.rts.protocol.WsErrorCodes
 import veeci.practicing.rts.shared.Actor
 import veeci.practicing.rts.shared.DomainException
 import veeci.practicing.rts.shared.Role
+import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.shared.geo.GeoPoint
 import veeci.practicing.rts.trip.application.api.TripQuery
 import veeci.practicing.rts.trip.application.api.TripSnapshot
+import veeci.practicing.rts.trip.domain.event.TripStatus
 import java.util.UUID
 
 /** Mount inside `authenticate(AUTH_JWT)`: the upgrade request needs a valid token, and only a GUEST may stay. */
@@ -52,6 +57,7 @@ class GuestSocket(
     private val runner: WsSessionRunner,
     private val trips: TripQuery,
     private val bus: LiveUpdateBus,
+    private val watching: GuestWatching,
 ) {
     private val log = LoggerFactory.getLogger(GuestSocket::class.java)
 
@@ -99,9 +105,34 @@ class GuestSocket(
             null
         } else {
             log.info("Guest {} watches trip {}", actor.userId.value, tripId)
-            socket.launch {
-                // takeWhile stops collecting (and unsubscribes) after the update that ended the trip.
-                bus.subscribe(tripId).takeWhile { forward(it, actor) }.collect {}
+            socket.launch { watch(tripId, trip, actor) }
+        }
+    }
+
+    /**
+     * Forwards the trip's updates until it ends or the socket closes. The first guest watching a trip on this
+     * instance, and the last one leaving it, tell device control, which changes the driver's tracking precision.
+     */
+    private suspend fun WsSession.watch(
+        tripId: UUID,
+        trip: TripSnapshot,
+        actor: Actor,
+    ) {
+        val driver = trip.driverId?.let(::UserId)
+        var status = trip.status
+        if (driver != null && bus.subscriberCount(tripId) == 0) watching.firstGuestWatching(driver)
+        try {
+            // takeWhile stops collecting (and unsubscribes) after the update that ended the trip.
+            bus
+                .subscribe(tripId)
+                .takeWhile { update ->
+                    if (update is TripStatusUpdate) status = update.status
+                    forward(update, actor)
+                }.collect {}
+        } finally {
+            // Runs also when the socket was cancelled; the call is quick and never throws.
+            if (driver != null && bus.subscriberCount(tripId) == 0) {
+                withContext(NonCancellable) { watching.lastGuestLeft(driver, rideStarted = status == TripStatus.IN_PROGRESS) }
             }
         }
     }

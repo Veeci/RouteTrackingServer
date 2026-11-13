@@ -4,11 +4,14 @@ import org.koin.core.module.Module
 import org.koin.dsl.bind
 import org.koin.dsl.module
 import veeci.practicing.rts.devicecontrol.adapter.inbound.event.CommandIssuedListener
+import veeci.practicing.rts.devicecontrol.adapter.inbound.event.TripPolicyListener
 import veeci.practicing.rts.devicecontrol.adapter.inbound.job.CommandExpiryJob
 import veeci.practicing.rts.devicecontrol.adapter.out.persistence.ExposedCommandEventOutbox
 import veeci.practicing.rts.devicecontrol.adapter.out.persistence.ExposedDeviceCommandRepository
 import veeci.practicing.rts.devicecontrol.application.CommandDelivery
+import veeci.practicing.rts.devicecontrol.application.CommandPolicies
 import veeci.practicing.rts.devicecontrol.application.CommandService
+import veeci.practicing.rts.devicecontrol.application.api.GuestWatching
 import veeci.practicing.rts.devicecontrol.application.port.out.CommandEventOutbox
 import veeci.practicing.rts.devicecontrol.application.port.out.DeviceCommandRepository
 import veeci.practicing.rts.platform.config.CommandsConfig
@@ -25,4 +28,7 @@ fun deviceControlModule(config: CommandsConfig): Module =
         // Built at startup: it registers with the driver sockets before any driver connects.
         single(createdAtStart = true) { CommandDelivery(get(), get()).also { it.start() } }
         single { CommandIssuedListener(get()) } bind OutboxEventHandler::class
+        // The server's own commands: guest watching (called by live) and trip stages (outbox).
+        single { CommandPolicies(get(), get(), get(), get()) } bind GuestWatching::class
+        single { TripPolicyListener(get()) } bind OutboxEventHandler::class
     }
