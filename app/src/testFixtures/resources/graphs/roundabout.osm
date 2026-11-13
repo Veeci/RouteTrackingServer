@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  roundabout.osm: a four-node roundabout with an approach road from the north and one from
+  the south. The roundabout way has junction=roundabout and no oneway tag, so traffic may
+  only follow the order of its nodes (anticlockwise, as in Vietnam).
+
+                     N (5)
+                     │
+                     1
+                   ↙   ↖
+                  2     4
+                   ↘   ↗
+                     3
+                     │
+                     S (6)
+
+  Way 401: closed roundabout 1-2-3-4-1, highway=primary, junction=roundabout.
+  Way 402: N-1, two-way primary.
+  Way 403: 3-S, two-way primary.
+
+  Expected graph: 6 nodes, 8 directed edges: 1->2, 2->3, 3->4, 4->1 on the ring (no reverse
+  edges), plus 5<->1 and 3<->6. Every node can reach every other.
+-->
+<osm version="0.6" generator="hand-written">
+  <node id="1" lat="21.0250" lon="105.8300"/>
+  <node id="2" lat="21.0247" lon="105.8297"/>
+  <node id="3" lat="21.0244" lon="105.8300"/>
+  <node id="4" lat="21.0247" lon="105.8303"/>
+  <node id="5" lat="21.0260" lon="105.8300"/>
+  <node id="6" lat="21.0234" lon="105.8300"/>
+  <way id="401">
+    <nd ref="1"/><nd ref="2"/><nd ref="3"/><nd ref="4"/><nd ref="1"/>
+    <tag k="highway" v="primary"/>
+    <tag k="junction" v="roundabout"/>
+  </way>
+  <way id="402">
+    <nd ref="5"/><nd ref="1"/>
+    <tag k="highway" v="primary"/>
+  </way>
+  <way id="403">
+    <nd ref="3"/><nd ref="6"/>
+    <tag k="highway" v="primary"/>
+  </way>
+</osm>

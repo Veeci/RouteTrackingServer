@@ -19,3 +19,6 @@ local.properties
 
 # OS
 .DS_Store
+
+# OpenStreetMap extracts (large, ODbL licensed). See docs/data/osm.md.
+data/osm/

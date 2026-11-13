@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  tiny_grid.osm: a 3 x 3 grid of two-way residential streets near Hoan Kiem Lake, Hanoi.
+
+      lat 21.030   1 ──── 2 ──── 3
+                   │      │      │
+      lat 21.029   4 ──── 5 ──── 6
+                   │      │      │
+      lat 21.028   7 ──── 8 ──── 9          10  (footway only, so the loader drops it)
+                lng 105.850 105.851 105.852
+                                            11  (a lone tagged node on no way, also dropped)
+
+  Ways: rows 1-2-3, 4-5-6, 7-8-9 and columns 1-4-7, 2-5-8, 3-6-9, all highway=residential,
+  no oneway tag. Way 107 is a highway=footway from 9 to 10.
+
+  Expected graph: 9 nodes, 12 street segments, 24 directed edges. Each node has 2 to 4 edges.
+
+  Haversine lengths (R = 6 371 008.8 m, computed outside this code):
+    one row step (0.001 deg of latitude)   111.195 m
+    one column step at lat 21.030          103.789 m
+    one column step at lat 21.028          103.790 m
+  Shortest distance 1 -> 9: 429.968 m (along row 1-2-3, then down 3-6-9).
+  Going down 1-4-7 and then along 7-8-9 is 429.970 m, because longitude steps are a little
+  longer further south.
+-->
+<osm version="0.6" generator="hand-written">
+  <node id="1" lat="21.030" lon="105.850"/>
+  <node id="2" lat="21.030" lon="105.851"/>
+  <node id="3" lat="21.030" lon="105.852"/>
+  <node id="4" lat="21.029" lon="105.850"/>
+  <node id="5" lat="21.029" lon="105.851"/>
+  <node id="6" lat="21.029" lon="105.852"/>
+  <node id="7" lat="21.028" lon="105.850"/>
+  <node id="8" lat="21.028" lon="105.851"/>
+  <node id="9" lat="21.028" lon="105.852"/>
+  <node id="10" lat="21.028" lon="105.853"/>
+  <node id="11" lat="21.027" lon="105.853">
+    <tag k="amenity" v="cafe"/>
+  </node>
+  <way id="101">
+    <nd ref="1"/><nd ref="2"/><nd ref="3"/>
+    <tag k="highway" v="residential"/>
+  </way>
+  <way id="102">
+    <nd ref="4"/><nd ref="5"/><nd ref="6"/>
+    <tag k="highway" v="residential"/>
+  </way>
+  <way id="103">
+    <nd ref="7"/><nd ref="8"/><nd ref="9"/>
+    <tag k="highway" v="residential"/>
+  </way>
+  <way id="104">
+    <nd ref="1"/><nd ref="4"/><nd ref="7"/>
+    <tag k="highway" v="residential"/>
+  </way>
+  <way id="105">
+    <nd ref="2"/><nd ref="5"/><nd ref="8"/>
+    <tag k="highway" v="residential"/>
+  </way>
+  <way id="106">
+    <nd ref="3"/><nd ref="6"/><nd ref="9"/>
+    <tag k="highway" v="residential"/>
+  </way>
+  <way id="107">
+    <nd ref="9"/><nd ref="10"/>
+    <tag k="highway" v="footway"/>
+  </way>
+</osm>
