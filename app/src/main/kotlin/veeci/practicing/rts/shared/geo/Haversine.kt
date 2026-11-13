@@ -16,13 +16,24 @@ object Haversine {
     fun distance(
         a: GeoPoint,
         b: GeoPoint,
-    ): Meters {
-        val lat1 = Math.toRadians(a.lat)
-        val lat2 = Math.toRadians(b.lat)
+    ): Meters = Meters(distanceM(a.lat, a.lng, b.lat, b.lng))
+
+    /**
+     * The same distance from raw degrees, in metres. Search loops call it once per edge; taking doubles
+     * instead of [GeoPoint]s means they allocate nothing.
+     */
+    fun distanceM(
+        latA: Double,
+        lngA: Double,
+        latB: Double,
+        lngB: Double,
+    ): Double {
+        val lat1 = Math.toRadians(latA)
+        val lat2 = Math.toRadians(latB)
         val dLat = lat2 - lat1
-        val dLng = Math.toRadians(b.lng - a.lng)
+        val dLng = Math.toRadians(lngB - lngA)
         val h = sin(dLat / 2).squared() + cos(lat1) * cos(lat2) * sin(dLng / 2).squared()
-        return Meters(2 * EARTH_RADIUS_M * asin(sqrt(h.coerceAtMost(1.0))))
+        return 2 * EARTH_RADIUS_M * asin(sqrt(h.coerceAtMost(1.0)))
     }
 
     private fun Double.squared() = this * this

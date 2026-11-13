@@ -35,6 +35,12 @@ class RoadGraph internal constructor(
 
     val edgeCount: Int get() = edgeTargets.size
 
+    /**
+     * The fastest edge speed in the graph, or 0 when there are no edges. A* divides straight-line distance by
+     * it to get a travel time that no real path can beat. Computed once here so that no search scans the edges.
+     */
+    val maxSpeedMps: Float = edgeSpeedMps.maxOrNull() ?: 0f
+
     fun point(node: Int): GeoPoint = GeoPoint(nodeLat[node], nodeLng[node])
 
     /** The OSM id the node had in the source file, for logs and tests. */
