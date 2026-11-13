@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  one_way_trap.osm: the straight road from S to T is one-way the other way, so a legal
+  route from S to T must go round through D.
+
+                 D
+               ⇅   ↘
+             S ←───── T
+
+      S (21.0290, 105.8500)    D (21.0300, 105.8510)    T (21.0290, 105.8520)
+
+  Way 201 S-T: nodes listed S, T with oneway=-1, so the only edge is T -> S.
+  Way 202 S-D: two-way.
+  Way 203 D-T: oneway=yes, so the only edge is D -> T.
+
+  Node ids: S = 1, D = 2, T = 3. Every node can reach every other, so SCC pruning keeps all 3.
+  Expected graph: 3 nodes, 4 directed edges (T->S, S->D, D->S, D->T).
+
+  Haversine lengths (computed outside this code):
+    S-T 207.579 m    S-D 152.107 m    D-T 152.107 m
+  Shortest S -> T: 304.214 m (S, D, T). Shortest T -> S: 207.579 m (direct).
+-->
+<osm version="0.6" generator="hand-written">
+  <node id="1" lat="21.0290" lon="105.8500"/>
+  <node id="2" lat="21.0300" lon="105.8510"/>
+  <node id="3" lat="21.0290" lon="105.8520"/>
+  <way id="201">
+    <nd ref="1"/><nd ref="3"/>
+    <tag k="highway" v="secondary"/>
+    <tag k="oneway" v="-1"/>
+  </way>
+  <way id="202">
+    <nd ref="1"/><nd ref="2"/>
+    <tag k="highway" v="residential"/>
+  </way>
+  <way id="203">
+    <nd ref="2"/><nd ref="3"/>
+    <tag k="highway" v="residential"/>
+    <tag k="oneway" v="yes"/>
+  </way>
+</osm>
