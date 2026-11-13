@@ -37,6 +37,10 @@ channels:
         $ref: '#/components/messages/fix_batch'
       device_status:
         $ref: '#/components/messages/device_status'
+      command_ack:
+        $ref: '#/components/messages/command_ack'
+      command:
+        $ref: '#/components/messages/command'
       welcome:
         $ref: '#/components/messages/welcome'
       ack:
@@ -98,6 +102,22 @@ operations:
     summary: The device's battery and motion, every 30 s; also the driver's heartbeat. No reply.
     messages:
       - $ref: '#/channels/driver/messages/device_status'
+  sendCommand:
+    action: send
+    channel:
+      $ref: '#/channels/driver'
+    summary: |
+      A command for the device, live or right after `welcome`. The server sends it again after a reconnect until
+      it gets `command_ack`, so the device handles each `commandId` once.
+    messages:
+      - $ref: '#/channels/driver/messages/command'
+  receiveCommandAck:
+    action: receive
+    channel:
+      $ref: '#/channels/driver'
+    summary: The device applied or rejected a command. An unknown id gets error COMMAND_NOT_FOUND. No other reply.
+    messages:
+      - $ref: '#/channels/driver/messages/command_ack'
   sendError:
     action: send
     channel:
@@ -155,6 +175,18 @@ components:
       summary: Battery and motion of the driver's device, every 30 s. Also the driver's heartbeat.
       payload:
         $ref: '#/components/schemas/DeviceStatus'
+    command:
+      name: command
+      title: Command
+      summary: Something the device should do (phase 5).
+      payload:
+        $ref: '#/components/schemas/Command'
+    command_ack:
+      name: command_ack
+      title: Command ack
+      summary: The device applied or rejected a command.
+      payload:
+        $ref: '#/components/schemas/CommandAck'
     welcome:
       name: welcome
       title: Welcome
@@ -387,6 +419,63 @@ components:
           minimum: 1
           description: Highest seq that the client received an ack for. Absent before the first ack. Informational only.
         sdkVersion:
+          type: string
+
+    Command:
+      type: object
+      additionalProperties: false
+      required: [type, commandId, kind]
+      properties:
+        type:
+          const: command
+        commandId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [SET_CONSTRAINT, REGISTER_GEOFENCES, FLUSH_QUEUE]
+        maxAccuracy:
+          type: string
+          enum: [HIGH, BALANCED, LOW, PASSIVE]
+        minIntervalMs:
+          type: integer
+          minimum: 0
+        reason:
+          type: string
+        regions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Geofence'
+
+    Geofence:
+      type: object
+      additionalProperties: false
+      required: [id, lat, lng, radiusM]
+      properties:
+        id:
+          type: string
+        lat:
+          type: number
+        lng:
+          type: number
+        radiusM:
+          type: number
+          exclusiveMinimum: 0
+
+    CommandAck:
+      type: object
+      additionalProperties: false
+      required: [type, commandId, result]
+      properties:
+        type:
+          const: command_ack
+        commandId:
+          type: string
+          format: uuid
+        result:
+          type: string
+          enum: [applied, rejected]
+        reason:
           type: string
 
     DeviceStatus:

@@ -13,6 +13,8 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import veeci.practicing.rts.protocol.Ack
+import veeci.practicing.rts.protocol.Command
+import veeci.practicing.rts.protocol.CommandAck
 import veeci.practicing.rts.protocol.DriverPosition
 import veeci.practicing.rts.protocol.FixBatch
 import veeci.practicing.rts.protocol.GuestServerMessage
@@ -42,6 +44,7 @@ simulator driver --token TOKEN [options]
   --battery-drain P         percent lost per minute of route time (default 0); try --battery 20 --battery-drain 2
   --pause-at S:D            after S seconds of route, send nothing for D real seconds (default none);
                             with the server's 60 s stale time, 120:70 shows driver_stale, then driver_back
+  --reject-commands true    answer every server command with rejected (default: applied)
 
 simulator guest --token TOKEN --trip TRIP_ID [--url URL]
   Watches a trip live and prints every position, progress update and status change.
@@ -150,6 +153,7 @@ private class DriverOptions(
                         battery = values["battery"]?.toInt() ?: DeviceScript.DEFAULT_BATTERY,
                         batteryDrain = values["battery-drain"]?.toDouble() ?: 0.0,
                         pause = values["pause-at"]?.let(DeviceScript::parsePause),
+                        rejectCommands = values["reject-commands"] == "true",
                     ),
             )
     }
@@ -176,6 +180,12 @@ private suspend fun replay(options: DriverOptions): Boolean {
                 script.statusBefore(batch)?.also { println("Battery ${it.battery.levelPercent} %") }
 
             override fun pauseBefore(batch: FixBatch) = script.pauseBefore(batch).also { if (it > Duration.ZERO) println("Silent for $it") }
+
+            override fun answer(command: Command): String {
+                val answer = if (options.phone.rejectCommands) CommandAck.REJECTED else CommandAck.APPLIED
+                println("Command ${command.kind} ${command.maxAccuracy ?: ""} ${command.reason ?: ""}: $answer")
+                return answer
+            }
         }
     HttpClient(CIO) { install(WebSockets) }.use { http ->
         val client =
@@ -201,6 +211,7 @@ private class DeviceSettings(
     val battery: Int,
     val batteryDrain: Double,
     val pause: Pair<Duration, Duration>?,
+    val rejectCommands: Boolean,
 )
 
 private class Stats {

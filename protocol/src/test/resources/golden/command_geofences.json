@@ -1,0 +1,13 @@
+{
+  "type": "command",
+  "commandId": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+  "kind": "REGISTER_GEOFENCES",
+  "regions": [
+    {
+      "id": "pickup",
+      "lat": 10.7725,
+      "lng": 106.698,
+      "radiusM": 150.0
+    }
+  ]
+}

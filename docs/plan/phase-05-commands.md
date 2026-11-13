@@ -104,15 +104,38 @@ The constants are now top-level.
 Tests: TC-5-CMD-02 to 07 (service), TC-5-DB-01 (contract against memory and Postgres), TC-5-API-01 and 02, plus
 admin round trip, forbidden list, bad driver id and 401. Check: 260 unit, 194 integration and 9 end-to-end tests pass.
 
+## As built: slice 5b (delivery over the driver socket)
+
+| Plan | As built | Why |
+|---|---|---|
+| `DeviceChannel` port in device control, `ConnectedDevices` in tracking's socket | `DriverLink` in `tracking.application.api` (send, onConnected, onCommandAck), implemented by `ConnectedDrivers` in tracking's socket adapter. Device control registers with it | One direction only: device control depends on tracking, tracking never imports device control |
+| Unknown id gets `error{UNKNOWN_COMMAND}` | `error{COMMAND_NOT_FOUND}` (the service's code); a bad id or result gets `INVALID_MESSAGE` | One code for "no such command" in REST and on the socket |
+
+How it works:
+- Protocol: server `command { commandId, kind, maxAccuracy?, minIntervalMs?, reason?, regions? }`, client
+  `command_ack { commandId, result: applied|rejected, reason? }`. No reply to an ack.
+- Live: `CommandIssuedListener` (outbox) calls `CommandDelivery.deliver`, which sends through `DriverLink` if the
+  driver has a socket on this instance and then marks the command SENT. It runs after the command committed.
+- After `welcome`: the driver socket registers itself with `ConnectedDrivers`, whose connect listener sends every
+  open, unexpired command, oldest first, before the socket reads its next message.
+- At least once: a SENT command without an ack is sent again after every reconnect. The device handles a
+  `commandId` once and acks it again.
+- Ack: `ConnectedDrivers` calls `CommandService.acknowledge`; COMMAND_NOT_FOUND comes back as an error frame.
+- Simulator: `DriverClient` answers every `command` with `command_ack` (`BatchHooks.answer`); `simulator driver`
+  prints each command, and `--reject-commands true` answers rejected.
+
+Tests: TC-5-WS-01 to 04 and TC-5-CMD-01 on Netty (`CommandDeliveryIT`), plus a bad ack result; golden files for
+`command`, `command` with geofences and `command_ack`. Check: 269 unit, 199 integration and 9 end-to-end tests pass.
+
 ## Tasks
 
 - [x] T5.1 Model, payloads, `CommandService` (`issue`, `acknowledge`, `expire`, `pendingFor`).
 - [x] T5.2 `DeviceCommandRepository` port + Exposed impl + contract tests.
-- [ ] T5.3 `DeviceChannel` port; `ConnectedDevices` (session → socket outbound channel, per instance) in the tracking WS adapter; listener delivering after commit.
-- [ ] T5.4 Protocol `command`, `command_ack`; handler: redeliver after welcome; ack branch.
+- [x] T5.3 `DeviceChannel` port; `ConnectedDevices` (session → socket outbound channel, per instance) in the tracking WS adapter; listener delivering after commit.
+- [x] T5.4 Protocol `command`, `command_ack`; handler: redeliver after welcome; ack branch.
 - [ ] T5.5 `CommandPolicies` + debounce, subscribed to hub updates.
 - [x] T5.6 Admin routes.
-- [ ] T5.7 Simulator: print received commands, auto-ack `applied` (flag `--reject-commands` for tests).
+- [x] T5.7 Simulator: print received commands, auto-ack `applied` (flag `--reject-commands` for tests).
 - [ ] T5.8 protocol.md: idempotency note and command payload schemas.
 
 ## Test plan

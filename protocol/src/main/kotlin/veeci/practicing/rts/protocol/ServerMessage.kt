@@ -37,6 +37,32 @@ data class RejectionDto(
     val reason: String,
 )
 
+/**
+ * A command for the device (phase 5). [kind] says which fields apply: SET_CONSTRAINT (maxAccuracy, minIntervalMs,
+ * reason), REGISTER_GEOFENCES (regions) or FLUSH_QUEUE (none). The device answers with `command_ack`. It may get
+ * the same command again after a reconnect, so it handles a `commandId` once.
+ */
+@Serializable
+@SerialName("command")
+data class Command(
+    val commandId: String,
+    val kind: String,
+    /** HIGH, BALANCED, LOW or PASSIVE: the names of the SDK's accuracy enum. */
+    val maxAccuracy: String? = null,
+    val minIntervalMs: Long? = null,
+    val reason: String? = null,
+    val regions: List<GeofenceDto>? = null,
+) : ServerMessage
+
+/** A circle the device watches. */
+@Serializable
+data class GeofenceDto(
+    val id: String,
+    val lat: Double,
+    val lng: Double,
+    val radiusM: Double,
+)
+
 @Serializable
 @SerialName("error")
 data class ErrorMessage(

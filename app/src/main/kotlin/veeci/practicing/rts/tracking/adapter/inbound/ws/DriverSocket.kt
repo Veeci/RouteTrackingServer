@@ -15,6 +15,7 @@ import veeci.practicing.rts.platform.ws.WsSession
 import veeci.practicing.rts.platform.ws.WsSessionRunner
 import veeci.practicing.rts.protocol.Ack
 import veeci.practicing.rts.protocol.ClientMessage
+import veeci.practicing.rts.protocol.CommandAck
 import veeci.practicing.rts.protocol.DeviceStatus
 import veeci.practicing.rts.protocol.FixBatch
 import veeci.practicing.rts.protocol.Hello
@@ -30,6 +31,7 @@ import veeci.practicing.rts.shared.Role
 import veeci.practicing.rts.tracking.application.TrackingService
 import veeci.practicing.rts.tracking.domain.SessionId
 import java.time.Clock
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlin.time.Duration
 import kotlin.time.toKotlinInstant
@@ -50,6 +52,7 @@ class DriverSocket(
     private val limits: LimitsDto,
     private val handshakeTimeout: Duration,
     metrics: MeterRegistry,
+    private val drivers: ConnectedDrivers,
 ) {
     private val log = LoggerFactory.getLogger(DriverSocket::class.java)
 
@@ -74,6 +77,7 @@ class DriverSocket(
             return
         }
         var session: SessionId? = null // set by the first valid hello
+        var registered: WsSession? = null // this socket, once ConnectedDrivers knows it
         val handshake =
             socket.launch {
                 delay(handshakeTimeout)
@@ -83,17 +87,55 @@ class DriverSocket(
             runner.run(socket, ENDPOINT, ClientMessage.serializer()) { message ->
                 val current = session
                 when {
-                    message is Hello && current == null -> session = hello(message, actor)?.also { handshake.cancel() }
-                    message is Hello -> sendError(WsErrorCodes.INVALID_MESSAGE, "This socket already sent its hello.")
-                    message is FixBatch && current != null -> batch(current, message)
-                    message is DeviceStatus && current != null -> status(current, message)
-                    else -> close(CloseReason(WsCloseCodes.HANDSHAKE_TIMEOUT, "The first message must be hello"))
+                    message is Hello && current == null -> {
+                        session =
+                            open(message, actor)?.also {
+                                handshake.cancel()
+                                registered = this
+                            }
+                    }
+
+                    message is Hello -> {
+                        sendError(WsErrorCodes.INVALID_MESSAGE, "This socket already sent its hello.")
+                    }
+
+                    current == null -> {
+                        close(CloseReason(WsCloseCodes.HANDSHAKE_TIMEOUT, "The first message must be hello"))
+                    }
+
+                    else -> {
+                        afterHello(current, message, actor)
+                    }
                 }
             }
         } finally {
             handshake.cancel()
+            registered?.let { drivers.disconnected(actor.userId, it) }
         }
     }
+
+    /** A message of an open session (after `welcome`). */
+    private suspend fun WsSession.afterHello(
+        session: SessionId,
+        message: ClientMessage,
+        actor: Actor,
+    ) {
+        when (message) {
+            is FixBatch -> batch(session, message)
+            is DeviceStatus -> status(session, message)
+            is CommandAck -> commandAck(message, actor)
+            is Hello -> sendError(WsErrorCodes.INVALID_MESSAGE, "This socket already sent its hello.")
+        }
+    }
+
+    /**
+     * [hello], then registers this socket with [drivers], whose listeners send pending commands now: after
+     * `welcome`, before the socket handles its next message. Null if the hello was refused.
+     */
+    private suspend fun WsSession.open(
+        message: Hello,
+        actor: Actor,
+    ): SessionId? = hello(message, actor)?.also { drivers.connected(actor.userId, this) }
 
     /** Opens or resumes the session and sends `welcome`. Null if the hello was refused. */
     private suspend fun WsSession.hello(
@@ -143,6 +185,25 @@ class DriverSocket(
                 fixesRejected.increment(result.rejected.size.toDouble())
             }
         }
+    }
+
+    /** No reply; an unknown or malformed id gets an `error` frame and the session stays open. */
+    private suspend fun WsSession.commandAck(
+        ack: CommandAck,
+        actor: Actor,
+    ) {
+        val id = runCatching { UUID.fromString(ack.commandId) }.getOrNull()
+        val applied =
+            when (ack.result) {
+                CommandAck.APPLIED -> true
+                CommandAck.REJECTED -> false
+                else -> null
+            }
+        if (id == null || applied == null) {
+            sendError(WsErrorCodes.INVALID_MESSAGE, "commandId must be a UUID and result applied or rejected.")
+            return
+        }
+        answer { drivers.acked(actor.userId, id, applied) }
     }
 
     /** No reply when it is stored; a level outside 0 to 100 gets INVALID_MESSAGE and the session stays open. */
