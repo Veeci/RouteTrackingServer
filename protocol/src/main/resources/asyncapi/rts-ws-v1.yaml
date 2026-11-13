@@ -67,6 +67,8 @@ channels:
         $ref: '#/components/messages/trip_progress'
       trip_event:
         $ref: '#/components/messages/trip_event'
+      route_updated:
+        $ref: '#/components/messages/route_updated'
       error:
         $ref: '#/components/messages/error'
 
@@ -147,6 +149,7 @@ operations:
       - $ref: '#/channels/guest/messages/driver_position'
       - $ref: '#/channels/guest/messages/trip_progress'
       - $ref: '#/channels/guest/messages/trip_event'
+      - $ref: '#/channels/guest/messages/route_updated'
   sendGuestError:
     action: send
     channel:
@@ -236,6 +239,12 @@ components:
       summary: The trip moved to another stage.
       payload:
         $ref: '#/components/schemas/TripEvent'
+    route_updated:
+      name: route_updated
+      title: Route updated
+      summary: The driver follows a new route from now on; draw it instead of the old one.
+      payload:
+        $ref: '#/components/schemas/RouteUpdated'
 
   schemas:
     Subscribe:
@@ -306,6 +315,38 @@ components:
         durationS:
           type: number
           minimum: 0
+
+    RouteUpdated:
+      type: object
+      additionalProperties: false
+      required: [type, tripId, kind, routeVersion, polyline, distanceM, durationS, reason]
+      properties:
+        type:
+          const: route_updated
+        tripId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [TRIP, APPROACH]
+        routeVersion:
+          type: integer
+          minimum: 1
+          description: Later trip_progress messages with this routeVersion measure along this route.
+        polyline:
+          type: string
+          description: Google Encoded Polyline, precision 5.
+        distanceM:
+          type: number
+          minimum: 0
+        durationS:
+          type: number
+          minimum: 0
+        reason:
+          type: string
+          description: >-
+            Why the route changed. `off_route`: the driver left the previous version. A later server may add
+            values, so a client ignores values it does not know.
 
     TripStatus:
       type: string
@@ -402,14 +443,15 @@ components:
           format: uuid
         event:
           type: string
-          enum: [status_changed, driver_arriving, driver_low_battery, driver_stale, driver_back]
+          enum: [status_changed, driver_arriving, driver_low_battery, driver_stale, driver_back, off_route]
           description: >-
             What happened. `status_changed`: the trip moved to `status`. `driver_arriving`: the driver came within
             200 m of the pickup (2 fixes in a row); sent again only after the driver went beyond 300 m.
             `driver_low_battery`: the driver's phone is at 15 % or less and not charging, or its profile is
             CRITICAL; sent again only after it reached 25 % or was charging. `driver_stale`: nothing came from the
             driver's phone for 60 s (connection lost). `driver_back`: the phone is heard again; it follows every
-            `driver_stale`, never two `driver_stale` in a row. A later
+            `driver_stale`, never two `driver_stale` in a row. `off_route` (phase 7): the driver left the planned
+            route and the server planned again; a `route_updated` follows when it found a new route. A later
             server may add values, so a client ignores values it does not know.
         status:
           $ref: '#/components/schemas/TripStatus'

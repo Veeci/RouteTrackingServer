@@ -40,5 +40,6 @@ class TripMomentListener(
             is TripMoment.DriverLowBattery -> TripMomentRaisedV1.KIND_DRIVER_LOW_BATTERY
             is TripMoment.DriverStale -> TripMomentRaisedV1.KIND_DRIVER_STALE
             is TripMoment.DriverBack -> TripMomentRaisedV1.KIND_DRIVER_BACK
+            is TripMoment.OffRoute -> TripMomentRaisedV1.KIND_OFF_ROUTE
         }
 }

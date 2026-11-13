@@ -24,5 +24,7 @@ data class FixesAccepted(
         val bearingDeg: Double?,
         /** Distance travelled in the session up to this position. */
         val cumulativeM: Double,
+        /** The fix's horizontal accuracy (68 % radius) in metres; null in events stored before phase 7b. */
+        val accuracyM: Double? = null,
     )
 }

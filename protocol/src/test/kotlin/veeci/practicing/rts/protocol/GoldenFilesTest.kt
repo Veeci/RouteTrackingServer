@@ -278,6 +278,25 @@ class GoldenFilesTest {
                     GuestServerMessage.serializer(),
                     file = "trip_event_driver_back",
                 ),
+                Sample(
+                    "trip_event",
+                    TripEvent(TRIP, TripEvent.OFF_ROUTE, "IN_PROGRESS", Instant.parse("2026-09-30T02:33:00Z")),
+                    GuestServerMessage.serializer(),
+                    file = "trip_event_off_route",
+                ),
+                Sample(
+                    "route_updated",
+                    RouteUpdated(
+                        TRIP,
+                        "TRIP",
+                        routeVersion = 2,
+                        "_wd`Ase}iSkk@_E",
+                        distanceM = 655.0,
+                        durationS = 80.5,
+                        reason = RouteUpdated.OFF_ROUTE,
+                    ),
+                    GuestServerMessage.serializer(),
+                ),
             )
     }
 }

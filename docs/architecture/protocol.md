@@ -161,8 +161,8 @@ client → subscribe        { tripId }
 server → subscribed       { trip: { tripId, status, pickup, destination, driverId?, updatedAt, route? } }
 server → driver_position  { tripId, lat, lng, bearingDeg?, speedMps?, recordedAt }
 server → trip_progress    { tripId, target: PICKUP | DESTINATION, remainingM, etaS, basis: STRAIGHT_LINE | ROUTE, routeVersion? }
-server → trip_event       { tripId, event: status_changed | driver_arriving | driver_low_battery | driver_stale | driver_back, status, at, remainingM?, levelPercent?, lastSeenAt? }
-server → route_updated    { tripId, polyline, distanceM }                    // phase 7
+server → trip_event       { tripId, event: status_changed | driver_arriving | driver_low_battery | driver_stale | driver_back | off_route, status, at, remainingM?, levelPercent?, lastSeenAt? }
+server → route_updated    { tripId, kind: TRIP | APPROACH, routeVersion, polyline, distanceM, durationS, reason: off_route }
 ```
 
 - One socket watches one trip. A second `subscribe` on the same socket gets `error{INVALID_MESSAGE}`.
@@ -194,6 +194,13 @@ server → route_updated    { tripId, polyline, distanceM }                    /
 - `trip_event` with `event: driver_stale` (phase 4) says nothing came from the driver's phone for 60 s;
   `lastSeenAt` is when it was last heard. `driver_back` follows when the phone is heard again, within 10 s. They
   come in pairs, never two `driver_stale` in a row.
+- `trip_event` with `event: off_route` (phase 7) says the driver left the planned route: 3 fixes in a row more
+  than 50 m beside it, each with an accuracy of 30 m or better. A fix within 30 m resets the count. The server
+  then plans again from the driver's position, at most once every 30 s per trip.
+- `route_updated` (phase 7) follows `off_route` when the new plan succeeded. Draw its `polyline` instead of the
+  old line. Later `trip_progress` messages carry its `routeVersion`. When no route could be planned, only
+  `off_route` comes and the old route stays. `reason` may get new values, so a client ignores those it does not
+  know.
 - When the arrival rules see the driver at the pickup, the server moves the trip to ARRIVED itself, and the guest
   gets the usual `status_changed` with `status: ARRIVED`.
 - After a final stage (COMPLETED, CANCELLED) the server sends that `trip_event` and closes the socket with 1000.

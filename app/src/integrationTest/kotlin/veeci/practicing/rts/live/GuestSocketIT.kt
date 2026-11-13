@@ -41,6 +41,7 @@ import veeci.practicing.rts.protocol.GuestClientMessage
 import veeci.practicing.rts.protocol.GuestServerMessage
 import veeci.practicing.rts.protocol.Hello
 import veeci.practicing.rts.protocol.ProtocolJson
+import veeci.practicing.rts.protocol.RouteUpdated
 import veeci.practicing.rts.protocol.ServerMessage
 import veeci.practicing.rts.protocol.Subscribe
 import veeci.practicing.rts.protocol.Subscribed
@@ -204,6 +205,29 @@ class GuestSocketIT {
         }
 
     @Test
+    fun `TC-7-WS-01 a driver who leaves the route makes the guest get off_route, then the new route as version 2`() =
+        socketApp {
+            val trip = api().created(guest)
+            api().moved(trip.id, driver, "accept", "arrive", "start")
+
+            watch(guest) {
+                subscribe(trip.id)
+                receiveGuest()
+                    .shouldBeInstanceOf<Subscribed>()
+                    .trip.route
+                    .shouldNotBeNull()
+                    .routeVersion shouldBe 1
+                sendDriverBatch(metersFromPickup = 150.0) // 3 precise fixes far south of a route that starts north
+
+                receiveEvent(TripEvent.OFF_ROUTE).status shouldBe "IN_PROGRESS"
+                val updated = receiveRouteUpdate()
+                updated.routeVersion shouldBe 2
+                updated.kind shouldBe "TRIP"
+                updated.reason shouldBe RouteUpdated.OFF_ROUTE
+            }
+        }
+
+    @Test
     fun `before the ride the subscribed trip has no route yet`() =
         socketApp {
             val trip = api().created(guest)
@@ -333,6 +357,14 @@ class GuestSocketIT {
         while (true) {
             val message = receiveGuest()
             if (message is TripEvent && message.status !in earlier) return message
+        }
+    }
+
+    /** The next `route_updated`, skipping everything else. */
+    private suspend fun DefaultClientWebSocketSession.receiveRouteUpdate(): RouteUpdated {
+        while (true) {
+            val message = receiveGuest()
+            if (message is RouteUpdated) return message
         }
     }
 

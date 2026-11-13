@@ -19,6 +19,7 @@ import veeci.practicing.rts.protocol.DriverPosition
 import veeci.practicing.rts.protocol.FixBatch
 import veeci.practicing.rts.protocol.GuestServerMessage
 import veeci.practicing.rts.protocol.ProtocolJson
+import veeci.practicing.rts.protocol.RouteUpdated
 import veeci.practicing.rts.protocol.Subscribed
 import veeci.practicing.rts.protocol.TripEvent
 import veeci.practicing.rts.protocol.TripProgress
@@ -115,15 +116,23 @@ private fun GuestServerMessage.describe(): String =
         }
 
         is TripEvent -> {
-            when (event) {
-                TripEvent.STATUS_CHANGED -> "Trip is now $status"
-                TripEvent.DRIVER_ARRIVING -> "Driver arriving: ${remainingM?.toInt()} m to the pickup"
-                TripEvent.DRIVER_LOW_BATTERY -> "Driver's phone battery is low: $levelPercent %"
-                TripEvent.DRIVER_STALE -> "Connection to the driver lost (last heard $lastSeenAt)"
-                TripEvent.DRIVER_BACK -> "Driver is back online"
-                else -> "Trip event $event"
-            }
+            describe()
         }
+
+        is RouteUpdated -> {
+            "New ${kind.lowercase()} route v$routeVersion: ${distanceM.toInt()} m, about ${durationS.toInt()} s ($reason)"
+        }
+    }
+
+private fun TripEvent.describe(): String =
+    when (event) {
+        TripEvent.STATUS_CHANGED -> "Trip is now $status"
+        TripEvent.DRIVER_ARRIVING -> "Driver arriving: ${remainingM?.toInt()} m to the pickup"
+        TripEvent.DRIVER_LOW_BATTERY -> "Driver's phone battery is low: $levelPercent %"
+        TripEvent.DRIVER_STALE -> "Connection to the driver lost (last heard $lastSeenAt)"
+        TripEvent.DRIVER_BACK -> "Driver is back online"
+        TripEvent.OFF_ROUTE -> "Driver left the route; planning a new one"
+        else -> "Trip event $event"
     }
 
 private fun Double.rounded(decimals: Int = 5): String = "%.${decimals}f".format(this)

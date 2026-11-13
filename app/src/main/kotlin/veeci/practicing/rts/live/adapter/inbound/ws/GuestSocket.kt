@@ -14,6 +14,7 @@ import org.slf4j.LoggerFactory
 import veeci.practicing.rts.devicecontrol.application.api.GuestWatching
 import veeci.practicing.rts.live.application.api.DriverPositionUpdate
 import veeci.practicing.rts.live.application.api.LiveUpdate
+import veeci.practicing.rts.live.application.api.RouteUpdate
 import veeci.practicing.rts.live.application.api.TripMomentUpdate
 import veeci.practicing.rts.live.application.api.TripProgressUpdate
 import veeci.practicing.rts.live.application.api.TripStatusUpdate
@@ -27,6 +28,7 @@ import veeci.practicing.rts.protocol.GuestRoute
 import veeci.practicing.rts.protocol.GuestServerMessage
 import veeci.practicing.rts.protocol.GuestTrip
 import veeci.practicing.rts.protocol.Point
+import veeci.practicing.rts.protocol.RouteUpdated
 import veeci.practicing.rts.protocol.Subscribe
 import veeci.practicing.rts.protocol.Subscribed
 import veeci.practicing.rts.protocol.TripEvent
@@ -172,6 +174,11 @@ class GuestSocket(
                 true
             }
 
+            is RouteUpdate -> {
+                send(update.toMessage())
+                true
+            }
+
             is TripMomentUpdate -> {
                 // The protocol names events in lower case: DRIVER_ARRIVING travels as driver_arriving.
                 send(
@@ -230,6 +237,9 @@ class GuestSocket(
         )
 
     private fun GeoPoint.toPoint() = Point(lat, lng)
+
+    // Stored reasons are upper case (OFF_ROUTE); the protocol names them in lower case (off_route).
+    private fun RouteUpdate.toMessage() = RouteUpdated(tripId.toString(), kind, version, polyline, distanceM, durationS, reason.lowercase())
 
     private companion object {
         const val ENDPOINT = "guest"

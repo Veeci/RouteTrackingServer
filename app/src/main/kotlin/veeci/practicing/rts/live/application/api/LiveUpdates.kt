@@ -36,6 +36,20 @@ data class TripStatusUpdate(
     val at: Instant,
 ) : LiveUpdate
 
+/** The driver follows a new route from now on (phase 7b: a re-route). */
+data class RouteUpdate(
+    override val tripId: UUID,
+    /** TRIP or APPROACH. */
+    val kind: String,
+    val version: Int,
+    /** Google Encoded Polyline, precision 5. */
+    val polyline: String,
+    val distanceM: Double,
+    val durationS: Double,
+    /** Why, as the trip context stored it, for example OFF_ROUTE. */
+    val reason: String,
+) : LiveUpdate
+
 /** Something happened on the trip that is not a change of stage, for example "driver arriving". */
 data class TripMomentUpdate(
     override val tripId: UUID,

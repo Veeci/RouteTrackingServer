@@ -109,12 +109,14 @@ is closed, and sign-up and login for real users.
 | 45 | Saving the driver's battery when nobody watches | High accuracy (1 s) while a guest watches, balanced (5 s) when the last guest leaves before the ride, passive (60 s) after the trip | Built P5 (5c) |
 | 46 | Waking the phone near the pickup and destination | A 150 m geofence at the pickup when the trip is accepted, at the destination when the ride starts. The server still decides "arrived" from GPS | Built P5 (5c) |
 
-## Phase 7 (7a built)
+## Phase 7 (7a and 7b built)
 
 | # | Problem | What happens now | Source |
 |---|---|---|---|
 | 47 | The ETA along a road | The route's planned time for the distance left, scaled by how fast the driver really drives. A driver stopped at a red light makes it at most 3 times the plan, a fast one at least half. The route stores only its total time, so a fast road ahead and a slow alley count the same | Built P7 (7a) |
 | 48 | "Arriving" and the road distance | "Arriving" and the automatic ARRIVED still use the straight line. The guest can see "arriving" (200 m straight) while the progress still shows 350 m by road. Kept on purpose: ARRIVED cannot be undone, and a bad snap onto the route must never cause it | Built P7 (7a) |
+| 49 | When the driver counts as off the route | 3 fixes in a row more than 50 m beside the route, each accurate to 30 m or better. A fix within 30 m resets the count, and between 30 and 50 m nothing changes. Imprecise fixes (a tunnel, tall buildings) never count | Built P7 (7b) |
+| 50 | How often the server re-plans | At most once every 30 s per trip. The guest gets `off_route`, then the new line. When no route can be found (no road near the driver), the old line stays and the server tries again after 30 s | Built P7 (7b) |
 
 ## Open questions, most important first
 
