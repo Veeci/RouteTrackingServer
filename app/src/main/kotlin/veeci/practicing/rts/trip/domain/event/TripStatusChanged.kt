@@ -1,6 +1,7 @@
 package veeci.practicing.rts.trip.domain.event
 
 import kotlinx.serialization.Serializable
+import veeci.practicing.rts.shared.geo.GeoPoint
 import java.util.UUID
 import kotlin.time.Instant
 
@@ -22,6 +23,9 @@ data class TripStatusChanged(
     val to: TripStatus,
     val at: Instant,
     val cause: StatusCause = StatusCause.USER,
+    /** Where the trip starts and ends (phase 5: device control places geofences there). */
+    val pickup: GeoPoint? = null,
+    val destination: GeoPoint? = null,
 )
 
 /**
@@ -38,6 +42,11 @@ data class TripStatusChangedV1(
     val at: Instant,
     /** Added in phase 4. Absent in older events, which were all USER. */
     val cause: String? = null,
+    /** Added in phase 5. Absent in older events. */
+    val pickupLat: Double? = null,
+    val pickupLng: Double? = null,
+    val destinationLat: Double? = null,
+    val destinationLng: Double? = null,
 ) {
     fun toEvent() =
         TripStatusChanged(
@@ -48,6 +57,8 @@ data class TripStatusChangedV1(
             to = TripStatus.valueOf(to),
             at = at,
             cause = cause?.let(StatusCause::valueOf) ?: StatusCause.USER,
+            pickup = if (pickupLat != null && pickupLng != null) GeoPoint(pickupLat, pickupLng) else null,
+            destination = if (destinationLat != null && destinationLng != null) GeoPoint(destinationLat, destinationLng) else null,
         )
 
     companion object {
@@ -62,6 +73,10 @@ data class TripStatusChangedV1(
                 to = event.to.name,
                 at = event.at,
                 cause = event.cause.name,
+                pickupLat = event.pickup?.lat,
+                pickupLng = event.pickup?.lng,
+                destinationLat = event.destination?.lat,
+                destinationLng = event.destination?.lng,
             )
     }
 }

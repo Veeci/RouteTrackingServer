@@ -97,7 +97,7 @@ is closed, and sign-up and login for real users.
 | 39 | Older app versions | New notices reuse the `trip_event` message and keep `status`, so an older SDK ignores what it does not know. The SDK must ignore unknown `event` values | Built P4 (4a) |
 | 40 | Showing whether "arrived" was automatic | Stored as `cause` for history, not sent to the guest | Built P4 (4a) |
 
-## Phase 5 (5a built)
+## Phase 5 (built)
 
 | # | Problem | What happens now | Source |
 |---|---|---|---|
@@ -105,6 +105,9 @@ is closed, and sign-up and login for real users.
 | 42 | Who may send commands by hand | Only an admin. The server's own policies (5c) need no user | Built P5 (5a) |
 | 43 | How long a command waits | 10 minutes without an ack, then it expires and is never sent | Built P5 (5a) |
 | 44 | Two accuracy commands in a row | The newer one cancels the older one if it was not sent yet | Built P5 (5a) |
+
+| 45 | Saving the driver's battery when nobody watches | High accuracy (1 s) while a guest watches, balanced (5 s) when the last guest leaves before the ride, passive (60 s) after the trip | Built P5 (5c) |
+| 46 | Waking the phone near the pickup and destination | A 150 m geofence at the pickup when the trip is accepted, at the destination when the ride starts. The server still decides "arrived" from GPS | Built P5 (5c) |
 
 ## Open questions, most important first
 

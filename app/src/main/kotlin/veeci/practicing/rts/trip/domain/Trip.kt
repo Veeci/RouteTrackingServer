@@ -130,7 +130,7 @@ class Trip private constructor(
         at: Instant,
         cause: StatusCause = StatusCause.USER,
     ) {
-        events += TripStatusChanged(id.value, guestId.value, driverId?.value, from, to, at, cause)
+        events += TripStatusChanged(id.value, guestId.value, driverId?.value, from, to, at, cause, pickup, destination)
     }
 
     private fun TripAction.done(): String =
