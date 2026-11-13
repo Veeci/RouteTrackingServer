@@ -34,6 +34,7 @@ import veeci.practicing.rts.platform.events.OutboxRelay
 import veeci.practicing.rts.platform.http.configureErrorHandling
 import veeci.practicing.rts.platform.http.configureRequestGuards
 import veeci.practicing.rts.platform.http.configureSerialization
+import veeci.practicing.rts.platform.jobs.BackgroundWorker
 import veeci.practicing.rts.platform.jobs.JobScheduler
 import veeci.practicing.rts.platform.jobs.ScheduledJob
 import veeci.practicing.rts.platform.lifecycle.configureGracefulShutdown
@@ -92,6 +93,8 @@ fun Application.module(
     get<OutboxRelay>().start(this)
     // Periodic jobs (the stale-driver check); each run happens on one instance only.
     get<JobScheduler>().start(this, getKoin().getAll<ScheduledJob>())
+    // Workers on in-process queues (re-routes); graceful shutdown stops them before the pool closes.
+    getKoin().getAll<BackgroundWorker>().forEach { it.start(this) }
     // The road graph loads in the background; readiness reports `graph` DOWN until it is ready.
     get<RoadGraphLoader>().start(this)
 

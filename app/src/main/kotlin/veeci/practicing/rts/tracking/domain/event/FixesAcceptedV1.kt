@@ -26,6 +26,8 @@ data class FixesAcceptedV1(
         val speedMps: Double? = null,
         val bearingDeg: Double? = null,
         val cumulativeM: Double,
+        /** Added in phase 7b; absent in older rows. */
+        val accuracyM: Double? = null,
     )
 
     fun toEvent() =
@@ -42,6 +44,7 @@ data class FixesAcceptedV1(
                         it.speedMps,
                         it.bearingDeg,
                         it.cumulativeM,
+                        it.accuracyM,
                     )
                 },
         )
@@ -57,7 +60,7 @@ data class FixesAcceptedV1(
                 seq = event.seq,
                 positions =
                     event.positions.map {
-                        Position(it.point.lat, it.point.lng, it.recordedAt, it.speedMps, it.bearingDeg, it.cumulativeM)
+                        Position(it.point.lat, it.point.lng, it.recordedAt, it.speedMps, it.bearingDeg, it.cumulativeM, it.accuracyM)
                     },
             )
     }

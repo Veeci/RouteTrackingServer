@@ -5,6 +5,7 @@ import org.koin.dsl.bind
 import org.koin.dsl.binds
 import org.koin.dsl.module
 import veeci.practicing.rts.live.adapter.inbound.event.TripMomentListener
+import veeci.practicing.rts.live.adapter.inbound.event.TripRouteListener
 import veeci.practicing.rts.live.adapter.inbound.event.TripStatusListener
 import veeci.practicing.rts.live.adapter.inbound.ws.GuestSocket
 import veeci.practicing.rts.live.adapter.out.bus.InMemoryLiveUpdateBus
@@ -18,5 +19,6 @@ fun liveModule(): Module =
         single { InMemoryLiveUpdateBus() } binds arrayOf(LiveUpdateBus::class, LiveUpdates::class)
         single { TripStatusListener(get(), get()) } bind OutboxEventHandler::class
         single { TripMomentListener(get(), get()) } bind OutboxEventHandler::class
+        single { TripRouteListener(get()) } bind OutboxEventHandler::class
         single { GuestSocket(get(), get(), get(), get()) }
     }

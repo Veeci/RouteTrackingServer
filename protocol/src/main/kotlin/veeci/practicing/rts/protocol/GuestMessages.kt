@@ -113,5 +113,28 @@ data class TripEvent(
         const val DRIVER_LOW_BATTERY = "driver_low_battery"
         const val DRIVER_STALE = "driver_stale"
         const val DRIVER_BACK = "driver_back"
+        const val OFF_ROUTE = "off_route"
+    }
+}
+
+/**
+ * The driver follows a new route from now on (phase 7): draw it instead of the old one. `trip_progress` messages
+ * with this [routeVersion] measure along it. [reason] says why; a client ignores values it does not know.
+ */
+@Serializable
+@SerialName("route_updated")
+data class RouteUpdated(
+    val tripId: String,
+    /** TRIP (pickup to destination) or APPROACH (driver to pickup). */
+    val kind: String,
+    val routeVersion: Int,
+    /** Google Encoded Polyline, precision 5. */
+    val polyline: String,
+    val distanceM: Double,
+    val durationS: Double,
+    val reason: String,
+) : GuestServerMessage {
+    companion object {
+        const val OFF_ROUTE = "off_route"
     }
 }

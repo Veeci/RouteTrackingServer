@@ -183,7 +183,14 @@ class TrackingService(
         seq = seq,
         positions =
             accepted.map {
-                FixesAccepted.Position(it.fix.point, it.fix.recordedAt, it.fix.speedMps, it.fix.bearingDeg, it.cumulative.value)
+                FixesAccepted.Position(
+                    it.fix.point,
+                    it.fix.recordedAt,
+                    it.fix.speedMps,
+                    it.fix.bearingDeg,
+                    it.cumulative.value,
+                    it.fix.accuracy.value,
+                )
             },
     )
 }
