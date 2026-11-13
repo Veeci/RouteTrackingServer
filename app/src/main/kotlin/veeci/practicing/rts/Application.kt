@@ -44,6 +44,9 @@ import veeci.practicing.rts.platform.security.AUTH_JWT
 import veeci.practicing.rts.platform.security.configureAuthentication
 import veeci.practicing.rts.platform.ws.configureWebSockets
 import veeci.practicing.rts.platform.ws.echoEndpoint
+import veeci.practicing.rts.routing.adapter.inbound.web.routeRoutes
+import veeci.practicing.rts.routing.application.RoadGraphLoader
+import veeci.practicing.rts.routing.routingModule
 import veeci.practicing.rts.tracking.adapter.inbound.ws.driverSocket
 import veeci.practicing.rts.tracking.trackingModule
 import veeci.practicing.rts.trip.adapter.inbound.web.tripRoutes
@@ -89,6 +92,8 @@ fun Application.module(
     get<OutboxRelay>().start(this)
     // Periodic jobs (the stale-driver check); each run happens on one instance only.
     get<JobScheduler>().start(this, getKoin().getAll<ScheduledJob>())
+    // The road graph loads in the background; readiness reports `graph` DOWN until it is ready.
+    get<RoadGraphLoader>().start(this)
 
     configureRequestLogging()
     configureMetrics(metrics)
@@ -106,6 +111,7 @@ fun Application.module(
             driverSocket(get())
             guestSocket(get())
             tripRoutes(get(), get())
+            routeRoutes(get())
             adminCommandRoutes(get())
         }
         if (config.app.env != AppEnv.PROD) echoEndpoint(get())
@@ -127,5 +133,6 @@ fun appModule(
             tripModule(config.events),
             deviceControlModule(config.commands),
             liveModule(),
+            routingModule(config.routing),
         )
     }

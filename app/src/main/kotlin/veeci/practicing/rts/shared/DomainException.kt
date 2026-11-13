@@ -25,6 +25,12 @@ enum class ErrorCategory {
 
     /** The caller acted on an outdated copy (an old version); they read again and decide again. */
     STALE,
+
+    /**
+     * The request is fine but the server cannot answer it right now (a map still loading, a computation over its
+     * time budget). Not the caller's fault: the same request may work a little later.
+     */
+    UNAVAILABLE,
 }
 
 /**

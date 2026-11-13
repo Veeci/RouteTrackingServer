@@ -10,12 +10,15 @@ import veeci.practicing.rts.trip.application.port.out.TripCursor
 import veeci.practicing.rts.trip.application.port.out.TripEventOutbox
 import veeci.practicing.rts.trip.application.port.out.TripMomentRepository
 import veeci.practicing.rts.trip.application.port.out.TripRepository
+import veeci.practicing.rts.trip.application.port.out.TripRouteRepository
 import veeci.practicing.rts.trip.domain.ArrivalState
 import veeci.practicing.rts.trip.domain.BatteryState
 import veeci.practicing.rts.trip.domain.PresenceState
+import veeci.practicing.rts.trip.domain.RouteKind
 import veeci.practicing.rts.trip.domain.Trip
 import veeci.practicing.rts.trip.domain.TripError
 import veeci.practicing.rts.trip.domain.TripId
+import veeci.practicing.rts.trip.domain.TripRoute
 import veeci.practicing.rts.trip.domain.event.TripMoment
 import veeci.practicing.rts.trip.domain.event.TripStatus
 import veeci.practicing.rts.trip.domain.event.TripStatusChanged
@@ -149,4 +152,21 @@ class InMemoryRuleStateStore : RuleStateStore {
     ) {
         battery[trip] = state
     }
+}
+
+/** Routes by trip, kind and version, like the `trip_routes` primary key. */
+class InMemoryTripRouteRepository : TripRouteRepository {
+    val routes = mutableListOf<TripRoute>()
+
+    override suspend fun insert(route: TripRoute) {
+        check(routes.none { it.tripId == route.tripId && it.kind == route.kind && it.version == route.version }) {
+            "Route ${route.kind} v${route.version} of ${route.tripId} exists already"
+        }
+        routes += route
+    }
+
+    override suspend fun findLatest(
+        tripId: TripId,
+        kind: RouteKind,
+    ): TripRoute? = routes.filter { it.tripId == tripId && it.kind == kind }.maxByOrNull { it.version }
 }

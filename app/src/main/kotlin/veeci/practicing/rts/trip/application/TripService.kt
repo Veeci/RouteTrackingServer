@@ -1,19 +1,27 @@
 package veeci.practicing.rts.trip.application
 
 import veeci.practicing.rts.platform.db.TransactionRunner
+import veeci.practicing.rts.routing.application.api.PlannedRoute
+import veeci.practicing.rts.routing.application.api.RouteMetric
+import veeci.practicing.rts.routing.application.api.RoutePlanner
 import veeci.practicing.rts.shared.Actor
 import veeci.practicing.rts.shared.DomainException
 import veeci.practicing.rts.shared.Role
 import veeci.practicing.rts.shared.geo.GeoPoint
+import veeci.practicing.rts.shared.geo.PolylineCodec
+import veeci.practicing.rts.trip.application.api.RouteSummary
 import veeci.practicing.rts.trip.application.api.TripQuery
 import veeci.practicing.rts.trip.application.api.TripSnapshot
 import veeci.practicing.rts.trip.application.port.out.TripCursor
 import veeci.practicing.rts.trip.application.port.out.TripEventOutbox
 import veeci.practicing.rts.trip.application.port.out.TripRepository
+import veeci.practicing.rts.trip.application.port.out.TripRouteRepository
+import veeci.practicing.rts.trip.domain.RouteKind
 import veeci.practicing.rts.trip.domain.Trip
 import veeci.practicing.rts.trip.domain.TripAction
 import veeci.practicing.rts.trip.domain.TripError
 import veeci.practicing.rts.trip.domain.TripId
+import veeci.practicing.rts.trip.domain.TripRoute
 import veeci.practicing.rts.trip.domain.event.TripStatus
 import java.time.Clock
 import java.time.temporal.ChronoUnit
@@ -51,22 +59,39 @@ class TripService(
     private val outbox: TripEventOutbox,
     private val transactions: TransactionRunner,
     private val clock: Clock,
+    private val planner: RoutePlanner,
+    private val routes: TripRouteRepository,
 ) : TripQuery {
+    /**
+     * Books a trip with its road route. The route is planned first, outside the transaction: planning is up to
+     * 500 ms of CPU work, and a transaction open that long would hold one of the pool's few connections idle.
+     * When no route exists the planner's DomainException (422) goes to the caller and no trip is stored.
+     */
     suspend fun request(
         command: RequestTrip,
         actor: Actor,
-    ): TripSnapshot =
-        transactions.inTransaction {
-            val trip = Trip.request(actor, command.pickup, command.destination, newTripId(), clock.now())
+    ): TripSnapshot {
+        Trip.ensureMayRequest(actor) // before planning: a caller who may not book should cost no CPU
+        val planned = planner.plan(command.pickup, command.destination, RouteMetric.DISTANCE)
+        return transactions.inTransaction {
+            val now = clock.now()
+            val trip = Trip.request(actor, command.pickup, command.destination, newTripId(), now)
             trips.insert(trip)
+            val route = planned.toTripRoute(trip.id, now)
+            routes.insert(route)
             publish(trip)
-            trip.snapshot()
+            trip.snapshot(route = route)
         }
+    }
 
     suspend fun get(
         id: TripId,
         actor: Actor,
-    ): TripSnapshot = transactions.inTransaction { load(id, actor).snapshot() }
+    ): TripSnapshot =
+        transactions.inTransaction {
+            val trip = load(id, actor)
+            trip.snapshot(route = routes.findLatest(trip.id, RouteKind.TRIP))
+        }
 
     override suspend fun snapshotFor(
         tripId: UUID,
@@ -136,5 +161,23 @@ internal fun Clock.now(): Instant = instant().truncatedTo(ChronoUnit.MICROS).toK
 @OptIn(ExperimentalUuidApi::class)
 private fun newTripId() = TripId(Uuid.generateV7().toJavaUuid())
 
-fun Trip.snapshot(version: Long = this.version) =
-    TripSnapshot(id.value, guestId.value, driverId?.value, pickup, destination, status, createdAt, updatedAt, version)
+fun Trip.snapshot(
+    version: Long = this.version,
+    route: TripRoute? = null,
+) = TripSnapshot(
+    id.value,
+    guestId.value,
+    driverId?.value,
+    pickup,
+    destination,
+    status,
+    createdAt,
+    updatedAt,
+    version,
+    route?.let { RouteSummary(it.polyline, it.distanceM, it.durationS) },
+)
+
+private fun PlannedRoute.toTripRoute(
+    tripId: TripId,
+    now: Instant,
+) = TripRoute(tripId, RouteKind.TRIP, version = 1, PolylineCodec.encode(polyline), distanceM, durationS, now)

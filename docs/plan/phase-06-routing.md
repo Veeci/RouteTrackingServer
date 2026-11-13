@@ -106,8 +106,8 @@ Google Encoded Polyline (precision 5) for compact storage and transport.
 - [ ] T6.4 `GridIndex`.
 - [ ] T6.5 `Dijkstra`, then `AStar`; shared heap.
 - [ ] T6.6 `PolylineCodec`.
-- [ ] T6.7 `GraphRoutePlanner` + error codes; used by `TripService.request` / `accept`; migration V7.
-- [ ] T6.8 `GET /api/v1/routes` (OpenAPI), graph health indicator, planning timeout.
+- [x] T6.7 `GraphRoutePlanner` + error codes; used by `TripService.request` / `accept`; migration V7. (6c: `request` only, migration V11; see As built.)
+- [x] T6.8 `GET /api/v1/routes` (OpenAPI), graph health indicator, planning timeout.
 - [ ] T6.9 Tests, including property cross-check and benchmark.
 - [ ] T6.10 (Stretch) Bidirectional Dijkstra; binary graph cache for fast startup.
 
@@ -202,3 +202,41 @@ Google Encoded Polyline (precision 5) for compact storage and transport.
 - A* and Dijkstra agree on every property run; A* settles fewer nodes on average (report the ratio in the PR).
 - Trip creation returns a real road route on the city graph; the guest/driver apps can draw it.
 - All P0 cases pass.
+
+## As built: slice 6c (planner, trip routes, routes API)
+
+Phase 6 is built in three slices: 6a the graph, SCC pruning and the OSM loader (PR #25); 6b the grid index,
+Dijkstra, A* and the polyline codec (PR #26); 6c the planner, trip routes, `GET /api/v1/routes` and the graph
+health check. 6c differs from the design above in these ways:
+
+| Plan | As built | Why |
+|---|---|---|
+| `plan` throws `UnprocessableException` | `DomainException` with a `RoutingError` code in `routing.application.api`: OUTSIDE_COVERAGE, NO_ROAD_NEARBY and NO_ROUTE_FOUND are INVALID (422) | The project has one business exception type; the category picks the status |
+| Snap first, then check coverage | Coverage is checked first | A point more than 1 km outside the box is also more than 300 m from every road, so snapping first would never give OUTSIDE_COVERAGE |
+| `RoutePlanner.plan` is a plain function | `suspend fun plan`; it switches to `Dispatchers.Default` and starts its 500 ms timeout there | The search is CPU work. Starting the timeout on the Default pool keeps it on real time, so a caller's test dispatcher cannot fire it at once |
+| A timeout cancels the search | `ShortestPath.search` takes a `checkpoint` callback, called once per 1024 settled nodes; the planner throws from it once the timeout has cancelled the coroutine | The search loop never suspends, so `withTimeout` alone would only return after the search finished |
+| ROUTING_TIMEOUT is 503 | A new `ErrorCategory.UNAVAILABLE` maps to 503. ROUTING_TIMEOUT and ROUTING_NOT_READY (graph still loading) use it | Neither is the caller's fault, and the same request may work later |
+| `metric` uses the search's `Metric` | A public `RouteMetric` in `routing.application.api` | Other contexts may import only that package |
+| Same node: "zero-length route" | The straight line `[from, to]`, with the haversine distance and the snap-leg speed | The two points are within metres of each other, so the straight line is the honest answer |
+| Snap legs have no speed | Snap legs are timed at the `service` road speed, 15 km/h | The leg from a point to its road is usually a driveway or an alley |
+| `V7__trip_routes.sql`, kind and version | `V11__trip_routes.sql`, primary key `(trip_id, kind, version)`, polyline encoded, no metric column | V7 to V10 were taken. Trip routes are always planned on DISTANCE |
+| `accept` stores an APPROACH route | Not built. The `kind` check allows APPROACH, so phase 7 needs no migration | Tracking has no "driver's last fix" query yet; phase 7 adds one to `tracking.application.api` |
+| The response has the route | `route` is in the trip from `POST /trips` and `GET /trips/{id}`; list pages and action responses omit it | One extra query by primary key per read of one trip, none per page |
+| Readiness waits for the graph | `RoadGraphLoader` loads on `Dispatchers.Default` after startup; `GraphHealthIndicator` (`graph`) is DOWN until then | Liveness stays UP while a city map parses, so the platform does not restart a busy process |
+
+Notes:
+- The graph source is a Koin definition (`RoadGraphSource`). Production reads `routing.graphPath`
+  (`data/osm/hanoi.osm`, env `ROUTING_GRAPHPATH`). A failed load is logged at ERROR and leaves `graph` DOWN;
+  the process stays up.
+- `testApp` and `socketApp` replace the source with `saigon_test_grid.osm`, a 4 x 17 street grid that covers the
+  Ho Chi Minh City points the existing trip, live and end-to-end tests book at. Both wait for the graph before the
+  test body runs; `testApp(awaitRoadGraph = false)` tests the time before.
+- `TripService.request` checks that the caller is a guest before it plans, so a forbidden caller costs no CPU. It
+  then plans outside the transaction and stores the trip and its route in one transaction.
+- TC-6-SP-11 (Hanoi benchmark) is still deferred: no Hanoi extract was available on the build machine. The 15 MB
+  per-search allocation noted in 6b is still unmeasured on the real graph.
+- The planner has no metrics of its own yet. `/api/v1/routes` latency shows in the HTTP timers.
+
+Tests: TC-6-RS-01 to 04, NO_ROUTE_FOUND, ROUTING_NOT_READY, the TIME metric, TC-6-PERF-02 (unit and API),
+checkpoint calls, loader and health check (unit); TC-6-API-01 to 04 and 06, plus 401, metric=time and 503 before
+loading (integration, checked against the OpenAPI contract); trip_routes versions in Postgres.

@@ -12,6 +12,9 @@ import org.junit.jupiter.api.Test
 import org.testcontainers.junit.jupiter.Testcontainers
 import org.testcontainers.postgresql.PostgreSQLContainer
 import veeci.practicing.rts.testing.TestDatabase
+import veeci.practicing.rts.testing.routing.FixtureGraphSource
+import veeci.practicing.rts.testing.routing.GatedGraphSource
+import veeci.practicing.rts.testing.routing.TestRouting
 import veeci.practicing.rts.testing.shouldMatchContract
 import veeci.practicing.rts.testing.testApp
 import kotlin.time.Duration
@@ -36,8 +39,24 @@ class HealthIT {
             val response = client.get("/health/ready")
 
             response.status shouldBe HttpStatusCode.OK
-            response.report() shouldBe HealthReport(HealthStatus.UP, mapOf("db" to HealthStatus.UP))
+            response.report() shouldBe HealthReport(HealthStatus.UP, mapOf("db" to HealthStatus.UP, "graph" to HealthStatus.UP))
         }
+
+    @Test
+    fun `TC-6-API-06 ready is 503 with graph DOWN until the road graph has loaded, live is UP meanwhile`() {
+        val gated = GatedGraphSource(FixtureGraphSource(TestRouting.CITY_GRAPH))
+        testApp(overrides = listOf(TestRouting.module(gated)), awaitRoadGraph = false) {
+            client.get("/health/live").status shouldBe HttpStatusCode.OK
+            val loading = client.get("/health/ready")
+            loading.status shouldBe HttpStatusCode.ServiceUnavailable
+            loading.report().checks["graph"] shouldBe HealthStatus.DOWN
+            loading.shouldMatchContract()
+
+            gated.release()
+
+            awaitStatus("/health/ready", HttpStatusCode.OK, within = 10.seconds)
+        }
+    }
 
     @Test
     fun `TC-1-HLT-01 TC-1-HLT-02 a frozen database turns ready DOWN, leaves live UP, and recovers`() {

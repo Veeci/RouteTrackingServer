@@ -2,7 +2,9 @@ package veeci.practicing.rts.trip
 
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.nulls.shouldBeNull
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldNotBeEmpty
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
@@ -243,6 +245,31 @@ class TripApiIT {
 
             late.status shouldBe HttpStatusCode.Conflict
             listOf(late.problem().code) shouldContainExactlyInAnyOrder listOf("ILLEGAL_TRANSITION")
+        }
+
+    @Test
+    fun `TC-6-API-04 a booking returns its road route, and an unroutable one is 422 and books nothing`() =
+        testApp(env = TestDatabase.freshDatabaseEnv()) {
+            val booked = api().request(guest).checked().trip()
+
+            val route = booked.route.shouldNotBeNull()
+            (route.distanceM > 0) shouldBe true
+            route.polyline.shouldNotBeEmpty()
+
+            val farFromRoads = GeoPoint(10.78, 106.7055) // 383 m east of the test map's last street
+            val noRoad = api().request(guest, pickup = farFromRoads).checked()
+            val inHanoi = api().request(guest, destination = GeoPoint(21.0285, 105.8542)).checked()
+
+            noRoad.status shouldBe HttpStatusCode.UnprocessableEntity
+            noRoad.problem().code shouldBe "NO_ROAD_NEARBY"
+            inHanoi.status shouldBe HttpStatusCode.UnprocessableEntity
+            inHanoi.problem().code shouldBe "OUTSIDE_COVERAGE"
+            api()
+                .listOpen(driver)
+                .checked()
+                .tripPage()
+                .items
+                .map { it.id } shouldBe listOf(booked.id)
         }
 
     private fun ApplicationTestBuilder.api() = TripApi(client)

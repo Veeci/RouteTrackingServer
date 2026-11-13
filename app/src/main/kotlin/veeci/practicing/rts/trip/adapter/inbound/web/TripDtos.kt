@@ -60,6 +60,8 @@ data class TripResponse(
     val updatedAt: Instant,
     /** Also sent as the ETag header. */
     val version: Long,
+    /** The pickup-to-destination road route; sent when a trip is booked and when one trip is read. */
+    val route: RouteDto? = null,
 ) {
     companion object {
         fun of(trip: TripSnapshot) =
@@ -73,9 +75,18 @@ data class TripResponse(
                 createdAt = trip.createdAt,
                 updatedAt = trip.updatedAt,
                 version = trip.version,
+                route = trip.route?.let { RouteDto(it.polyline, it.distanceM, it.durationS) },
             )
     }
 }
+
+@Serializable
+data class RouteDto(
+    /** Google Encoded Polyline, precision 5. */
+    val polyline: String,
+    val distanceM: Double,
+    val durationS: Double,
+)
 
 @Serializable
 data class TripPageResponse(

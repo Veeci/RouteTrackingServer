@@ -155,6 +155,11 @@ class Trip private constructor(
                 (ARRIVED to TripAction.CANCEL) to CANCELLED,
             )
 
+        /** Only a guest books trips. Separate from [request] so a caller can check it before costly work. */
+        fun ensureMayRequest(actor: Actor) {
+            if (actor.role != Role.GUEST) throw DomainException(TripError.TRIP_ACTION_FORBIDDEN, "Only a guest may request a trip")
+        }
+
         /** A guest asks for a ride. Only a guest may. */
         fun request(
             guest: Actor,
@@ -163,7 +168,7 @@ class Trip private constructor(
             id: TripId,
             now: Instant,
         ): Trip {
-            if (guest.role != Role.GUEST) throw DomainException(TripError.TRIP_ACTION_FORBIDDEN, "Only a guest may request a trip")
+            ensureMayRequest(guest)
             return Trip(id, guest.userId, null, pickup, destination, REQUESTED, now, now, version = 1)
                 .also { it.record(from = null, to = REQUESTED, now) }
         }

@@ -2,6 +2,7 @@ package veeci.practicing.rts.platform.config
 
 import com.sksamuel.hoplite.Secret
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
@@ -16,6 +17,7 @@ data class AppConfig(
     val tracking: TrackingConfig,
     val events: EventsConfig,
     val commands: CommandsConfig = CommandsConfig(),
+    val routing: RoutingConfig = RoutingConfig(),
 )
 
 data class AppInfo(
@@ -86,6 +88,18 @@ data class CommandsConfig(
     val expireAfter: Duration = 10.minutes,
     /** How often the expiry job looks for overdue commands. */
     val expiryCheckEvery: Duration = 30.seconds,
+)
+
+/** Road routing (phase 6). */
+data class RoutingConfig(
+    /** The OSM XML extract the road graph is built from, relative to the working directory (docs/data/osm.md). */
+    val graphPath: String = "data/osm/hanoi.osm",
+    /** A point farther than this from every road gets NO_ROAD_NEARBY. */
+    val maxSnapDistanceM: Double = 300.0,
+    /** A point farther than this outside the map's bounding box gets OUTSIDE_COVERAGE. */
+    val coverageMarginM: Double = 1_000.0,
+    /** The most time one route may take to plan; a slower one gets 503 ROUTING_TIMEOUT. */
+    val planTimeout: Duration = 500.milliseconds,
 )
 
 /** The tracking context's limits. The tracking module turns them into its own types. */

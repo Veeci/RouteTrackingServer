@@ -19,9 +19,10 @@ class AStar : ShortestPath {
         from: Int,
         to: Int,
         metric: Metric,
+        checkpoint: () -> Unit,
     ): SearchResult? {
         require(to in 0 until graph.nodeCount) { "to=$to is not a node of a graph with ${graph.nodeCount} nodes" }
-        return LabelSettingSearch(graph, metric, heuristic(graph, to, metric)).run(from, to)
+        return LabelSettingSearch(graph, metric, heuristic(graph, to, metric), checkpoint).run(from, to)
     }
 
     internal companion object {
