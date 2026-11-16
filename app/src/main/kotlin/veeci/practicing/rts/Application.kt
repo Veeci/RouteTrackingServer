@@ -50,6 +50,7 @@ import veeci.practicing.rts.routing.application.RoadGraphLoader
 import veeci.practicing.rts.routing.routingModule
 import veeci.practicing.rts.tracking.adapter.inbound.ws.driverSocket
 import veeci.practicing.rts.tracking.trackingModule
+import veeci.practicing.rts.trip.adapter.inbound.web.tripHistoryRoutes
 import veeci.practicing.rts.trip.adapter.inbound.web.tripRoutes
 import veeci.practicing.rts.trip.adapter.inbound.web.tripSummaryRoutes
 import veeci.practicing.rts.trip.tripModule
@@ -116,6 +117,7 @@ fun Application.module(
             guestSocket(get())
             tripRoutes(get(), get())
             tripSummaryRoutes(get())
+            tripHistoryRoutes(get())
             routeRoutes(get())
             adminCommandRoutes(get())
         }

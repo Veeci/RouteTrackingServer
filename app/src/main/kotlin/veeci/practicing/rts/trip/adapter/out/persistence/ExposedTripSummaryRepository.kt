@@ -2,8 +2,10 @@ package veeci.practicing.rts.trip.adapter.out.persistence
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.core.java.javaUUID
 import org.jetbrains.exposed.v1.datetime.timestamp
 import org.jetbrains.exposed.v1.jdbc.selectAll
@@ -97,5 +99,19 @@ class ExposedTripSummaryRepository : TripSummaryRepository {
             .selectAll()
             .where { TripSummariesTable.tripId eq tripId.value }
             .singleOrNull()
-            ?.let { it[TripSummariesTable.summary].toSummary(tripId, it[TripSummariesTable.computedAt]) }
+            ?.toSummary()
+
+    override suspend fun findAll(tripIds: Collection<TripId>): Map<TripId, TripSummary> =
+        if (tripIds.isEmpty()) {
+            emptyMap() // `IN ()` is not valid SQL
+        } else {
+            TripSummariesTable
+                .selectAll()
+                .where { TripSummariesTable.tripId inList tripIds.map { it.value } }
+                .map { it.toSummary() }
+                .associateBy { it.tripId }
+        }
+
+    private fun ResultRow.toSummary() =
+        this[TripSummariesTable.summary].toSummary(TripId(this[TripSummariesTable.tripId]), this[TripSummariesTable.computedAt])
 }

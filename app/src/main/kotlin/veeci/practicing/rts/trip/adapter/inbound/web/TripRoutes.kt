@@ -98,7 +98,16 @@ internal fun ApplicationCall.tripId(): TripId {
 }
 
 /** `?status=REQUESTED&cursor=...&limit=20`. Only open (REQUESTED) trips can be listed for now. */
-private data class TripListQuery(
+private object TripListQuery {
+    fun parse(parameters: Parameters): PageQuery =
+        PageQuery.parse(parameters) {
+            val status = parameters["status"]
+            if (status != null && status != TripStatus.REQUESTED.name) add(FieldError("status", "only REQUESTED can be listed"))
+        }
+}
+
+/** `cursor` and `limit` of a paged trip list. A bad value of either gets 400 with a field error. */
+internal data class PageQuery(
     val cursor: TripCursor?,
     val limit: Int,
 ) {
@@ -106,14 +115,17 @@ private data class TripListQuery(
         private const val DEFAULT_LIMIT = 20
         private const val MAX_LIMIT = 100
 
-        fun parse(parameters: Parameters): TripListQuery {
-            val status = parameters["status"]
+        /** [more] adds the errors of the list's own parameters, so the caller gets every error in one answer. */
+        fun parse(
+            parameters: Parameters,
+            more: MutableList<FieldError>.() -> Unit = {},
+        ): PageQuery {
             val limitText = parameters["limit"]
             val cursorText = parameters["cursor"]
             val cursor = cursorText?.let(TripCursors::decode)
             val errors =
                 buildList {
-                    if (status != null && status != TripStatus.REQUESTED.name) add(FieldError("status", "only REQUESTED can be listed"))
+                    more()
                     if (limitText != null &&
                         (limitText.toIntOrNull() ?: 0) !in 1..MAX_LIMIT
                     ) {
@@ -122,7 +134,7 @@ private data class TripListQuery(
                     if (cursorText != null && cursor == null) add(FieldError("cursor", "is not a cursor from this API"))
                 }
             if (errors.isNotEmpty()) throw RequestInvalidException(errors)
-            return TripListQuery(cursor, limitText?.toInt() ?: DEFAULT_LIMIT)
+            return PageQuery(cursor, limitText?.toInt() ?: DEFAULT_LIMIT)
         }
     }
 }

@@ -247,12 +247,20 @@ when the application has a bug.
 | Fixes of a session in a time range (phase 3) | `fixes_session_time` |
 | Undelivered events in order (`OutboxRelay`) | `outbox_unpublished (id) WHERE published_at IS NULL` |
 | Open trips, oldest first, page by page (`TripRepository.findByStatus`) | `trips_status_created (status, created_at, id)` |
+| A guest's trips, newest first, page by page (`TripRepository.findHistory`) | `trips_guest_history (guest_id, created_at DESC, id DESC)` |
+| A driver's trips, newest first, page by page (`TripRepository.findHistory`) | `trips_driver_history (driver_id, created_at DESC, id DESC) WHERE driver_id IS NOT NULL` |
+| The summaries of one history page (`TripSummaryRepository.findAll`) | Primary key of `trip_summaries` |
 | The active trip of a driver (`TripRepository.findActiveForDriver`) | `one_active_trip_per_driver` (it is unique and contains only active trips) |
 | A stored idempotent response (`Idempotency.execute`) | Primary key of `idempotency_keys` |
 
 There is no index on `tracking_sessions.device_id`, because no query needs it yet. An index is added
 together with the first query that needs it, because every index slows down writes and uses space.
 `outbox_unpublished` is a partial index: it contains only undelivered rows, so it stays small.
+`trips_driver_history` is partial for the same reason: a trip nobody accepted has no driver.
+
+A history page asks for `created_at <= x AND (created_at < x OR (created_at = x AND id < y))`. The first term
+repeats part of the OR on purpose. Postgres cannot use an OR as an index range, so without that term the scan would
+start at the user's newest trip and drop every row before the cursor.
 
 ## Column types
 

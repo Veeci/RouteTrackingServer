@@ -12,6 +12,9 @@ data class TripCursor(
     val id: TripId,
 )
 
+/** The side of a trip a user is on: the column a history query matches them against. */
+enum class TripParty { GUEST, DRIVER }
+
 interface TripRepository {
     suspend fun insert(trip: Trip)
 
@@ -21,6 +24,17 @@ interface TripRepository {
     suspend fun findByStatus(
         status: TripStatus,
         after: TripCursor?,
+        limit: Int,
+    ): List<Trip>
+
+    /**
+     * Up to [limit] trips of [user] as [party], in every status, newest first: by createdAt, then id, both
+     * descending. The page starts after [before], the last trip of the previous page.
+     */
+    suspend fun findHistory(
+        user: UserId,
+        party: TripParty,
+        before: TripCursor?,
         limit: Int,
     ): List<Trip>
 

@@ -9,4 +9,7 @@ interface TripSummaryRepository {
     suspend fun save(summary: TripSummary)
 
     suspend fun find(tripId: TripId): TripSummary?
+
+    /** The summaries of those of [tripIds] that have one, in one query. */
+    suspend fun findAll(tripIds: Collection<TripId>): Map<TripId, TripSummary>
 }
