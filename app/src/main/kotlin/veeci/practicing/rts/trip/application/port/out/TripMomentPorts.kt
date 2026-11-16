@@ -9,6 +9,9 @@ import veeci.practicing.rts.trip.domain.event.TripMoment
 /** The history of a trip's moments. Joins the caller's transaction. */
 interface TripMomentRepository {
     suspend fun append(moment: TripMoment)
+
+    /** How often the driver of [trip] left its route: the number of OffRoute moments (phase 8). */
+    suspend fun countOffRoute(trip: TripId): Int
 }
 
 /**

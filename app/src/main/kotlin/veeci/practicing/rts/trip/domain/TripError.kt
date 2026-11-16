@@ -23,4 +23,10 @@ enum class TripError(
 
     /** The caller's copy of the trip (If-Match) is older than the stored one. */
     VERSION_MISMATCH(ErrorCategory.STALE),
+
+    /** The trip has no summary yet: it is not completed, or the summary is still being computed. */
+    SUMMARY_NOT_READY(ErrorCategory.NOT_FOUND),
+
+    /** The request needs a trip that has ended, and this one is still running. */
+    TRIP_NOT_ENDED(ErrorCategory.CONFLICT),
 }

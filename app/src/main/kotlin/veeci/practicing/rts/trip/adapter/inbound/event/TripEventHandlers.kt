@@ -8,8 +8,10 @@ import veeci.practicing.rts.tracking.domain.event.FixesAcceptedV1
 import veeci.practicing.rts.trip.adapter.out.driver.DriverRoutePush
 import veeci.practicing.rts.trip.application.TripEventService
 import veeci.practicing.rts.trip.application.TripProgressService
+import veeci.practicing.rts.trip.application.TripSummaryService
 import veeci.practicing.rts.trip.domain.TripId
 import veeci.practicing.rts.trip.domain.event.TripRouteChangedV1
+import veeci.practicing.rts.trip.domain.event.TripStatus
 import veeci.practicing.rts.trip.domain.event.TripStatusChangedV1
 
 /** The driver moved (tracking context): update the progress of their active trip. */
@@ -65,5 +67,17 @@ class DriverRouteListener(
 
     override suspend fun handle(payload: JsonElement) {
         push.push(EventJson.decodeFromJsonElement(TripRouteChangedV1.serializer(), payload))
+    }
+}
+
+/** A trip completed: compute and store its summary (phase 8a). */
+class TripSummaryListener(
+    private val summaries: TripSummaryService,
+) : OutboxEventHandler {
+    override val eventType = TripStatusChangedV1.TYPE
+
+    override suspend fun handle(payload: JsonElement) {
+        val event = EventJson.decodeFromJsonElement(TripStatusChangedV1.serializer(), payload).toEvent()
+        if (event.to == TripStatus.COMPLETED) summaries.summarize(TripId(event.tripId))
     }
 }

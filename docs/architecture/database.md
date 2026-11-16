@@ -168,6 +168,10 @@ increases with every change. An update only succeeds if the version is still the
 (optimistic locking). The API sends the version as the ETag. Ids are UUID version 7, which start with the
 creation time, so new rows go to the end of the primary key index.
 
+Since V13, `accepted_at`, `arrived_at`, `started_at` and `ended_at` record when the trip reached each stage. Trip
+sets them in the same update as `status`. Trips stored before V13 have nulls. `trip_summaries` (V13) holds one
+JSON summary per completed trip, keyed by `trip_id`, so computing it again replaces it.
+
 ### `idempotency_keys`
 
 The receipt book of REST requests that carried an `Idempotency-Key` header, kept for 24 hours. A retry with

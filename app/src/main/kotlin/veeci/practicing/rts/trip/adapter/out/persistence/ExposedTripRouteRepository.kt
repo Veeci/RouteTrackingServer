@@ -66,6 +66,16 @@ class ExposedTripRouteRepository : TripRouteRepository {
             .singleOrNull()
             ?.toRoute()
 
+    override suspend fun findAll(tripId: TripId): List<TripRoute> =
+        TripRoutesTable
+            .selectAll()
+            .where { TripRoutesTable.tripId eq tripId.value }
+            .orderBy(
+                TripRoutesTable.createdAt to SortOrder.ASC,
+                TripRoutesTable.kind to SortOrder.ASC,
+                TripRoutesTable.version to SortOrder.ASC,
+            ).map { it.toRoute() }
+
     private fun ResultRow.toRoute() =
         TripRoute(
             tripId = TripId(this[TripRoutesTable.tripId]),

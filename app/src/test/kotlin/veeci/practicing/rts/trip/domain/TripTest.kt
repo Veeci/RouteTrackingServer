@@ -19,6 +19,7 @@ import veeci.practicing.rts.trip.domain.event.TripStatus.IN_PROGRESS
 import veeci.practicing.rts.trip.domain.event.TripStatus.REQUESTED
 import veeci.practicing.rts.trip.domain.event.TripStatusChanged
 import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.minutes
 
 class TripTest {
     private val guest = TripSamples.guest()
@@ -216,4 +217,19 @@ class TripTest {
 
     /** Someone the table allows to do [action], so a refusal can only come from the trip's stage. */
     private fun allowedActor(action: TripAction) = if (action == TripAction.CANCEL) guest else driver
+
+    @Test
+    fun `TC-8-STG-01 each stage records when it was reached, and both ends set endedAt`() {
+        val trip = TripSamples.requested(guest)
+        trip.perform(TripAction.ACCEPT, driver, T0 + 1.minutes)
+        trip.autoArrive(T0 + 2.minutes)
+        trip.perform(TripAction.START, driver, T0 + 3.minutes)
+        trip.perform(TripAction.COMPLETE, driver, T0 + 4.minutes)
+
+        trip.stages shouldBe StageTimes(T0 + 1.minutes, T0 + 2.minutes, T0 + 3.minutes, T0 + 4.minutes)
+
+        val cancelled = TripSamples.requested(guest)
+        cancelled.perform(TripAction.CANCEL, guest, T0 + 5.minutes)
+        cancelled.stages shouldBe StageTimes(endedAt = T0 + 5.minutes)
+    }
 }
