@@ -14,16 +14,19 @@ import veeci.practicing.rts.trip.application.port.out.TripRouteRepository
 import veeci.practicing.rts.trip.application.port.out.TripSummaryRepository
 import veeci.practicing.rts.trip.domain.RouteKind
 import veeci.practicing.rts.trip.domain.RouteReason
+import veeci.practicing.rts.trip.domain.TimeWindow
 import veeci.practicing.rts.trip.domain.Trip
 import veeci.practicing.rts.trip.domain.TripError
 import veeci.practicing.rts.trip.domain.TripId
+import veeci.practicing.rts.trip.domain.approachWindow
 import veeci.practicing.rts.trip.domain.event.TripStatus
+import veeci.practicing.rts.trip.domain.hasExactRide
+import veeci.practicing.rts.trip.domain.rideWindow
 import veeci.practicing.rts.trip.domain.summary.LegSummarizer
 import veeci.practicing.rts.trip.domain.summary.LegSummary
 import veeci.practicing.rts.trip.domain.summary.TrackSample
 import veeci.practicing.rts.trip.domain.summary.TripSummary
 import java.time.Clock
-import kotlin.time.Instant
 
 /**
  * Summaries of completed trips (phase 8a). [summarize] runs when a trip completes, inside the outbox relay's
@@ -46,22 +49,17 @@ class TripSummaryService(
         transactions.inTransaction {
             val trip = trips.find(tripId)?.takeIf { it.status == TripStatus.COMPLETED } ?: return@inTransaction null
             val driver = checkNotNull(trip.driverId) { "A completed trip has a driver" }
-            val stages = trip.stages
-            val exact = stages.startedAt != null && stages.endedAt != null
-            val rideFrom = stages.startedAt.takeIf { exact } ?: trip.createdAt
-            val rideTo = stages.endedAt.takeIf { exact } ?: trip.updatedAt
-            val approach =
-                if (stages.acceptedAt != null && stages.arrivedAt != null) leg(driver, stages.acceptedAt, stages.arrivedAt) else null
+            val ride = checkNotNull(trip.rideWindow()) { "A completed trip has a ride window" }
             val tripRoutes = routes.findAll(trip.id)
             TripSummary(
                 tripId = trip.id,
-                ride = leg(driver, rideFrom, rideTo),
-                approach = approach,
+                ride = leg(driver, ride),
+                approach = trip.approachWindow()?.let { leg(driver, it) },
                 plannedDistanceM = tripRoutes.firstOrNull { it.kind == RouteKind.TRIP && it.version == 1 }?.distanceM,
                 offRouteCount = moments.countOffRoute(trip.id),
                 rerouteCount = tripRoutes.count { it.reason == RouteReason.OFF_ROUTE },
-                rejected = track.rejections(driver, rideFrom, rideTo),
-                approximate = !exact,
+                rejected = track.rejections(driver, ride.from, ride.to),
+                approximate = !trip.hasExactRide,
                 computedAt = clock.now(),
             ).also { summaries.save(it) }
         }
@@ -99,16 +97,15 @@ class TripSummaryService(
         trips.find(tripId)?.takeIf { it.isVisibleTo(actor) && it.status != TripStatus.REQUESTED }
             ?: throw DomainException(TripError.TRIP_NOT_FOUND, "No trip ${tripId.value}")
 
-    /** Reads the driver's track in [from, to) page by page; only one page is in memory at a time. */
+    /** Reads the driver's track in [window] page by page; only one page is in memory at a time. */
     private suspend fun leg(
         driver: UserId,
-        from: Instant,
-        to: Instant,
+        window: TimeWindow,
     ): LegSummary {
-        val summarizer = LegSummarizer(from, to)
+        val summarizer = LegSummarizer(window.from, window.to)
         var after: TrackCursor? = null
         do {
-            val page = track.fixes(driver, from, to, after, PAGE_SIZE)
+            val page = track.fixes(driver, window.from, window.to, after, PAGE_SIZE)
             page.forEach { summarizer.add(TrackSample(GeoPoint(it.lat, it.lng), it.recordedAt, it.speedMps ?: it.derivedSpeedMps)) }
             after = page.lastOrNull()?.cursor
         } while (page.size == PAGE_SIZE)

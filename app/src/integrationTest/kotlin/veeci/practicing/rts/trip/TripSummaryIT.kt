@@ -5,41 +5,24 @@ import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
-import io.kotest.matchers.types.shouldBeInstanceOf
-import io.ktor.client.plugins.websocket.WebSockets
-import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpStatusCode
-import io.ktor.websocket.Frame
-import io.ktor.websocket.readText
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Test
 import org.testcontainers.junit.jupiter.Testcontainers
-import veeci.practicing.rts.protocol.Ack
-import veeci.practicing.rts.protocol.ClientMessage
-import veeci.practicing.rts.protocol.FixBatch
-import veeci.practicing.rts.protocol.FixDto
-import veeci.practicing.rts.protocol.Hello
-import veeci.practicing.rts.protocol.ProtocolJson
-import veeci.practicing.rts.protocol.ServerMessage
-import veeci.practicing.rts.protocol.Welcome
 import veeci.practicing.rts.testing.SocketTestApp
 import veeci.practicing.rts.testing.TestTokens
-import veeci.practicing.rts.testing.geo.offset
 import veeci.practicing.rts.testing.shouldMatchContract
 import veeci.practicing.rts.testing.socketApp
 import veeci.practicing.rts.testing.trip.TripApi
-import veeci.practicing.rts.testing.trip.TripSamples.PICKUP
 import veeci.practicing.rts.trip.adapter.inbound.web.TripSummaryResponse
-import java.util.UUID
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.milliseconds
-import kotlin.time.Instant
 
 /**
  * Phase 8a end to end on Netty: a driver records a short ride over the socket, completes the trip, and the summary
@@ -64,7 +47,7 @@ class TripSummaryIT {
             // 25 fixes 100 ms and 1 m apart that lie between the start and now.
             val started = Clock.System.now()
             delay(RIDE_MS)
-            sendRide((1..POINTS).map { fix(northM = it.toDouble(), at = started + (it * STEP_MS).milliseconds) })
+            sendRide(driver, (1..POINTS).map { rideFix(northM = it.toDouble(), at = started + (it * STEP_MS).milliseconds) })
             api.moved(trip.id, driver, "complete")
 
             val forGuest = eventuallySummary(trip.id, guest)
@@ -127,32 +110,6 @@ class TripSummaryIT {
     }
 
     private suspend fun HttpResponse.summary() = json.decodeFromString(TripSummaryResponse.serializer(), bodyAsText())
-
-    private fun fix(
-        northM: Double,
-        at: Instant,
-    ): FixDto {
-        val point = PICKUP.offset(northM = northM, eastM = 0.0)
-        return FixDto(point.lat, point.lng, accuracyM = 5.0, speedMps = 10.0, recordedAt = at)
-    }
-
-    /** One driver session: hello, then all [fixes] in one batch, waiting for its ack. */
-    private suspend fun SocketTestApp.sendRide(fixes: List<FixDto>) =
-        createClient { install(WebSockets) }.webSocket("/ws/v1/driver", request = { bearerAuth(driver) }) {
-            suspend fun send(message: ClientMessage) = send(Frame.Text(ProtocolJson.encodeToString(ClientMessage.serializer(), message)))
-
-            suspend fun receive() = ProtocolJson.decodeFromString(ServerMessage.serializer(), (incoming.receive() as Frame.Text).readText())
-            send(Hello(1, "phone-1", UUID.randomUUID().toString(), sdkVersion = "0.9.0"))
-            receive().shouldBeInstanceOf<Welcome>()
-            send(FixBatch(1, fixes))
-            while (true) {
-                val message = receive()
-                if (message is Ack && message.seq == 1L) {
-                    message.accepted shouldBe fixes.size
-                    break
-                }
-            }
-        }
 
     private companion object {
         const val POINTS = 25

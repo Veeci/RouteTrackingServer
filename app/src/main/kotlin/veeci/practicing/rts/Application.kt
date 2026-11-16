@@ -53,6 +53,7 @@ import veeci.practicing.rts.tracking.trackingModule
 import veeci.practicing.rts.trip.adapter.inbound.web.tripHistoryRoutes
 import veeci.practicing.rts.trip.adapter.inbound.web.tripRoutes
 import veeci.practicing.rts.trip.adapter.inbound.web.tripSummaryRoutes
+import veeci.practicing.rts.trip.adapter.inbound.web.tripTrackRoutes
 import veeci.practicing.rts.trip.tripModule
 import kotlin.system.exitProcess
 
@@ -118,6 +119,7 @@ fun Application.module(
             tripRoutes(get(), get())
             tripSummaryRoutes(get())
             tripHistoryRoutes(get())
+            tripTrackRoutes(get())
             routeRoutes(get())
             adminCommandRoutes(get())
         }

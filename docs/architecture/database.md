@@ -250,6 +250,7 @@ when the application has a bug.
 | A guest's trips, newest first, page by page (`TripRepository.findHistory`) | `trips_guest_history (guest_id, created_at DESC, id DESC)` |
 | A driver's trips, newest first, page by page (`TripRepository.findHistory`) | `trips_driver_history (driver_id, created_at DESC, id DESC) WHERE driver_id IS NOT NULL` |
 | The summaries of one history page (`TripSummaryRepository.findAll`) | Primary key of `trip_summaries` |
+| A trip's moments in time order, for the track's timeline (`TripMomentRepository.findAll`) | `trip_moments_trip_at` (V8); `id` breaks ties among the few rows of one trip |
 | The active trip of a driver (`TripRepository.findActiveForDriver`) | `one_active_trip_per_driver` (it is unique and contains only active trips) |
 | A stored idempotent response (`Idempotency.execute`) | Primary key of `idempotency_keys` |
 
