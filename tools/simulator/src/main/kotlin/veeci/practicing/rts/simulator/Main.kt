@@ -19,6 +19,7 @@ import veeci.practicing.rts.protocol.DriverPosition
 import veeci.practicing.rts.protocol.FixBatch
 import veeci.practicing.rts.protocol.GuestServerMessage
 import veeci.practicing.rts.protocol.ProtocolJson
+import veeci.practicing.rts.protocol.RouteUpdated
 import veeci.practicing.rts.protocol.Subscribed
 import veeci.practicing.rts.protocol.TripEvent
 import veeci.practicing.rts.protocol.TripProgress
@@ -45,6 +46,8 @@ simulator driver --token TOKEN [options]
   --pause-at S:D            after S seconds of route, send nothing for D real seconds (default none);
                             with the server's 60 s stale time, 120:70 shows driver_stale, then driver_back
   --reject-commands true    answer every server command with rejected (default: applied)
+  --detour-at S:D:M         after S seconds of route, drive M metres east of it for D seconds (default none);
+                            during a ride, 60:60:150 makes the server see the driver off-route and re-route
 
 simulator guest --token TOKEN --trip TRIP_ID [--url URL]
   Watches a trip live and prints every position, progress update and status change.
@@ -115,15 +118,23 @@ private fun GuestServerMessage.describe(): String =
         }
 
         is TripEvent -> {
-            when (event) {
-                TripEvent.STATUS_CHANGED -> "Trip is now $status"
-                TripEvent.DRIVER_ARRIVING -> "Driver arriving: ${remainingM?.toInt()} m to the pickup"
-                TripEvent.DRIVER_LOW_BATTERY -> "Driver's phone battery is low: $levelPercent %"
-                TripEvent.DRIVER_STALE -> "Connection to the driver lost (last heard $lastSeenAt)"
-                TripEvent.DRIVER_BACK -> "Driver is back online"
-                else -> "Trip event $event"
-            }
+            describe()
         }
+
+        is RouteUpdated -> {
+            "New ${kind.lowercase()} route v$routeVersion: ${distanceM.toInt()} m, about ${durationS.toInt()} s ($reason)"
+        }
+    }
+
+private fun TripEvent.describe(): String =
+    when (event) {
+        TripEvent.STATUS_CHANGED -> "Trip is now $status"
+        TripEvent.DRIVER_ARRIVING -> "Driver arriving: ${remainingM?.toInt()} m to the pickup"
+        TripEvent.DRIVER_LOW_BATTERY -> "Driver's phone battery is low: $levelPercent %"
+        TripEvent.DRIVER_STALE -> "Connection to the driver lost (last heard $lastSeenAt)"
+        TripEvent.DRIVER_BACK -> "Driver is back online"
+        TripEvent.OFF_ROUTE -> "Driver left the route; planning a new one"
+        else -> "Trip event $event"
     }
 
 private fun Double.rounded(decimals: Int = 5): String = "%.${decimals}f".format(this)
@@ -137,6 +148,7 @@ private class DriverOptions(
     val device: String,
     val token: String?,
     val phone: DeviceSettings,
+    val detour: Detour?,
 ) {
     companion object {
         fun of(values: Map<String, String>) =
@@ -155,12 +167,13 @@ private class DriverOptions(
                         pause = values["pause-at"]?.let(DeviceScript::parsePause),
                         rejectCommands = values["reject-commands"] == "true",
                     ),
+                detour = values["detour-at"]?.let(Detour::parse),
             )
     }
 }
 
 private suspend fun replay(options: DriverOptions): Boolean {
-    val points = GpxReader.load(options.gpx)
+    val points = GpxReader.load(options.gpx).let { options.detour?.applyTo(it) ?: it }
     val fixes = points.toFixes(now = Instant.fromEpochMilliseconds(System.currentTimeMillis()))
     val interval = (points.last().time - points.first().time) / (points.size - 1)
     val pace = interval * options.batchSize / options.speedup
@@ -186,6 +199,9 @@ private suspend fun replay(options: DriverOptions): Boolean {
                 println("Command ${command.kind} ${command.maxAccuracy ?: ""} ${command.reason ?: ""}: $answer")
                 return answer
             }
+
+            override fun routeUpdated(route: RouteUpdated) =
+                println("Route ${route.kind.lowercase()} v${route.routeVersion}: ${route.distanceM.toInt()} m (${route.reason})")
         }
     HttpClient(CIO) { install(WebSockets) }.use { http ->
         val client =

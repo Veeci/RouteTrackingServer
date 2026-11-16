@@ -1,0 +1,10 @@
+{
+  "type": "route_updated",
+  "tripId": "3b241101-e2bb-4255-8caf-4136c566a962",
+  "kind": "TRIP",
+  "routeVersion": 2,
+  "polyline": "_wd`Ase}iSkk@_E",
+  "distanceM": 655.0,
+  "durationS": 80.5,
+  "reason": "off_route"
+}

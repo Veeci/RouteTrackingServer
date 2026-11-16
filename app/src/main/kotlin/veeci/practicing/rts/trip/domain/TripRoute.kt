@@ -23,6 +23,15 @@ enum class RouteKind {
     }
 }
 
+/** Why a route was planned. Stored, so a trip's history shows each re-route. */
+enum class RouteReason {
+    /** The first plan of its kind. */
+    INITIAL,
+
+    /** The driver left the previous version. */
+    OFF_ROUTE,
+}
+
 /**
  * A route the trip context keeps for a trip. It stores the encoded polyline and the totals, not the routing
  * context's types: the trip owns this copy, and a later change of the planner does not change a booked trip.
@@ -37,6 +46,7 @@ data class TripRoute(
     val distanceM: Double,
     val durationS: Double,
     val createdAt: Instant,
+    val reason: RouteReason = RouteReason.INITIAL,
 ) {
     init {
         require(version > 0) { "version must be positive, was $version" }

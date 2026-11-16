@@ -61,7 +61,7 @@ is closed, and sign-up and login for real users.
 
 | # | Problem | What happens now | Source |
 |---|---|---|---|
-| 21 | Distance to the driver | Along the planned road during the ride (phase 7a). Before the ride it stays a straight line until phase 7c plans the driver's route to the pickup | Built P7 (7a) |
+| 21 | Distance to the driver | Along the planned road (phase 7). Before the ride, from the second fix after accept: the first fix plans the driver's route to the pickup. Until then, and when no route can be planned, a straight line | Built P7 (7a, 7c) |
 | 22 | ETA while the driver stands still | Speed is a moving average and never below 2 m/s, so the ETA stays finite | Plan |
 | 23 | A guest with a slow connection | Old positions are dropped. The latest position matters, and at most 64 updates wait per trip | Plan |
 | 24 | Stages that change quickly | The server reads the trip again before each status message, so the guest always sees the current stage. A stage in between may be skipped | Built P3 |
@@ -109,12 +109,16 @@ is closed, and sign-up and login for real users.
 | 45 | Saving the driver's battery when nobody watches | High accuracy (1 s) while a guest watches, balanced (5 s) when the last guest leaves before the ride, passive (60 s) after the trip | Built P5 (5c) |
 | 46 | Waking the phone near the pickup and destination | A 150 m geofence at the pickup when the trip is accepted, at the destination when the ride starts. The server still decides "arrived" from GPS | Built P5 (5c) |
 
-## Phase 7 (7a built)
+## Phase 7 (built)
 
 | # | Problem | What happens now | Source |
 |---|---|---|---|
 | 47 | The ETA along a road | The route's planned time for the distance left, scaled by how fast the driver really drives. A driver stopped at a red light makes it at most 3 times the plan, a fast one at least half. The route stores only its total time, so a fast road ahead and a slow alley count the same | Built P7 (7a) |
 | 48 | "Arriving" and the road distance | "Arriving" and the automatic ARRIVED still use the straight line. The guest can see "arriving" (200 m straight) while the progress still shows 350 m by road. Kept on purpose: ARRIVED cannot be undone, and a bad snap onto the route must never cause it | Built P7 (7a) |
+| 49 | When the driver counts as off the route | 3 fixes in a row more than 50 m beside the route, each accurate to 30 m or better. A fix within 30 m resets the count, and between 30 and 50 m nothing changes. Imprecise fixes (a tunnel, tall buildings) never count | Built P7 (7b) |
+| 50 | How often the server re-plans | At most once every 30 s per trip. The guest gets `off_route`, then the new line. When no route can be found (no road near the driver), the old line stays and the server tries again after 30 s | Built P7 (7b) |
+| 51 | When the route to the pickup is planned | From the driver's first fix after accepting, not at the moment of accept: the server has no position before that. A failed plan (driver far from any road) is tried again every 30 s | Built P7 (7c) |
+| 52 | What the driver's app gets | The same `route_updated` as the guest: the route to the pickup, the trip route when the ride starts, and each re-route. It is sent again after every reconnect, so the app can draw it and later give directions | Built P7 (7c) |
 
 ## Open questions, most important first
 

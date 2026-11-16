@@ -5,6 +5,8 @@ import veeci.practicing.rts.platform.events.OutboxWriter
 import veeci.practicing.rts.trip.application.port.out.TripEventOutbox
 import veeci.practicing.rts.trip.domain.event.TripMoment
 import veeci.practicing.rts.trip.domain.event.TripMomentRaisedV1
+import veeci.practicing.rts.trip.domain.event.TripRouteChanged
+import veeci.practicing.rts.trip.domain.event.TripRouteChangedV1
 import veeci.practicing.rts.trip.domain.event.TripStatusChanged
 import veeci.practicing.rts.trip.domain.event.TripStatusChangedV1
 
@@ -18,5 +20,9 @@ class ExposedTripEventOutbox(
 
     override suspend fun add(moment: TripMoment) {
         outbox.append(TripMomentRaisedV1.TYPE, Json.encodeToJsonElement(TripMomentRaisedV1.serializer(), TripMomentRaisedV1.of(moment)))
+    }
+
+    override suspend fun add(change: TripRouteChanged) {
+        outbox.append(TripRouteChangedV1.TYPE, Json.encodeToJsonElement(TripRouteChangedV1.serializer(), TripRouteChangedV1.of(change)))
     }
 }

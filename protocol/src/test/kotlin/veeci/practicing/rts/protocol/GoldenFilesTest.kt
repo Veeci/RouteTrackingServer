@@ -114,7 +114,7 @@ class GoldenFilesTest {
         private val at = Instant.parse("2026-09-30T02:15:04.120Z")
 
         @JvmStatic
-        fun samples(): List<Sample<*>> = driverSamples() + commandSamples() + guestSamples() + tripEventSamples()
+        fun samples(): List<Sample<*>> = driverSamples() + commandSamples() + guestSamples() + tripEventSamples() + routeSamples()
 
         private fun driverSamples(): List<Sample<*>> =
             listOf(
@@ -278,6 +278,21 @@ class GoldenFilesTest {
                     GuestServerMessage.serializer(),
                     file = "trip_event_driver_back",
                 ),
+                Sample(
+                    "trip_event",
+                    TripEvent(TRIP, TripEvent.OFF_ROUTE, "IN_PROGRESS", Instant.parse("2026-09-30T02:33:00Z")),
+                    GuestServerMessage.serializer(),
+                    file = "trip_event_off_route",
+                ),
             )
+
+        /** `route_updated` (phase 7): the guest's frame, and the same frame decoded with the driver's family. */
+        private fun routeSamples(): List<Sample<*>> {
+            val route = RouteUpdated(TRIP, "TRIP", routeVersion = 2, "_wd`Ase}iSkk@_E", 655.0, 80.5, RouteUpdated.OFF_ROUTE)
+            return listOf(
+                Sample("route_updated", route, GuestServerMessage.serializer()),
+                Sample("route_updated", route, ServerMessage.serializer()),
+            )
+        }
     }
 }

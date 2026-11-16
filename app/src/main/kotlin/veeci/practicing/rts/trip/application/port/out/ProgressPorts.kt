@@ -53,6 +53,8 @@ data class ProgressState(
     val lastAt: Instant,
     /** The route the driver follows and where they are on it; null when the trip has none for this stage. */
     val route: FollowedRoute? = null,
+    /** When the last re-route was asked for (fix time), for the cooldown. Kept across route versions. */
+    val lastRerouteAt: Instant? = null,
 )
 
 /**
@@ -67,6 +69,8 @@ data class FollowedRoute(
     val durationS: Double,
     /** Null until the first fix is matched on this version. */
     val match: MatchState? = null,
+    /** Fixes in a row that counted toward off-route on this version (see OffRouteRule). */
+    val offRouteCount: Int = 0,
 ) {
     fun isSameRoute(
         kind: RouteKind,

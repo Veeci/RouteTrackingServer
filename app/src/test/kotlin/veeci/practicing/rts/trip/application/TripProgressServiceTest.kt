@@ -25,6 +25,7 @@ import veeci.practicing.rts.trip.application.port.out.ProgressPublisher
 import veeci.practicing.rts.trip.application.port.out.ProgressTarget
 import veeci.practicing.rts.trip.application.port.out.TripProgress
 import veeci.practicing.rts.trip.domain.RouteKind
+import veeci.practicing.rts.trip.domain.RouteReason
 import veeci.practicing.rts.trip.domain.Trip
 import veeci.practicing.rts.trip.domain.TripAction
 import veeci.practicing.rts.trip.domain.TripRoute
@@ -47,7 +48,12 @@ class TripProgressServiceTest {
             }
         }
     private val routes = InMemoryTripRouteRepository()
-    private val service = TripProgressService(trips, routes, states, publisher, DirectTransactionRunner)
+    private val rerouteRequests = mutableListOf<RerouteRequest>()
+    private val service =
+        TripProgressService(trips, routes, states, publisher, DirectTransactionRunner, {
+            rerouteRequests += it
+            true
+        })
     private val driver = TripSamples.driver()
 
     private suspend fun tripIn(status: TripStatus) = TripSamples.inStatus(status, driver = driver).also { trips.insert(it) }
@@ -58,12 +64,14 @@ class TripProgressServiceTest {
         s: Int,
         speedMps: Double? = null,
         from: GeoPoint = PICKUP,
+        accuracyM: Double = 10.0,
     ) = FixesAccepted.Position(
         GeoPoint(from.lat - metersNorth / 111_195.0, from.lng),
         T0 + s.seconds,
         speedMps,
         bearingDeg = 0.0,
         cumulativeM = 0.0,
+        accuracyM = accuracyM,
     )
 
     private fun batch(vararg positions: FixesAccepted.Position) =
@@ -259,5 +267,129 @@ class TripProgressServiceTest {
 
             progress().last().routeVersion shouldBe 2
             progress().last().remainingM shouldBe (700.0 plusOrMinus 1.0) // 350 m along a 1050 m route
+        }
+
+    /** Three fixes 60 m east of the route at about [alongM], one second apart from [s]. */
+    private fun offRoute(
+        alongM: Double,
+        s: Int,
+        accuracyM: Double = 10.0,
+    ) = batch(
+        *(0..2)
+            .map {
+                position(
+                    alongM + it * 10,
+                    s + it,
+                    speedMps = 10.0,
+                    from = PICKUP.offset(eastM = 60.0),
+                    accuracyM,
+                )
+            }.toTypedArray(),
+    )
+
+    @Test
+    fun `three fixes 60 m beside the route ask for a re-route from the last fix to the destination`() =
+        runTest {
+            val trip = tripIn(TripStatus.IN_PROGRESS)
+            routeFor(trip)
+
+            service.onFixesAccepted(offRoute(alongM = 300.0, s = 1))
+
+            val request = rerouteRequests.single()
+            request.tripId shouldBe trip.id
+            request.kind shouldBe RouteKind.TRIP
+            request.baseVersion shouldBe 1
+            request.to shouldBe DESTINATION
+            request.at shouldBe T0 + 3.seconds
+            states.get(trip.id)!!.route!!.offRouteCount shouldBe 0 // asked: counting starts again
+        }
+
+    @Test
+    fun `imprecise fixes beside the route ask for nothing`() =
+        runTest {
+            val trip = tripIn(TripStatus.IN_PROGRESS)
+            routeFor(trip)
+
+            service.onFixesAccepted(offRoute(alongM = 300.0, s = 1, accuracyM = 45.0))
+
+            rerouteRequests.shouldBeEmpty()
+        }
+
+    @Test
+    fun `TC-7-RR-02 a second off-route within 30 s asks for nothing, after 30 s it asks again`() =
+        runTest {
+            val trip = tripIn(TripStatus.IN_PROGRESS)
+            routeFor(trip)
+            service.onFixesAccepted(offRoute(alongM = 100.0, s = 1)) // asks at T0 + 3 s
+
+            service.onFixesAccepted(offRoute(alongM = 200.0, s = 10))
+            rerouteRequests.size shouldBe 1
+
+            service.onFixesAccepted(offRoute(alongM = 300.0, s = 31)) // the third fix is at T0 + 33 s
+            rerouteRequests.size shouldBe 2
+            rerouteRequests.last().at shouldBe T0 + 33.seconds
+        }
+
+    @Test
+    fun `TC-7-RR-04 after a re-route the new version is matched from its start with a fresh count`() =
+        runTest {
+            val trip = tripIn(TripStatus.IN_PROGRESS)
+            routeFor(trip)
+            service.onFixesAccepted(offRoute(alongM = 100.0, s = 1))
+            routeFor(trip, version = 2, eastM = 60.0) // planned from the driver, 60 m east
+
+            service.onFixesAccepted(batch(position(150.0, 10, speedMps = 10.0, from = PICKUP.offset(eastM = 60.0))))
+
+            val followed = states.get(trip.id)!!.route!!
+            followed.version shouldBe 2
+            followed.offRouteCount shouldBe 0
+            progress().last().routeVersion shouldBe 2
+            rerouteRequests.size shouldBe 1
+        }
+
+    @Test
+    fun `the first fix after accept asks for the APPROACH route from the driver to the pickup, once per cooldown`() =
+        runTest {
+            val trip = tripIn(TripStatus.ACCEPTED)
+
+            service.onFixesAccepted(batch(position(500.0, 1, speedMps = 10.0), position(490.0, 2, speedMps = 10.0)))
+            service.onFixesAccepted(batch(position(480.0, 3, speedMps = 10.0)))
+
+            val request = rerouteRequests.single()
+            request.kind shouldBe RouteKind.APPROACH
+            request.reason shouldBe RouteReason.INITIAL
+            request.baseVersion shouldBe 0
+            request.from shouldBe position(490.0, 2).point // the newest fix of the batch
+            request.to shouldBe PICKUP
+            progress().last().basis shouldBe ProgressBasis.STRAIGHT_LINE // until the route is stored
+
+            service.onFixesAccepted(batch(position(300.0, 33, speedMps = 10.0))) // 31 s later: plan failed, ask again
+            rerouteRequests.size shouldBe 2
+        }
+
+    @Test
+    fun `once the APPROACH route is stored, progress before the ride is measured along it`() =
+        runTest {
+            val trip = tripIn(TripStatus.ACCEPTED)
+            val start = PICKUP.offset(northM = -1_000.0)
+            routes.insert(
+                TripRoute(trip.id, RouteKind.APPROACH, 1, PolylineCodec.encode(listOf(start, PICKUP)), 1_000.0, 100.0, T0),
+            )
+
+            service.onFixesAccepted(batch(position(600.0, 1, speedMps = 10.0)))
+
+            progress().single().basis shouldBe ProgressBasis.ROUTE
+            progress().single().remainingM shouldBe (600.0 plusOrMinus 1.0)
+            rerouteRequests.shouldBeEmpty()
+        }
+
+    @Test
+    fun `an ARRIVED trip without an APPROACH route asks for none`() =
+        runTest {
+            tripIn(TripStatus.ARRIVED)
+
+            service.onFixesAccepted(batch(position(10.0, 1, speedMps = 1.0)))
+
+            rerouteRequests.shouldBeEmpty()
         }
 }

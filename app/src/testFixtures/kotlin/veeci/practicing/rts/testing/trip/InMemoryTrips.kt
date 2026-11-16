@@ -20,6 +20,7 @@ import veeci.practicing.rts.trip.domain.TripError
 import veeci.practicing.rts.trip.domain.TripId
 import veeci.practicing.rts.trip.domain.TripRoute
 import veeci.practicing.rts.trip.domain.event.TripMoment
+import veeci.practicing.rts.trip.domain.event.TripRouteChanged
 import veeci.practicing.rts.trip.domain.event.TripStatus
 import veeci.practicing.rts.trip.domain.event.TripStatusChanged
 import kotlin.time.Instant
@@ -101,6 +102,7 @@ class InMemoryTripRepository : TripRepository {
 class InMemoryTripEventOutbox : TripEventOutbox {
     val events = mutableListOf<TripStatusChanged>()
     val moments = mutableListOf<TripMoment>()
+    val routeChanges = mutableListOf<TripRouteChanged>()
 
     override suspend fun add(event: TripStatusChanged) {
         events += event
@@ -108,6 +110,10 @@ class InMemoryTripEventOutbox : TripEventOutbox {
 
     override suspend fun add(moment: TripMoment) {
         moments += moment
+    }
+
+    override suspend fun add(change: TripRouteChanged) {
+        routeChanges += change
     }
 }
 
@@ -163,6 +169,12 @@ class InMemoryTripRouteRepository : TripRouteRepository {
             "Route ${route.kind} v${route.version} of ${route.tripId} exists already"
         }
         routes += route
+    }
+
+    override suspend fun insertIfAbsent(route: TripRoute): Boolean {
+        if (routes.any { it.tripId == route.tripId && it.kind == route.kind && it.version == route.version }) return false
+        routes += route
+        return true
     }
 
     override suspend fun findLatest(
