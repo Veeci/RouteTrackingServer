@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1" creator="RouteTrackingServer">
+  <trk>
+    <name>trip-6f1c2c1e-0f6a-4d43-9a3e-5b2f8c9d7e10 ride</name>
+    <trkseg>
+      <trkpt lat="21.0285000" lon="105.8542000"><time>2026-11-16T08:00:00Z</time></trkpt>
+      <trkpt lat="21.0289497" lon="105.8543927"><time>2026-11-16T08:00:10Z</time></trkpt>
+      <trkpt lat="21.0293993" lon="105.8545854"><time>2026-11-16T08:00:20Z</time></trkpt>
+      <trkpt lat="21.0298490" lon="105.8547781"><time>2026-11-16T08:00:30Z</time></trkpt>
+      <trkpt lat="21.0302986" lon="105.8549708"><time>2026-11-16T08:00:40Z</time></trkpt>
+    </trkseg>
+  </trk>
+</gpx>

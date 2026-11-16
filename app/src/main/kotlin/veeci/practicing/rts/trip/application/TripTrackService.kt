@@ -1,5 +1,9 @@
 package veeci.practicing.rts.trip.application
 
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.toList
 import veeci.practicing.rts.platform.db.TransactionRunner
 import veeci.practicing.rts.shared.Actor
 import veeci.practicing.rts.shared.DomainException
@@ -32,7 +36,19 @@ data class TripTrack(
     val timeline: List<TimelineEntry>,
 )
 
-/** The recorded track and timeline of ended trips (phase 8c). */
+/** One leg of an ended trip for a file export (phase 8d): everything but the points is read already. */
+class TrackExport(
+    val tripId: TripId,
+    val leg: TripLeg,
+    /** The leg's window; null when the trip never had this leg. */
+    val window: TimeWindow?,
+    /** The whole trip's timeline, in time order. */
+    val timeline: List<TimelineEntry>,
+    /** The leg's fixes, oldest first, one page per emission. Cold: nothing is read until it is collected. */
+    val pages: Flow<List<TrackPoint>>,
+)
+
+/** The recorded track and timeline of ended trips (phases 8c and 8d). */
 class TripTrackService(
     private val trips: TripRepository,
     private val moments: TripMomentRepository,
@@ -57,13 +73,11 @@ class TripTrackService(
     ): TripTrack {
         require(simplifyM in 0.0..MAX_SIMPLIFY_M) { "simplifyM must be 0 to $MAX_SIMPLIFY_M, was $simplifyM" }
         return transactions.inTransaction {
-            val trip =
-                trips.find(tripId)?.takeIf { it.isPartyOrAdmin(actor) }
-                    ?: throw DomainException(TripError.TRIP_NOT_FOUND, "No trip ${tripId.value}")
-            trip.checkReadable(actor, leg)
+            val trip = readable(tripId, actor, leg)
             val driver = trip.driverId
             val window = trip.window(leg)
-            val points = if (driver == null || window == null) emptyList() else readAll(driver, window)
+            // Already inside a transaction: every page joins it.
+            val points = if (driver == null || window == null) emptyList() else pages(driver, window) { it() }.toList().flatten()
             TripTrack(
                 trip.id,
                 leg,
@@ -72,6 +86,39 @@ class TripTrackService(
             )
         }
     }
+
+    /**
+     * The same leg for a file export (phase 8d). The checks and the timeline run now, in one short transaction,
+     * so the route can still answer 404, 403 or 409 before it sends a byte. The points come later from
+     * [TrackExport.pages], a cold flow: each page of 1 000 fixes is read in its own transaction when the writer
+     * asks for it, so a slow download holds no database connection between pages.
+     */
+    suspend fun export(
+        tripId: TripId,
+        actor: Actor,
+        leg: TripLeg,
+    ): TrackExport {
+        val (trip, timeline) =
+            transactions.inTransaction {
+                val trip = readable(tripId, actor, leg)
+                trip to TripTimeline.of(trip, moments.findAll(trip.id), routes.findAll(trip.id))
+            }
+        val driver = trip.driverId
+        val window = trip.window(leg)
+        val pages = if (driver == null || window == null) emptyFlow() else pages(driver, window) { transactions.inTransaction(it) }
+        return TrackExport(trip.id, leg, window, timeline, pages)
+    }
+
+    private suspend fun readable(
+        tripId: TripId,
+        actor: Actor,
+        leg: TripLeg,
+    ): Trip =
+        trips
+            .find(tripId)
+            ?.takeIf { it.isPartyOrAdmin(actor) }
+            ?.also { it.checkReadable(actor, leg) }
+            ?: throw DomainException(TripError.TRIP_NOT_FOUND, "No trip ${tripId.value}")
 
     /** Only an ended trip has a track, and only the driver and admins see the approach. */
     private fun Trip.checkReadable(
@@ -92,19 +139,24 @@ class TripTrackService(
             Role.DRIVER -> actor.userId == driverId
         }
 
-    private suspend fun readAll(
+    /**
+     * The fixes of [driver] in [window], one page per emission, oldest first; an empty page is never emitted.
+     * [read] runs each page's query: directly inside a caller's transaction, or in a transaction of its own.
+     */
+    private fun pages(
         driver: UserId,
         window: TimeWindow,
-    ): List<TrackPoint> {
-        val points = mutableListOf<TrackPoint>()
-        var after: TrackCursor? = null
-        do {
-            val page = track.fixes(driver, window.from, window.to, after, PAGE_SIZE)
-            points += page
-            after = page.lastOrNull()?.cursor
-        } while (page.size == PAGE_SIZE)
-        return points
-    }
+        read: suspend (suspend () -> List<TrackPoint>) -> List<TrackPoint>,
+    ): Flow<List<TrackPoint>> =
+        flow {
+            var after: TrackCursor? = null
+            do {
+                val cursor = after
+                val page = read { track.fixes(driver, window.from, window.to, cursor, PAGE_SIZE) }
+                if (page.isNotEmpty()) emit(page)
+                after = page.lastOrNull()?.cursor
+            } while (page.size == PAGE_SIZE)
+        }
 
     companion object {
         /** The largest simplify tolerance. Above it the line no longer follows the streets. */

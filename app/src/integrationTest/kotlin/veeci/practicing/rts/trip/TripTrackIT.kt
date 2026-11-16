@@ -8,13 +8,19 @@ import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.get
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.contentType
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import org.junit.jupiter.api.Test
 import org.testcontainers.junit.jupiter.Testcontainers
 import veeci.practicing.rts.testing.SocketTestApp
 import veeci.practicing.rts.testing.TestTokens
+import veeci.practicing.rts.testing.geo.GpxTrack
 import veeci.practicing.rts.testing.problem
 import veeci.practicing.rts.testing.shouldMatchContract
 import veeci.practicing.rts.testing.socketApp
@@ -22,6 +28,7 @@ import veeci.practicing.rts.testing.trip.TripApi
 import veeci.practicing.rts.trip.adapter.inbound.web.TripTrackResponse
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Instant
 
 /** `GET /api/v1/trips/{id}/track` on Netty with a ride recorded over the driver socket (phase 8c). */
 @Testcontainers(disabledWithoutDocker = true)
@@ -37,7 +44,7 @@ class TripTrackIT {
             val trip = api.created(guest)
             api.moved(trip.id, driver, "accept", "arrive", "start")
             // The server refuses fixes from the future: wait, then send fixes that lie between the start and now.
-            val started = Clock.System.now()
+            val started = nowInMillis()
             delay(RIDE_MS)
             sendRide(driver, (1..POINTS).map { rideFix(northM = it * 10.0, at = started + (it * STEP_MS).milliseconds) })
             api.moved(trip.id, driver, "complete")
@@ -101,6 +108,54 @@ class TripTrackIT {
                 .points
                 .shouldBeEmpty() // cancelled before anyone accepted it
         }
+
+    @Test
+    fun `TC-8-E2E-01 and TC-8-EXP-03 a recorded ride downloads as GPX and GeoJSON that parse back`() =
+        socketApp {
+            val api = TripApi(client)
+            val trip = api.created(guest)
+            api.moved(trip.id, driver, "accept", "arrive", "start")
+            val started = nowInMillis()
+            delay(RIDE_MS)
+            val sent = (1..POINTS).map { rideFix(northM = it * 10.0, at = started + (it * STEP_MS).milliseconds) }
+            sendRide(driver, sent)
+            export(trip.id, guest, "gpx").checked().status shouldBe HttpStatusCode.Conflict // still running
+            api.moved(trip.id, driver, "complete")
+
+            val gpx = export(trip.id, guest, "gpx").checked()
+            gpx.status shouldBe HttpStatusCode.OK
+            gpx.contentType()?.withoutParameters() shouldBe ContentType.parse("application/gpx+xml")
+            gpx.headers[HttpHeaders.ContentDisposition] shouldBe "attachment; filename=trip-${trip.id}.gpx"
+            GpxTrack.points(gpx.bodyAsText()).map { it.time } shouldBe sent.map { it.recordedAt }
+
+            val geoJson = export(trip.id, guest, "geojson").checked()
+            geoJson.contentType()?.withoutParameters() shouldBe ContentType.parse("application/geo+json")
+            geoJson.headers[HttpHeaders.ContentDisposition] shouldBe "attachment; filename=trip-${trip.id}.geojson"
+            val line =
+                Json
+                    .parseToJsonElement(geoJson.bodyAsText())
+                    .jsonObject["features"]!!
+                    .jsonArray
+                    .first()
+                    .jsonObject["geometry"]!!
+            line.jsonObject["coordinates"]!!.jsonArray.size shouldBe POINTS
+
+            export(trip.id, guest, "gpx", "?leg=approach").checked().status shouldBe HttpStatusCode.Forbidden
+            export(trip.id, TestTokens.guest(), "geojson").checked().status shouldBe HttpStatusCode.NotFound
+        }
+
+    /**
+     * Now, cut to whole milliseconds. Postgres stores microseconds, and Linux clocks give nanoseconds, so a fix
+     * sent at Clock.System.now() can come back rounded and no longer equal the time that was sent.
+     */
+    private fun nowInMillis() = Instant.fromEpochMilliseconds(Clock.System.now().toEpochMilliseconds())
+
+    private suspend fun SocketTestApp.export(
+        tripId: String,
+        token: String,
+        format: String,
+        query: String = "",
+    ): HttpResponse = client.get("/api/v1/trips/$tripId/export.$format$query") { bearerAuth(token) }
 
     private suspend fun SocketTestApp.track(
         tripId: String,

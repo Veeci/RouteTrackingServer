@@ -166,7 +166,7 @@ returned only to the driver and to admins. A guest who asks for `leg=approach` g
 - [x] T8.5 V14 history indexes, the history query with keyset pagination, `GET /me/trips`.
 - [x] T8.6 `DouglasPeucker`.
 - [x] T8.7 Timeline merge, `GET /track`.
-- [ ] T8.8 `GpxWriter`, `GeoJsonWriter`, streaming export endpoints.
+- [x] T8.8 `GpxWriter`, `GeoJsonWriter`, streaming export endpoints.
 - [ ] T8.9 OpenAPI contract and golden files for every new endpoint, written first.
 
 Slices: **8a** = T8.1 to T8.4, **8b** = T8.5, **8c** = T8.6 and T8.7, **8d** = T8.8. T8.9 goes with each slice.
@@ -202,14 +202,14 @@ Slices: **8a** = T8.1 to T8.4, **8b** = T8.5, **8c** = T8.6 and T8.7, **8d** = T
 | TC-8-EXP-01 | Unit | `GpxWriter` output validates against the GPX 1.1 XSD | P0 |
 | TC-8-EXP-02 | Unit | `GeoJsonWriter` writes `[lng, lat]`, not `[lat, lng]` | P0 |
 | TC-8-EXP-03 | API | Exports set the content type and the file name `trip-<id>.gpx` | P1 |
-| TC-8-EXP-04 | Integration | A 50 000-point export reads at least 50 pages | P2 |
+| TC-8-EXP-04 | Unit | A 50 000-point export reads at least 50 pages | P2 |
 | TC-8-EXP-05 | Unit | GPX round trip through the test fixtures' GPX parser gives the same points (±1e-7) | P1 |
 | TC-8-E2E-01 | E2E | A full simulator trip, then complete: the summary is ready within 1 s, and the export downloads and parses | P0 |
 
 ## Test implementation notes
 
 - **GPX schema:** put `gpx.xsd` (GPX 1.1) in test resources and validate with `javax.xml.validation.SchemaFactory`.
-- **GPX parser:** reuse the one in `app/src/testFixtures/.../testing/Fixtures.kt`, not the simulator.
+- **GPX parser:** `GpxTrack` in `app/src/testFixtures/.../testing/geo` (added in 8d: `Fixtures.kt` had none), not the simulator.
 - **GeoJSON order:** TC-8-EXP-02 checks the first coordinate against `[lng, lat]` of the first fix.
 - **Paging tests** insert rows with set timestamps through SQL fixtures, not through the API.
 - **Socket and e2e tests** run on Netty through `socketApp`, as in phases 3 to 7.
@@ -239,6 +239,7 @@ Accepted by the product owner on 2026-11-16:
 | `?role=guest\|driver`, and both sides without it | No `role`: the token's role picks the side, an admin gets 403 | A user has one role, and `guest_id = ? OR driver_id = ?` cannot be read in order from one index |
 | 400 `INVALID_CURSOR` | 400 `VALIDATION_FAILED` with a `cursor` field error | The open-trips list already answers a bad cursor this way |
 | A guest asking for the approach gets 404 | 403 `TRIP_ACTION_FORBIDDEN` | The guest knows the trip exists; 403 states the real reason, as for an admin's history |
+| TC-8-EXP-04 as an integration test | A unit test with a counting `DriverTrack` | It checks the paging, which a fake counts exactly; 50 000 rows in Postgres would test the database |
 | 8c holds the track, the timeline and the exports | 8c: track and timeline. 8d: exports | The exports bring streaming, XML and the XSD; two PRs of 8b's size review better |
 
 ## As built (8a)
@@ -288,6 +289,26 @@ Accepted by the product owner on 2026-11-16:
 - TC-8-TRK-01 to 03 ran in 8a against `DriverTrack` (TrackHistoryIT). TC-8-API-01 to 04 run in the service unit
   test and in TripTrackIT.
 - The ride helpers of TripSummaryIT moved to `Rides.kt`, shared with TripTrackIT.
+
+## As built (8d)
+
+- `TripTrackService.export` runs the checks and reads the timeline in one short transaction, then returns a
+  `TrackExport` whose `pages` is a cold `Flow<List<TrackPoint>>`. Each page of 1 000 fixes is read in its own
+  transaction when the writer collects it, so a slow download holds no pool connection between pages. `track`
+  uses the same page flow inside its single transaction.
+- The route collects the flow inside `respondOutputStream`. Every check runs before the stream opens; a failure
+  after the headers can only cut the connection.
+- `GpxWriter` uses StAX. Coordinates have 7 decimals. Speed is left out, because GPX 1.1 has it only in
+  `<extensions>`.
+- `GeoJsonWriter` writes the leg as a LineString, then one Point per timeline entry at the last fix at or before
+  its time, found in the same pass. Timeline points use the closed window `from..to`, unlike fixes, so COMPLETED
+  sits at the ride's last fix. A LineString needs two positions, so the writer holds the first fix until a
+  second one arrives, and a shorter leg gets `"geometry": null`.
+- The contract validator parses `application/geo+json` as JSON, so the GeoJSON response has a real schema,
+  `TrackFeatureCollection`, not `type: string`.
+- Golden files for a fixed five-fix ride are in `app/src/test/resources/export`. Run the test with
+  `UPDATE_GOLDEN=true` to rewrite them on purpose.
+- TC-8-E2E-01 ends in TripTrackIT: a ride recorded over the socket downloads as GPX and GeoJSON, and both parse.
 
 ## Definition of Done
 

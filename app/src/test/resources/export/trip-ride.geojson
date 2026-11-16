@@ -1,0 +1,13 @@
+{"type":"FeatureCollection","features":[
+{"type":"Feature","properties":{"tripId":"6f1c2c1e-0f6a-4d43-9a3e-5b2f8c9d7e10","leg":"ride"},"geometry":{"type":"LineString","coordinates":[
+[105.8542000,21.0285000],
+[105.8543927,21.0289497],
+[105.8545854,21.0293993],
+[105.8547781,21.0298490],
+[105.8549708,21.0302986]
+]}},
+{"type":"Feature","properties":{"at":"2026-11-16T07:55:00Z","kind":"status_changed","status":"REQUESTED"},"geometry":null},
+{"type":"Feature","properties":{"at":"2026-11-16T08:00:00Z","kind":"status_changed","status":"IN_PROGRESS"},"geometry":{"type":"Point","coordinates":[105.8542000,21.0285000]}},
+{"type":"Feature","properties":{"at":"2026-11-16T08:00:25Z","kind":"off_route","status":"IN_PROGRESS"},"geometry":{"type":"Point","coordinates":[105.8545854,21.0293993]}},
+{"type":"Feature","properties":{"at":"2026-11-16T08:00:50Z","kind":"status_changed","status":"COMPLETED"},"geometry":{"type":"Point","coordinates":[105.8549708,21.0302986]}}
+]}
