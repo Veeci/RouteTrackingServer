@@ -28,6 +28,7 @@ import veeci.practicing.rts.testing.trip.TripApi
 import veeci.practicing.rts.trip.adapter.inbound.web.TripTrackResponse
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Instant
 
 /** `GET /api/v1/trips/{id}/track` on Netty with a ride recorded over the driver socket (phase 8c). */
 @Testcontainers(disabledWithoutDocker = true)
@@ -43,7 +44,7 @@ class TripTrackIT {
             val trip = api.created(guest)
             api.moved(trip.id, driver, "accept", "arrive", "start")
             // The server refuses fixes from the future: wait, then send fixes that lie between the start and now.
-            val started = Clock.System.now()
+            val started = nowInMillis()
             delay(RIDE_MS)
             sendRide(driver, (1..POINTS).map { rideFix(northM = it * 10.0, at = started + (it * STEP_MS).milliseconds) })
             api.moved(trip.id, driver, "complete")
@@ -114,7 +115,7 @@ class TripTrackIT {
             val api = TripApi(client)
             val trip = api.created(guest)
             api.moved(trip.id, driver, "accept", "arrive", "start")
-            val started = Clock.System.now()
+            val started = nowInMillis()
             delay(RIDE_MS)
             val sent = (1..POINTS).map { rideFix(northM = it * 10.0, at = started + (it * STEP_MS).milliseconds) }
             sendRide(driver, sent)
@@ -142,6 +143,12 @@ class TripTrackIT {
             export(trip.id, guest, "gpx", "?leg=approach").checked().status shouldBe HttpStatusCode.Forbidden
             export(trip.id, TestTokens.guest(), "geojson").checked().status shouldBe HttpStatusCode.NotFound
         }
+
+    /**
+     * Now, cut to whole milliseconds. Postgres stores microseconds, and Linux clocks give nanoseconds, so a fix
+     * sent at Clock.System.now() can come back rounded and no longer equal the time that was sent.
+     */
+    private fun nowInMillis() = Instant.fromEpochMilliseconds(Clock.System.now().toEpochMilliseconds())
 
     private suspend fun SocketTestApp.export(
         tripId: String,
