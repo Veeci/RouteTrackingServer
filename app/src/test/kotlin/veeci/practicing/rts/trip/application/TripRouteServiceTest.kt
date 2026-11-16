@@ -28,6 +28,7 @@ import veeci.practicing.rts.trip.domain.RouteKind
 import veeci.practicing.rts.trip.domain.RouteReason
 import veeci.practicing.rts.trip.domain.Trip
 import veeci.practicing.rts.trip.domain.TripRoute
+import veeci.practicing.rts.trip.domain.event.RouteChangeReason
 import veeci.practicing.rts.trip.domain.event.TripMoment
 import veeci.practicing.rts.trip.domain.event.TripStatus
 import java.time.Clock
@@ -130,5 +131,46 @@ class TripRouteServiceTest {
 
             outbox.moments.shouldBeEmpty()
             outbox.routeChanges.shouldBeEmpty()
+        }
+
+    private fun initial(trip: Trip) =
+        RerouteRequest(trip.id, RouteKind.APPROACH, 0, offTheRoute, PICKUP, T0 + 5.seconds, RouteReason.INITIAL)
+
+    @Test
+    fun `the initial APPROACH plan stores version 1 and the event, with no off-route moment`() =
+        runTest {
+            val trip = tripIn(TripStatus.ACCEPTED)
+
+            service.reroute(initial(trip)) shouldBe RerouteOutcome.REROUTED
+
+            val stored = routes.findLatest(trip.id, RouteKind.APPROACH).shouldNotBeNull()
+            stored.version shouldBe 1
+            stored.reason shouldBe RouteReason.INITIAL
+            outbox.routeChanges.single().reason shouldBe RouteChangeReason.INITIAL
+            outbox.moments.shouldBeEmpty()
+            service.currentRouteOf(driver.userId) shouldBe stored
+        }
+
+    @Test
+    fun `a failed initial plan stores nothing at all`() =
+        runTest {
+            val trip = tripIn(TripStatus.ACCEPTED)
+            planner.failWith = RoutingError.NO_ROAD_NEARBY
+
+            service.reroute(initial(trip)) shouldBe RerouteOutcome.FAILED
+
+            routes.findLatest(trip.id, RouteKind.APPROACH) shouldBe null
+            outbox.moments.shouldBeEmpty()
+            outbox.routeChanges.shouldBeEmpty()
+        }
+
+    @Test
+    fun `the current route of a driver follows the trip's stage`() =
+        runTest {
+            val trip = tripIn(TripStatus.IN_PROGRESS)
+
+            service.currentRouteOf(driver.userId)!!.kind shouldBe RouteKind.TRIP
+            service.currentRouteOf(TripSamples.driver().userId) shouldBe null // no active trip
+            trip.status shouldBe TripStatus.IN_PROGRESS
         }
 }

@@ -5,11 +5,24 @@ import veeci.practicing.rts.trip.domain.TripRoute
 import java.util.UUID
 import kotlin.time.Instant
 
-/** The trip got a new route the driver follows from now on (phase 7b: after leaving the old one). */
+/** Why clients get a route now. */
+enum class RouteChangeReason {
+    /** The first plan of its kind: the APPROACH route from the driver's first fix after accept. */
+    INITIAL,
+
+    /** The ride started, so the TRIP route takes over from the APPROACH route. */
+    STATUS_CHANGED,
+
+    /** The driver left the previous version. */
+    OFF_ROUTE,
+}
+
+/** The driver follows [route] from now on (phase 7). */
 data class TripRouteChanged(
     val route: TripRoute,
     val guestId: UUID,
     val driverId: UUID?,
+    val reason: RouteChangeReason,
 )
 
 /**
@@ -25,7 +38,7 @@ data class TripRouteChangedV1(
     /** TRIP or APPROACH. */
     val kind: String,
     val version: Int,
-    /** INITIAL or OFF_ROUTE; a newer writer may add values. */
+    /** A [RouteChangeReason] name; a newer writer may add values. */
     val reason: String,
     /** Google Encoded Polyline, precision 5. */
     val polyline: String,
@@ -44,7 +57,7 @@ data class TripRouteChangedV1(
                     change.driverId?.toString(),
                     kind.name,
                     version,
-                    reason.name,
+                    change.reason.name,
                     polyline,
                     distanceM,
                     durationS,

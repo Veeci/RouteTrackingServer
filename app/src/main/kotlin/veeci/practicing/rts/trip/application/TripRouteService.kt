@@ -5,6 +5,7 @@ import veeci.practicing.rts.platform.db.TransactionRunner
 import veeci.practicing.rts.routing.application.api.RouteMetric
 import veeci.practicing.rts.routing.application.api.RoutePlanner
 import veeci.practicing.rts.shared.DomainException
+import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.shared.geo.GeoPoint
 import veeci.practicing.rts.shared.geo.PolylineCodec
 import veeci.practicing.rts.trip.application.port.out.TripEventOutbox
@@ -15,20 +16,25 @@ import veeci.practicing.rts.trip.domain.RouteKind
 import veeci.practicing.rts.trip.domain.RouteReason
 import veeci.practicing.rts.trip.domain.TripId
 import veeci.practicing.rts.trip.domain.TripRoute
+import veeci.practicing.rts.trip.domain.event.RouteChangeReason
 import veeci.practicing.rts.trip.domain.event.TripMoment
 import veeci.practicing.rts.trip.domain.event.TripRouteChanged
 import java.time.Clock
 import kotlin.time.Instant
 
-/** The driver left version [baseVersion] of the trip's [kind] route at [from]; plan again from there to [to]. */
+/**
+ * Plan the trip's [kind] route from [from] to [to] as version [baseVersion] + 1. [RouteReason.OFF_ROUTE]: the driver
+ * left version [baseVersion]. [RouteReason.INITIAL]: the first plan of this kind ([baseVersion] 0).
+ */
 data class RerouteRequest(
     val tripId: TripId,
     val kind: RouteKind,
     val baseVersion: Int,
     val from: GeoPoint,
     val to: GeoPoint,
-    /** When the fix that made the driver off-route was recorded. */
+    /** When the fix that caused the request was recorded. */
     val at: Instant,
+    val reason: RouteReason = RouteReason.OFF_ROUTE,
 )
 
 /** Takes a re-route request without waiting. False when it could not be queued. */
@@ -42,10 +48,10 @@ fun interface RerouteHandler {
 }
 
 enum class RerouteOutcome {
-    /** A new version is stored, with the OffRoute moment and the TripRouteChanged event. */
+    /** A new version is stored with the TripRouteChanged event (and, off-route, the OffRoute moment). */
     REROUTED,
 
-    /** No route could be planned: the old route stays, only the OffRoute moment is stored. */
+    /** No route could be planned: the old route stays. Off-route, the OffRoute moment is still stored. */
     FAILED,
 
     /** The request is out of date (the trip moved on, or another re-route stored the next version): nothing stored. */
@@ -53,7 +59,8 @@ enum class RerouteOutcome {
 }
 
 /**
- * Plans a new route for a driver who left the old one, and stores it as the next version.
+ * Plans the next version of a trip's route: the APPROACH route from the driver's first fix (phase 7c), or a new
+ * route for a driver who left the old one (phase 7b). It also gives the route a driver follows now.
  *
  * The plan runs first, outside the transaction: it is up to 500 ms of CPU work, and no connection waits idle
  * meanwhile. The transaction then checks that the request still holds: the trip is in a stage that follows a
@@ -97,20 +104,30 @@ class TripRouteService(
                         it.distanceM,
                         it.durationS,
                         clock.now(),
-                        RouteReason.OFF_ROUTE,
+                        request.reason,
                     )
                 }
             if (route != null && !routes.insertIfAbsent(route)) return@inTransaction RerouteOutcome.DROPPED
 
-            val offRoute = TripMoment.OffRoute(trip.id.value, trip.guestId.value, trip.status, request.at)
-            moments.append(offRoute)
-            outbox.add(offRoute)
+            if (request.reason == RouteReason.OFF_ROUTE) {
+                val offRoute = TripMoment.OffRoute(trip.id.value, trip.guestId.value, trip.status, request.at)
+                moments.append(offRoute)
+                outbox.add(offRoute)
+            }
             if (route == null) {
                 RerouteOutcome.FAILED
             } else {
-                outbox.add(TripRouteChanged(route, trip.guestId.value, trip.driverId?.value))
+                val why = if (request.reason == RouteReason.INITIAL) RouteChangeReason.INITIAL else RouteChangeReason.OFF_ROUTE
+                outbox.add(TripRouteChanged(route, trip.guestId.value, trip.driverId?.value, why))
                 RerouteOutcome.REROUTED
             }
         }
     }
+
+    /** The active trip of [driver] and the newest route of the kind its stage follows; null when there is none. */
+    suspend fun currentRouteOf(driver: UserId): TripRoute? =
+        transactions.inTransaction {
+            val trip = trips.findActiveForDriver(driver) ?: return@inTransaction null
+            RouteKind.followedIn(trip.status)?.let { routes.findLatest(trip.id, it) }
+        }
 }

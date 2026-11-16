@@ -18,6 +18,7 @@ import veeci.practicing.rts.trip.application.port.out.TripProgress
 import veeci.practicing.rts.trip.application.port.out.TripRepository
 import veeci.practicing.rts.trip.application.port.out.TripRouteRepository
 import veeci.practicing.rts.trip.domain.RouteKind
+import veeci.practicing.rts.trip.domain.RouteReason
 import veeci.practicing.rts.trip.domain.Trip
 import veeci.practicing.rts.trip.domain.TripId
 import veeci.practicing.rts.trip.domain.TripRoute
@@ -65,12 +66,7 @@ class TripProgressService(
         val fresh = event.positions.filter { before == null || it.recordedAt > before.lastAt }
         if (fresh.isEmpty()) return
 
-        val (target, point) =
-            if (trip.status == TripStatus.IN_PROGRESS) {
-                ProgressTarget.DESTINATION to trip.destination
-            } else {
-                ProgressTarget.PICKUP to trip.pickup
-            }
+        val (target, point) = trip.target()
 
         // Decode the route once per version; a new version (or stage) starts matching from scratch.
         var step = RouteStep(stored?.let { r -> before?.route?.takeIf { it.isSameRoute(r.kind, r.version) } ?: r.toFollowed() })
@@ -81,21 +77,28 @@ class TripProgressService(
             step = step.follow(position, trip.id, point, lastRerouteAt)
             lastRerouteAt = step.reroutedAt ?: lastRerouteAt
         }
+        val latest = fresh.last()
+        if (stored == null && trip.status == TripStatus.ACCEPTED) lastRerouteAt = askForApproach(trip, latest, lastRerouteAt)
         val current = checkNotNull(state).copy(route = step.route, lastRerouteAt = lastRerouteAt)
         states.put(trip.id, current)
 
-        val latest = fresh.last()
+        val speedMps = maxOf(current.speedMps ?: 0.0, rules.minSpeedMps)
+        val progress = progressOf(trip.id, target, step, current.speedMps) ?: straightLine(trip.id, target, latest.point, point, speedMps)
+        publisher.publish(DriverPosition(trip.id, latest.point, latest.bearingDeg, latest.speedMps, latest.recordedAt), progress)
+    }
+
+    /** Progress along the route; null when the trip has no route for this stage. */
+    private fun progressOf(
+        tripId: TripId,
+        target: ProgressTarget,
+        step: RouteStep,
+        speedMps: Double?,
+    ): TripProgress? {
         val route = step.route
         val match = step.match
-        val progress =
-            if (route != null && match != null) {
-                val etaS = rules.eta.etaS(route.distanceM, route.durationS, match.remainingM, current.speedMps)
-                TripProgress(trip.id, target, match.remainingM, etaS, ProgressBasis.ROUTE, route.version)
-            } else {
-                val remainingM = Haversine.distance(latest.point, point).value
-                TripProgress(trip.id, target, remainingM, remainingM / maxOf(current.speedMps ?: 0.0, rules.minSpeedMps))
-            }
-        publisher.publish(DriverPosition(trip.id, latest.point, latest.bearingDeg, latest.speedMps, latest.recordedAt), progress)
+        if (route == null || match == null) return null
+        val etaS = rules.eta.etaS(route.distanceM, route.durationS, match.remainingM, speedMps)
+        return TripProgress(tripId, target, match.remainingM, etaS, ProgressBasis.ROUTE, route.version)
     }
 
     /** Where the driver is on the route after a fix, and when this fix asked for a re-route (null if it did not). */
@@ -117,7 +120,7 @@ class TripProgressService(
         val count = rules.offRoute.count(r.offRouteCount, m.projection.crossTrackM, position.accuracyM)
         val asked =
             rules.offRoute.isOffRoute(count) &&
-                (lastRerouteAt == null || position.recordedAt - lastRerouteAt >= rules.rerouteCooldown) &&
+                lastRerouteAt.cooledDownAt(position.recordedAt) &&
                 rerouter.request(RerouteRequest(tripId, r.kind, r.version, position.point, target, position.recordedAt))
         return RouteStep(
             r.copy(match = m.state, offRouteCount = if (asked) 0 else count),
@@ -125,6 +128,23 @@ class TripProgressService(
             if (asked) position.recordedAt else null,
         )
     }
+
+    /**
+     * No APPROACH route yet: asks for one from where the driver is now (phase 7c), and returns the new time of the
+     * last request. Until the route is stored the progress stays a straight line; a failed plan is asked again
+     * after the cooldown.
+     */
+    private fun askForApproach(
+        trip: Trip,
+        latest: FixesAccepted.Position,
+        lastRerouteAt: Instant?,
+    ): Instant? {
+        if (!lastRerouteAt.cooledDownAt(latest.recordedAt)) return lastRerouteAt
+        val first = RerouteRequest(trip.id, RouteKind.APPROACH, 0, latest.point, trip.pickup, latest.recordedAt, RouteReason.INITIAL)
+        return if (rerouter.request(first)) latest.recordedAt else lastRerouteAt
+    }
+
+    private fun Instant?.cooledDownAt(now: Instant) = this == null || now - this >= rules.rerouteCooldown
 
     /** The driver's active trip and the newest route of the kind its stage follows, in one transaction. */
     private suspend fun load(driver: UserId): Pair<Trip, TripRoute?>? =
@@ -155,9 +175,6 @@ class TripProgressService(
             }
         return ProgressState(speed, position.point, position.recordedAt)
     }
-
-    private fun TripRoute.toFollowed() =
-        FollowedRoute(kind, version, MeasuredPolyline(PolylineCodec.decode(polyline)), distanceM, durationS)
 }
 
 /** The rules and tuning values of [TripProgressService]. Tests change one value; production uses the defaults. */
@@ -172,3 +189,21 @@ data class ProgressRules(
     /** About walking speed: below it the driver is treated as "about to move again" (straight-line ETA only). */
     val minSpeedMps: Double = 2.0,
 )
+
+/** Where the driver is heading: the pickup before the ride, the destination during it. */
+private fun Trip.target(): Pair<ProgressTarget, GeoPoint> =
+    if (status == TripStatus.IN_PROGRESS) ProgressTarget.DESTINATION to destination else ProgressTarget.PICKUP to pickup
+
+/** Progress in a straight line: remaining distance ÷ [speedMps]. */
+private fun straightLine(
+    tripId: TripId,
+    target: ProgressTarget,
+    from: GeoPoint,
+    to: GeoPoint,
+    speedMps: Double,
+): TripProgress {
+    val remainingM = Haversine.distance(from, to).value
+    return TripProgress(tripId, target, remainingM, remainingM / speedMps)
+}
+
+private fun TripRoute.toFollowed() = FollowedRoute(kind, version, MeasuredPolyline(PolylineCodec.decode(polyline)), distanceM, durationS)

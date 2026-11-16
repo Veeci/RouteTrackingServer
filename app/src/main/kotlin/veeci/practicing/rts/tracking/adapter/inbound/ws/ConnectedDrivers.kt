@@ -3,7 +3,7 @@ package veeci.practicing.rts.tracking.adapter.inbound.ws
 import kotlinx.coroutines.CancellationException
 import org.slf4j.LoggerFactory
 import veeci.practicing.rts.platform.ws.WsSession
-import veeci.practicing.rts.protocol.Command
+import veeci.practicing.rts.protocol.ServerMessage
 import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.tracking.application.api.DriverLink
 import java.util.UUID
@@ -23,16 +23,16 @@ class ConnectedDrivers : DriverLink {
     @Suppress("TooGenericExceptionCaught") // a socket that just closed must not stop the others
     override suspend fun send(
         driver: UserId,
-        command: Command,
+        message: ServerMessage,
     ): Boolean =
         sessions[driver].orEmpty().toList().count { session ->
             try {
-                session.send(command)
+                session.send(message)
                 true
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                log.info("Command {} not sent to a closing socket: {}", command.commandId, e.toString())
+                log.info("{} not sent to a closing socket: {}", message::class.simpleName, e.toString())
                 false
             }
         } > 0
@@ -58,7 +58,7 @@ class ConnectedDrivers : DriverLink {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                log.error("Delivering pending commands to driver {} failed; they wait for the next connect", driver.value, e)
+                log.error("A connect listener failed for driver {}; it runs again on the next connect", driver.value, e)
             }
         }
     }

@@ -41,6 +41,8 @@ channels:
         $ref: '#/components/messages/command_ack'
       command:
         $ref: '#/components/messages/command'
+      route_updated:
+        $ref: '#/components/messages/route_updated'
       welcome:
         $ref: '#/components/messages/welcome'
       ack:
@@ -113,6 +115,15 @@ operations:
       it gets `command_ack`, so the device handles each `commandId` once.
     messages:
       - $ref: '#/channels/driver/messages/command'
+  sendDriverRoute:
+    action: send
+    channel:
+      $ref: '#/channels/driver'
+    summary: |
+      The route the driver follows from now on (phase 7): when the APPROACH route is planned, when the ride
+      starts, after a re-route, and again right after every `welcome` while the driver has an active trip.
+    messages:
+      - $ref: '#/channels/driver/messages/route_updated'
   receiveCommandAck:
     action: receive
     channel:
@@ -242,7 +253,7 @@ components:
     route_updated:
       name: route_updated
       title: Route updated
-      summary: The driver follows a new route from now on; draw it instead of the old one.
+      summary: The driver follows a new route from now on; draw it instead of the old one. Sent to the guest and the driver.
       payload:
         $ref: '#/components/schemas/RouteUpdated'
 
@@ -345,8 +356,10 @@ components:
         reason:
           type: string
           description: >-
-            Why the route changed. `off_route`: the driver left the previous version. A later server may add
-            values, so a client ignores values it does not know.
+            Why the client gets this route. `initial`: the first plan of its kind (the APPROACH route, planned
+            from the driver's first fix after accept). `status_changed`: the ride started, so the TRIP route takes
+            over. `off_route`: the driver left the previous version. A later server may add values, so a client
+            ignores values it does not know.
 
     TripStatus:
       type: string

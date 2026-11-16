@@ -25,6 +25,7 @@ import veeci.practicing.rts.trip.application.port.out.ProgressPublisher
 import veeci.practicing.rts.trip.application.port.out.ProgressTarget
 import veeci.practicing.rts.trip.application.port.out.TripProgress
 import veeci.practicing.rts.trip.domain.RouteKind
+import veeci.practicing.rts.trip.domain.RouteReason
 import veeci.practicing.rts.trip.domain.Trip
 import veeci.practicing.rts.trip.domain.TripAction
 import veeci.practicing.rts.trip.domain.TripRoute
@@ -344,5 +345,51 @@ class TripProgressServiceTest {
             followed.offRouteCount shouldBe 0
             progress().last().routeVersion shouldBe 2
             rerouteRequests.size shouldBe 1
+        }
+
+    @Test
+    fun `the first fix after accept asks for the APPROACH route from the driver to the pickup, once per cooldown`() =
+        runTest {
+            val trip = tripIn(TripStatus.ACCEPTED)
+
+            service.onFixesAccepted(batch(position(500.0, 1, speedMps = 10.0), position(490.0, 2, speedMps = 10.0)))
+            service.onFixesAccepted(batch(position(480.0, 3, speedMps = 10.0)))
+
+            val request = rerouteRequests.single()
+            request.kind shouldBe RouteKind.APPROACH
+            request.reason shouldBe RouteReason.INITIAL
+            request.baseVersion shouldBe 0
+            request.from shouldBe position(490.0, 2).point // the newest fix of the batch
+            request.to shouldBe PICKUP
+            progress().last().basis shouldBe ProgressBasis.STRAIGHT_LINE // until the route is stored
+
+            service.onFixesAccepted(batch(position(300.0, 33, speedMps = 10.0))) // 31 s later: plan failed, ask again
+            rerouteRequests.size shouldBe 2
+        }
+
+    @Test
+    fun `once the APPROACH route is stored, progress before the ride is measured along it`() =
+        runTest {
+            val trip = tripIn(TripStatus.ACCEPTED)
+            val start = PICKUP.offset(northM = -1_000.0)
+            routes.insert(
+                TripRoute(trip.id, RouteKind.APPROACH, 1, PolylineCodec.encode(listOf(start, PICKUP)), 1_000.0, 100.0, T0),
+            )
+
+            service.onFixesAccepted(batch(position(600.0, 1, speedMps = 10.0)))
+
+            progress().single().basis shouldBe ProgressBasis.ROUTE
+            progress().single().remainingM shouldBe (600.0 plusOrMinus 1.0)
+            rerouteRequests.shouldBeEmpty()
+        }
+
+    @Test
+    fun `an ARRIVED trip without an APPROACH route asks for none`() =
+        runTest {
+            tripIn(TripStatus.ARRIVED)
+
+            service.onFixesAccepted(batch(position(10.0, 1, speedMps = 1.0)))
+
+            rerouteRequests.shouldBeEmpty()
         }
 }
