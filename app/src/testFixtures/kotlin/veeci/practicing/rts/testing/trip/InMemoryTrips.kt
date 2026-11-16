@@ -146,6 +146,9 @@ class InMemoryTripMomentRepository : TripMomentRepository {
     }
 
     override suspend fun countOffRoute(trip: TripId): Int = moments.count { it is TripMoment.OffRoute && it.tripId == trip.value }
+
+    // sortedBy is stable, so moments with the same time stay in the order they were appended, as by id in Postgres.
+    override suspend fun findAll(trip: TripId): List<TripMoment> = moments.filter { it.tripId == trip.value }.sortedBy { it.at }
 }
 
 /** Rule state per trip. No locking: the unit tests run one batch at a time. */

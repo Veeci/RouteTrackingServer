@@ -31,6 +31,7 @@ import veeci.practicing.rts.trip.application.port.out.TripRepository
 import veeci.practicing.rts.trip.domain.ArrivalState
 import veeci.practicing.rts.trip.domain.PresenceState
 import veeci.practicing.rts.trip.domain.Trip
+import veeci.practicing.rts.trip.domain.TripId
 import veeci.practicing.rts.trip.domain.event.TripMoment
 import veeci.practicing.rts.trip.domain.event.TripMomentRaisedV1
 import veeci.practicing.rts.trip.domain.event.TripStatus
@@ -96,6 +97,21 @@ class TripMomentsIT {
                 }.single()
             kind shouldBe "DRIVER_ARRIVING"
             Json.decodeFromString(TripMomentRaisedV1.serializer(), payload).toMoment() shouldBe moment
+        }
+
+    @Test
+    fun `a trip's moments read back by time, and two at the same time in the order they were stored`() =
+        runTest {
+            val trip = UUID.randomUUID()
+            val guest = UUID.randomUUID()
+            val late = TripMoment.DriverBack(trip, guest, TripStatus.IN_PROGRESS, T0 + 60.seconds)
+            val stale = TripMoment.DriverStale(trip, guest, TripStatus.IN_PROGRESS, T0, lastSeenAt = T0 - 60.seconds)
+            val offRoute = TripMoment.OffRoute(trip, guest, TripStatus.IN_PROGRESS, T0)
+            val otherTrip = TripMoment.OffRoute(UUID.randomUUID(), guest, TripStatus.IN_PROGRESS, T0)
+
+            transactions.inTransaction { listOf(late, stale, offRoute, otherTrip).forEach { moments.append(it) } }
+
+            transactions.inTransaction { moments.findAll(TripId(trip)) } shouldBe listOf(stale, offRoute, late)
         }
 
     @Test

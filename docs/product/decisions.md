@@ -120,7 +120,7 @@ is closed, and sign-up and login for real users.
 | 51 | When the route to the pickup is planned | From the driver's first fix after accepting, not at the moment of accept: the server has no position before that. A failed plan (driver far from any road) is tried again every 30 s | Built P7 (7c) |
 | 52 | What the driver's app gets | The same `route_updated` as the guest: the route to the pickup, the trip route when the ride starts, and each re-route. It is sent again after every reconnect, so the app can draw it and later give directions | Built P7 (7c) |
 
-## Phase 8 (8a and 8b built, decided 2026-11-16)
+## Phase 8 (8a to 8c built, decided 2026-11-16)
 
 | # | Problem | What will happen | Source |
 |---|---|---|---|
@@ -131,6 +131,8 @@ is closed, and sign-up and login for real users.
 | 57 | A batch from the ride that arrives after "complete" | Stored, but missing from the summary, which is computed at completion. An admin can compute it again. Known limit | Built P8 (8a) |
 | 58 | Whose trips "my trips" lists | The token decides: a guest gets the trips they booked, a driver the trips they accepted. There is no parameter for another user or side. An admin gets 403, because a list of every trip belongs to the admin dashboard (phase 11) | Built P8 (8b) |
 | 59 | What "my trips" holds | Every stage, newest first, running and cancelled trips included, 20 per page (at most 100). An item has the stage times and, once summarized, the ride distance, never the track | Built P8 (8b) |
+| 60 | Who sees the approach in a trip's track | The driver and admins. A guest who asks gets 403 TRIP_ACTION_FORBIDDEN, not 404: the guest knows the trip exists | Built P8 (8c) |
+| 61 | What a track's timeline holds | The whole trip, whatever leg is asked: stages, moments and route versions, in time order, with the guest socket's names. Never simplified | Built P8 (8c) |
 
 ## Open questions, most important first
 

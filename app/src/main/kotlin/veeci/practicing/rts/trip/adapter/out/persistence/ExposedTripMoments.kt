@@ -4,6 +4,7 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
@@ -62,6 +63,14 @@ class ExposedTripMomentRepository : TripMomentRepository {
             .where { (TripMomentsTable.tripId eq trip.value) and (TripMomentsTable.kind eq TripMomentRaisedV1.KIND_OFF_ROUTE) }
             .count()
             .toInt()
+
+    // trip_moments_trip_at (trip_id, at) serves the filter and the first sort key; the id breaks ties.
+    override suspend fun findAll(trip: TripId): List<TripMoment> =
+        TripMomentsTable
+            .selectAll()
+            .where { TripMomentsTable.tripId eq trip.value }
+            .orderBy(TripMomentsTable.at to SortOrder.ASC, TripMomentsTable.id to SortOrder.ASC)
+            .mapNotNull { Json.decodeFromJsonElement(TripMomentRaisedV1.serializer(), it[TripMomentsTable.payload]).toMoment() }
 }
 
 /**

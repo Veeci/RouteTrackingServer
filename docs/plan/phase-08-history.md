@@ -154,7 +154,8 @@ The same rule as `GET /trips/{id}`: the guest, the assigned driver, or an admin.
 `TRIP_NOT_FOUND`, so a guessed id reveals nothing (decisions.md row 10).
 
 The guest sees the ride leg and its timeline. The approach leg (where the driver drove before the pickup) is
-returned only to the driver and to admins. A guest who asks for `leg=approach` gets 404.
+returned only to the driver and to admins. A guest who asks for `leg=approach` gets 403
+`TRIP_ACTION_FORBIDDEN`: the guest knows the trip exists, so a 404 would hide nothing.
 
 ## Tasks
 
@@ -163,12 +164,12 @@ returned only to the driver and to admins. A guest who asks for `leg=approach` g
 - [x] T8.3 `TripSummaryCalculator` (gaps, median max speed, moving time) and `LegSummary`.
 - [x] T8.4 `TripSummaryService`, `TripSummaryListener`, `GET /summary`, the admin recompute endpoint.
 - [x] T8.5 V14 history indexes, the history query with keyset pagination, `GET /me/trips`.
-- [ ] T8.6 `DouglasPeucker`.
-- [ ] T8.7 Timeline merge, `GET /track`.
+- [x] T8.6 `DouglasPeucker`.
+- [x] T8.7 Timeline merge, `GET /track`.
 - [ ] T8.8 `GpxWriter`, `GeoJsonWriter`, streaming export endpoints.
 - [ ] T8.9 OpenAPI contract and golden files for every new endpoint, written first.
 
-Slices: **8a** = T8.1 to T8.4, **8b** = T8.5, **8c** = T8.6 to T8.8. T8.9 goes with each slice.
+Slices: **8a** = T8.1 to T8.4, **8b** = T8.5, **8c** = T8.6 and T8.7, **8d** = T8.8. T8.9 goes with each slice.
 
 ## Test plan
 
@@ -195,7 +196,7 @@ Slices: **8a** = T8.1 to T8.4, **8b** = T8.5, **8c** = T8.6 to T8.8. T8.9 goes w
 | TC-8-HIS-03 | API | Guest A's history never holds guest B's trips | P0 |
 | TC-8-HIS-04 | API | A bad cursor gets 400 `VALIDATION_FAILED` with a `cursor` field error | P1 |
 | TC-8-API-01 | API | The track of a live trip gets 409 `TRIP_NOT_ENDED` | P1 |
-| TC-8-API-02 | API | A guest asking for `leg=approach` gets 404; the driver gets the points | P0 |
+| TC-8-API-02 | API | A guest asking for `leg=approach` gets 403; the driver gets the points | P0 |
 | TC-8-API-03 | API | The timeline holds stages, moments and route versions in time order | P0 |
 | TC-8-API-04 | API | `?simplify=5` returns fewer points with the first and last unchanged | P1 |
 | TC-8-EXP-01 | Unit | `GpxWriter` output validates against the GPX 1.1 XSD | P0 |
@@ -237,6 +238,8 @@ Accepted by the product owner on 2026-11-16:
 | `/history` reachable during the trip | 409 until the trip ends | The live socket covers a running trip |
 | `?role=guest\|driver`, and both sides without it | No `role`: the token's role picks the side, an admin gets 403 | A user has one role, and `guest_id = ? OR driver_id = ?` cannot be read in order from one index |
 | 400 `INVALID_CURSOR` | 400 `VALIDATION_FAILED` with a `cursor` field error | The open-trips list already answers a bad cursor this way |
+| A guest asking for the approach gets 404 | 403 `TRIP_ACTION_FORBIDDEN` | The guest knows the trip exists; 403 states the real reason, as for an admin's history |
+| 8c holds the track, the timeline and the exports | 8c: track and timeline. 8d: exports | The exports bring streaming, XML and the XSD; two PRs of 8b's size review better |
 
 ## As built (8a)
 
@@ -266,6 +269,25 @@ Accepted by the product owner on 2026-11-16:
   recompute marks the summary approximate.
 - `/api/v1/me/trips` is outside `/api/v1/trips`, so AuthorizationMatrixIT does not cover it. TripHistoryIT tests
   its callers instead: guests, drivers, an admin (403) and no token (401).
+
+## As built (8c)
+
+- `Trip.rideWindow()` and `Trip.approachWindow()` (`TripWindows.kt`) decide which fixes belong to a leg, for the
+  summary and the track alike. The fallback to `created_at..updated_at` applies only to a COMPLETED trip without
+  stage times. A trip cancelled before its ride has no ride window, so it never shows approach fixes as the ride.
+- `TripTimeline.of` merges the stages, `TripMomentRepository.findAll` and `TripRouteRepository.findAll`. It
+  concatenates them and does one stable sort by time, then by source (stage, moment, route). The lists are a
+  few dozen entries, so a hand-written three-way merge would add code and save nothing.
+- `TripTrackService` reads the whole leg into memory, because Douglas–Peucker needs every point before it drops
+  one. The endpoint is not paged. A 2-hour ride at one fix a second is about 7 200 points.
+- `DouglasPeucker` (shared/geo) measures in one flat frame around the first point and keeps its ranges on an
+  `ArrayDeque<Long>`, two indexes packed in one Long, so the stack holds no objects. TC-8-DP-03 runs a
+  100 000-point zigzag that keeps every point, the deepest case.
+- The track is for the guest, the assigned driver and admins. Unlike `Trip.isVisibleTo`, a driver does not see
+  another driver's trip, and a REQUESTED trip of their own guest gets 409, not 404.
+- TC-8-TRK-01 to 03 ran in 8a against `DriverTrack` (TrackHistoryIT). TC-8-API-01 to 04 run in the service unit
+  test and in TripTrackIT.
+- The ride helpers of TripSummaryIT moved to `Rides.kt`, shared with TripTrackIT.
 
 ## Definition of Done
 

@@ -12,6 +12,12 @@ interface TripMomentRepository {
 
     /** How often the driver of [trip] left its route: the number of OffRoute moments (phase 8). */
     suspend fun countOffRoute(trip: TripId): Int
+
+    /**
+     * Every moment of [trip] in the order it happened: by time, then by the order they were stored (phase 8c).
+     * A stored kind this server does not know is left out.
+     */
+    suspend fun findAll(trip: TripId): List<TripMoment>
 }
 
 /**
