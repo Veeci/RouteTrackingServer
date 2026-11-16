@@ -61,6 +61,8 @@ class AuthorizationMatrixIT {
             // Computed after the completion commits: call() waits until the summary exists.
             row("GET /api/v1/trips/{id}/summary", listOf("accept", "arrive", "start", "complete"), 401, 200, 404, 200, 404, 200),
             row("GET /api/v1/trips/{id}/track", listOf("accept", "arrive", "start", "complete"), 401, 200, 404, 200, 404, 200),
+            row("GET /api/v1/trips/{id}/export.gpx", listOf("accept", "arrive", "start", "complete"), 401, 200, 404, 200, 404, 200),
+            row("GET /api/v1/trips/{id}/export.geojson", listOf("accept", "arrive", "start", "complete"), 401, 200, 404, 200, 404, 200),
         )
 
     @TestFactory

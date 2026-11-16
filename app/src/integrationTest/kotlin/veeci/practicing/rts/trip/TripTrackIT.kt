@@ -8,13 +8,19 @@ import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.get
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.contentType
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import org.junit.jupiter.api.Test
 import org.testcontainers.junit.jupiter.Testcontainers
 import veeci.practicing.rts.testing.SocketTestApp
 import veeci.practicing.rts.testing.TestTokens
+import veeci.practicing.rts.testing.geo.GpxTrack
 import veeci.practicing.rts.testing.problem
 import veeci.practicing.rts.testing.shouldMatchContract
 import veeci.practicing.rts.testing.socketApp
@@ -101,6 +107,48 @@ class TripTrackIT {
                 .points
                 .shouldBeEmpty() // cancelled before anyone accepted it
         }
+
+    @Test
+    fun `TC-8-E2E-01 and TC-8-EXP-03 a recorded ride downloads as GPX and GeoJSON that parse back`() =
+        socketApp {
+            val api = TripApi(client)
+            val trip = api.created(guest)
+            api.moved(trip.id, driver, "accept", "arrive", "start")
+            val started = Clock.System.now()
+            delay(RIDE_MS)
+            val sent = (1..POINTS).map { rideFix(northM = it * 10.0, at = started + (it * STEP_MS).milliseconds) }
+            sendRide(driver, sent)
+            export(trip.id, guest, "gpx").checked().status shouldBe HttpStatusCode.Conflict // still running
+            api.moved(trip.id, driver, "complete")
+
+            val gpx = export(trip.id, guest, "gpx").checked()
+            gpx.status shouldBe HttpStatusCode.OK
+            gpx.contentType()?.withoutParameters() shouldBe ContentType.parse("application/gpx+xml")
+            gpx.headers[HttpHeaders.ContentDisposition] shouldBe "attachment; filename=trip-${trip.id}.gpx"
+            GpxTrack.points(gpx.bodyAsText()).map { it.time } shouldBe sent.map { it.recordedAt }
+
+            val geoJson = export(trip.id, guest, "geojson").checked()
+            geoJson.contentType()?.withoutParameters() shouldBe ContentType.parse("application/geo+json")
+            geoJson.headers[HttpHeaders.ContentDisposition] shouldBe "attachment; filename=trip-${trip.id}.geojson"
+            val line =
+                Json
+                    .parseToJsonElement(geoJson.bodyAsText())
+                    .jsonObject["features"]!!
+                    .jsonArray
+                    .first()
+                    .jsonObject["geometry"]!!
+            line.jsonObject["coordinates"]!!.jsonArray.size shouldBe POINTS
+
+            export(trip.id, guest, "gpx", "?leg=approach").checked().status shouldBe HttpStatusCode.Forbidden
+            export(trip.id, TestTokens.guest(), "geojson").checked().status shouldBe HttpStatusCode.NotFound
+        }
+
+    private suspend fun SocketTestApp.export(
+        tripId: String,
+        token: String,
+        format: String,
+        query: String = "",
+    ): HttpResponse = client.get("/api/v1/trips/$tripId/export.$format$query") { bearerAuth(token) }
 
     private suspend fun SocketTestApp.track(
         tripId: String,

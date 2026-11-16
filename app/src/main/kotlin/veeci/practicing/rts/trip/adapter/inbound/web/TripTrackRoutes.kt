@@ -1,62 +1,91 @@
 package veeci.practicing.rts.trip.adapter.inbound.web
 
+import io.ktor.http.ContentDisposition
+import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.Parameters
+import io.ktor.server.application.ApplicationCall
+import io.ktor.server.response.header
 import io.ktor.server.response.respond
+import io.ktor.server.response.respondOutputStream
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import kotlinx.serialization.Serializable
 import veeci.practicing.rts.platform.http.FieldError
 import veeci.practicing.rts.platform.http.RequestInvalidException
 import veeci.practicing.rts.platform.security.actor
+import veeci.practicing.rts.trip.adapter.inbound.web.export.GeoJsonWriter
+import veeci.practicing.rts.trip.adapter.inbound.web.export.GpxWriter
+import veeci.practicing.rts.trip.application.TrackExport
 import veeci.practicing.rts.trip.application.TripTrack
 import veeci.practicing.rts.trip.application.TripTrackService
 import veeci.practicing.rts.trip.domain.TimelineEntry
 import veeci.practicing.rts.trip.domain.TripLeg
 import veeci.practicing.rts.trip.domain.event.TripMoment
+import java.io.OutputStream
 import kotlin.time.Instant
 
 /**
- * The recorded track and timeline of an ended trip (phase 8c, contract in openapi/rts-v1.yaml). Mount inside
- * `authenticate(AUTH_JWT)`. The service decides who may read which leg.
+ * The recorded track and timeline of an ended trip (phase 8c), and its file exports (phase 8d). Contract in
+ * openapi/rts-v1.yaml. Mount inside `authenticate(AUTH_JWT)`. The service decides who may read which leg.
  */
 fun Route.tripTrackRoutes(service: TripTrackService) {
     get("/api/v1/trips/{id}/track") {
-        val query = TrackQuery.parse(call.request.queryParameters)
+        val parameters = call.request.queryParameters
+        val query = TrackQuery(parameters.leg(), parameters.simplifyM())
         call.respond(TripTrackResponse.of(service.track(call.tripId(), call.actor(), query.leg, query.simplifyM)))
+    }
+
+    get("/api/v1/trips/{id}/export.gpx") {
+        call.respondExport(service, "gpx", GpxWriter.CONTENT_TYPE, GpxWriter::write)
+    }
+
+    get("/api/v1/trips/{id}/export.geojson") {
+        call.respondExport(service, "geojson", GeoJsonWriter.CONTENT_TYPE, GeoJsonWriter::write)
     }
 }
 
-/** `?leg=ride&simplify=0`. Both are optional. */
+/**
+ * Every check runs in [TripTrackService.export], before the first byte: once the stream opens, the status and
+ * headers are sent, and a later failure can only cut the connection.
+ */
+private suspend fun ApplicationCall.respondExport(
+    service: TripTrackService,
+    extension: String,
+    contentType: String,
+    write: suspend (TrackExport, OutputStream) -> Unit,
+) {
+    val export = service.export(tripId(), actor(), request.queryParameters.leg())
+    response.header(
+        HttpHeaders.ContentDisposition,
+        ContentDisposition.Attachment
+            .withParameter(
+                ContentDisposition.Parameters.FileName,
+                "trip-${export.tripId.value}.$extension",
+            ).toString(),
+    )
+    respondOutputStream(ContentType.parse(contentType)) { write(export, this) }
+}
+
 private data class TrackQuery(
     val leg: TripLeg,
     val simplifyM: Double,
-) {
-    companion object {
-        fun parse(parameters: Parameters): TrackQuery {
-            val legText = parameters["leg"]
-            val simplifyText = parameters["simplify"]
-            val leg = if (legText == null) TripLeg.RIDE else TripLeg.entries.firstOrNull { it.name.lowercase() == legText }
-            val simplifyM =
-                if (simplifyText ==
-                    null
-                ) {
-                    0.0
-                } else {
-                    simplifyText.toDoubleOrNull()?.takeIf { it in 0.0..TripTrackService.MAX_SIMPLIFY_M }
-                }
-            val errors =
-                buildList {
-                    if (leg == null) add(FieldError("leg", "must be ride or approach"))
-                    if (simplifyM ==
-                        null
-                    ) {
-                        add(FieldError("simplify", "must be a number of metres from 0 to ${TripTrackService.MAX_SIMPLIFY_M.toInt()}"))
-                    }
-                }
-            if (errors.isNotEmpty()) throw RequestInvalidException(errors)
-            return TrackQuery(checkNotNull(leg), checkNotNull(simplifyM))
-        }
-    }
+)
+
+/** `?leg=ride|approach`, ride when absent. */
+private fun Parameters.leg(): TripLeg {
+    val text = this["leg"] ?: return TripLeg.RIDE
+    return TripLeg.entries.firstOrNull { it.name.lowercase() == text }
+        ?: throw RequestInvalidException(listOf(FieldError("leg", "must be ride or approach")))
+}
+
+/** `?simplify=` metres from 0 to 50, 0 when absent. */
+private fun Parameters.simplifyM(): Double {
+    val text = this["simplify"] ?: return 0.0
+    return text.toDoubleOrNull()?.takeIf { it in 0.0..TripTrackService.MAX_SIMPLIFY_M }
+        ?: throw RequestInvalidException(
+            listOf(FieldError("simplify", "must be a number of metres from 0 to ${TripTrackService.MAX_SIMPLIFY_M.toInt()}")),
+        )
 }
 
 @Serializable

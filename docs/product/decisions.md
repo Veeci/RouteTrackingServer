@@ -120,7 +120,7 @@ is closed, and sign-up and login for real users.
 | 51 | When the route to the pickup is planned | From the driver's first fix after accepting, not at the moment of accept: the server has no position before that. A failed plan (driver far from any road) is tried again every 30 s | Built P7 (7c) |
 | 52 | What the driver's app gets | The same `route_updated` as the guest: the route to the pickup, the trip route when the ride starts, and each re-route. It is sent again after every reconnect, so the app can draw it and later give directions | Built P7 (7c) |
 
-## Phase 8 (8a to 8c built, decided 2026-11-16)
+## Phase 8 (built, decided 2026-11-16)
 
 | # | Problem | What will happen | Source |
 |---|---|---|---|
@@ -133,6 +133,8 @@ is closed, and sign-up and login for real users.
 | 59 | What "my trips" holds | Every stage, newest first, running and cancelled trips included, 20 per page (at most 100). An item has the stage times and, once summarized, the ride distance, never the track | Built P8 (8b) |
 | 60 | Who sees the approach in a trip's track | The driver and admins. A guest who asks gets 403 TRIP_ACTION_FORBIDDEN, not 404: the guest knows the trip exists | Built P8 (8c) |
 | 61 | What a track's timeline holds | The whole trip, whatever leg is asked: stages, moments and route versions, in time order, with the guest socket's names. Never simplified | Built P8 (8c) |
+| 62 | Where a timeline entry sits on the GeoJSON map | At the driver's last fix at or before its time, inside the leg including its end. With no such fix, the point has no geometry, never a guessed position | Built P8 (8d) |
+| 63 | What the exports hold | One leg each, with the same access rules as the track. GPX holds the points and their times only; GeoJSON adds the timeline as points | Built P8 (8d) |
 
 ## Open questions, most important first
 

@@ -4,6 +4,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import veeci.practicing.rts.shared.DomainException
@@ -114,6 +115,30 @@ class TripTrackServiceTest {
 
             result.points.shouldBeEmpty()
             result.timeline.map { (it as TimelineEntry.StageReached).status } shouldBe listOf(TripStatus.REQUESTED, TripStatus.CANCELLED)
+        }
+
+    @Test
+    fun `TC-8-EXP-04 an export reads nothing until collected, then a 50 000-point leg in 50 pages`() =
+        runTest {
+            val trip = stored(TripStatus.COMPLETED)
+            repeat(50_000) { track.add(driver.userId, T0 + 3.minutes + it.milliseconds) }
+
+            val export = service.export(trip.id, guest, TripLeg.RIDE)
+            track.calls shouldBe 0 // the checks ran, the fixes did not
+
+            val pages = export.pages.toList()
+            pages.size shouldBe 50
+            pages.sumOf { it.size } shouldBe 50_000
+            track.calls shouldBe 51 // the 51st read finds the end
+        }
+
+    @Test
+    fun `an export checks the trip first, so a live trip fails before any fix is read`() =
+        runTest {
+            val trip = stored(TripStatus.IN_PROGRESS)
+
+            shouldThrow<DomainException> { service.export(trip.id, guest, TripLeg.RIDE) }.code shouldBe TripError.TRIP_NOT_ENDED
+            track.calls shouldBe 0
         }
 
     /** One session per driver; it pages like the Exposed adapter: [from, to), after the cursor, at most limit. */
