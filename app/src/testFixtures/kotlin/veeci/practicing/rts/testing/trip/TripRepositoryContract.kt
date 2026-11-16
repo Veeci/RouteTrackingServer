@@ -7,9 +7,11 @@ import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import veeci.practicing.rts.platform.db.TransactionRunner
 import veeci.practicing.rts.shared.DomainException
+import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.testing.tracking.DirectTransactionRunner
 import veeci.practicing.rts.testing.trip.TripSamples.T0
 import veeci.practicing.rts.trip.application.port.out.TripCursor
+import veeci.practicing.rts.trip.application.port.out.TripParty
 import veeci.practicing.rts.trip.application.port.out.TripRepository
 import veeci.practicing.rts.trip.domain.StageTimes
 import veeci.practicing.rts.trip.domain.Trip
@@ -107,6 +109,61 @@ abstract class TripRepositoryContract {
 
             (first + rest).map { it.id } shouldBe open.map { it.id }
         }
+
+    @Test
+    fun `TC-8-HIS-01 a guest's history comes newest first in pages with no duplicate or gap`() =
+        runTest {
+            val guest = TripSamples.guest()
+            val own = (0 until 45).map { TripSamples.requested(guest, at = T0 + it.seconds) }
+            val other = TripSamples.requested(at = T0 + 1.seconds) // another guest, same time as one of the own trips
+            tx { (own.shuffled() + other).forEach { trips.insert(it) } }
+
+            val pages = pagesOf(guest.userId, TripParty.GUEST, size = 20)
+
+            pages.map { it.size } shouldBe listOf(20, 20, 5)
+            pages.flatten().map { it.id } shouldBe own.reversed().map { it.id }
+        }
+
+    @Test
+    fun `TC-8-HIS-02 trips with the same creation time both come back across a page boundary`() =
+        runTest {
+            val guest = TripSamples.guest()
+            // Newest first means id descending among equal times; the database orders uuids byte by byte, like text.
+            val same = (0..3).map { TripSamples.requested(guest, at = T0) }.sortedByDescending { it.id.value.toString() }
+            tx { same.forEach { trips.insert(it) } }
+
+            pagesOf(guest.userId, TripParty.GUEST, size = 3).flatten().map { it.id } shouldBe same.map { it.id }
+        }
+
+    @Test
+    fun `a driver's history holds the trips they accepted, in every stage, and not the guest side`() =
+        runTest {
+            val driver = TripSamples.driver()
+            val done = TripSamples.inStatus(TripStatus.COMPLETED, driver = driver, at = T0)
+            val running = TripSamples.inStatus(TripStatus.ACCEPTED, driver = driver, at = T0 + 1.minutes)
+            val someoneElses = TripSamples.inStatus(TripStatus.COMPLETED, at = T0 + 2.minutes)
+            tx { listOf(done, running, someoneElses).forEach { trips.insert(it) } }
+
+            tx { trips.findHistory(driver.userId, TripParty.DRIVER, before = null, limit = 10) }.map { it.id } shouldBe
+                listOf(running.id, done.id)
+            tx { trips.findHistory(driver.userId, TripParty.GUEST, before = null, limit = 10) } shouldBe emptyList()
+        }
+
+    /** Reads the whole history of [user] page by page, as a client would. */
+    private suspend fun pagesOf(
+        user: UserId,
+        party: TripParty,
+        size: Int,
+    ): List<List<Trip>> {
+        val pages = mutableListOf<List<Trip>>()
+        var cursor: TripCursor? = null
+        do {
+            val page = tx { trips.findHistory(user, party, cursor, size) }
+            if (page.isNotEmpty()) pages += page
+            cursor = page.lastOrNull()?.let { TripCursor(it.createdAt, it.id) }
+        } while (page.size == size)
+        return pages
+    }
 
     @Test
     fun `the active trip of a driver is found until it is finished`() =

@@ -9,6 +9,8 @@ import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greater
 import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.core.java.javaUUID
+import org.jetbrains.exposed.v1.core.less
+import org.jetbrains.exposed.v1.core.lessEq
 import org.jetbrains.exposed.v1.core.or
 import org.jetbrains.exposed.v1.core.statements.UpdateBuilder
 import org.jetbrains.exposed.v1.datetime.timestamp
@@ -20,6 +22,7 @@ import veeci.practicing.rts.shared.DomainException
 import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.shared.geo.GeoPoint
 import veeci.practicing.rts.trip.application.port.out.TripCursor
+import veeci.practicing.rts.trip.application.port.out.TripParty
 import veeci.practicing.rts.trip.application.port.out.TripRepository
 import veeci.practicing.rts.trip.domain.StageTimes
 import veeci.practicing.rts.trip.domain.Trip
@@ -85,6 +88,25 @@ class ExposedTripRepository : TripRepository {
             .limit(limit)
             .map { it.toTrip() }
 
+    override suspend fun findHistory(
+        user: UserId,
+        party: TripParty,
+        before: TripCursor?,
+        limit: Int,
+    ): List<Trip> {
+        val side =
+            when (party) {
+                TripParty.GUEST -> TripsTable.guestId eq user.value
+                TripParty.DRIVER -> TripsTable.driverId eq user.value
+            }
+        return TripsTable
+            .selectAll()
+            .where { side and before.endsBefore() }
+            .orderBy(TripsTable.createdAt to SortOrder.DESC, TripsTable.id to SortOrder.DESC)
+            .limit(limit)
+            .map { it.toTrip() }
+    }
+
     override suspend fun findActive(): List<Trip> =
         TripsTable
             .selectAll()
@@ -113,14 +135,6 @@ class ExposedTripRepository : TripRepository {
                 throw DomainException(TripError.DRIVER_ALREADY_ON_TRIP, "The driver already has an active trip")
             }
             throw e
-        }
-
-    /** Keyset paging: rows after the cursor in (created_at, id) order. */
-    private fun TripCursor?.startsAfter(): Op<Boolean> =
-        if (this == null) {
-            Op.TRUE
-        } else {
-            (TripsTable.createdAt greater createdAt) or ((TripsTable.createdAt eq createdAt) and (TripsTable.id greater id.value))
         }
 
     private fun UpdateBuilder<*>.stages(stages: StageTimes) {
@@ -156,3 +170,24 @@ class ExposedTripRepository : TripRepository {
         const val ONE_ACTIVE_TRIP_INDEX = "one_active_trip_per_driver"
     }
 }
+
+/** Keyset paging: rows after the cursor in (created_at, id) order. */
+private fun TripCursor?.startsAfter(): Op<Boolean> =
+    if (this == null) {
+        Op.TRUE
+    } else {
+        (TripsTable.createdAt greater createdAt) or ((TripsTable.createdAt eq createdAt) and (TripsTable.id greater id.value))
+    }
+
+/**
+ * Keyset paging backwards: rows before the cursor in (created_at, id) order. The first term repeats what the
+ * OR says, on purpose. Postgres cannot turn an OR into an index range, but `created_at <= x` it can: the scan
+ * starts at the cursor instead of reading and dropping every newer row of the user.
+ */
+private fun TripCursor?.endsBefore(): Op<Boolean> =
+    if (this == null) {
+        Op.TRUE
+    } else {
+        (TripsTable.createdAt lessEq createdAt) and
+            ((TripsTable.createdAt less createdAt) or ((TripsTable.createdAt eq createdAt) and (TripsTable.id less id.value)))
+    }

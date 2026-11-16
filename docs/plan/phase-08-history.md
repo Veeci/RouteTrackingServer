@@ -114,10 +114,12 @@ the trip and a `ScheduledJob` can compute it instead. That is not needed now.
 
 ### 8b. History list
 
-`GET /api/v1/me/trips?cursor=&limit=20&role=guest|driver` returns `{items: [TripListItemDto], nextCursor}`,
-newest first. `role` is optional: without it, a user sees trips where they are the guest or the driver.
+`GET /api/v1/me/trips?cursor=&limit=20` returns `{items: [TripHistoryItem], nextCursor}`, newest first. The token
+decides whose trips and on which side: a guest gets the trips they booked, a driver the trips they accepted. An
+admin has no trips of their own and gets 403.
 
-- The cursor is opaque: base64url of `(created_at, id)`. A bad cursor gets 400 `INVALID_CURSOR`.
+- The cursor is opaque: base64url of `(created_at, id)`, the same format as the open-trips list. A bad cursor
+  gets 400 `VALIDATION_FAILED` with a `cursor` field error, as on the open-trips list.
 - The query is `where guest_id = ? and (created_at, id) < (?, ?) order by created_at desc, id desc limit ? + 1`.
   The extra row says whether a next page exists.
 - V14 adds `trips (guest_id, created_at desc, id desc)` and `trips (driver_id, created_at desc, id desc)`, with the
@@ -160,7 +162,7 @@ returned only to the driver and to admins. A guest who asks for `leg=approach` g
 - [x] T8.2 `DriverTrack` in `tracking.application.api` with its Exposed adapter and keyset paging.
 - [x] T8.3 `TripSummaryCalculator` (gaps, median max speed, moving time) and `LegSummary`.
 - [x] T8.4 `TripSummaryService`, `TripSummaryListener`, `GET /summary`, the admin recompute endpoint.
-- [ ] T8.5 V14 history indexes, the history query with keyset pagination, `GET /me/trips`.
+- [x] T8.5 V14 history indexes, the history query with keyset pagination, `GET /me/trips`.
 - [ ] T8.6 `DouglasPeucker`.
 - [ ] T8.7 Timeline merge, `GET /track`.
 - [ ] T8.8 `GpxWriter`, `GeoJsonWriter`, streaming export endpoints.
@@ -191,7 +193,7 @@ Slices: **8a** = T8.1 to T8.4, **8b** = T8.5, **8c** = T8.6 to T8.8. T8.9 goes w
 | TC-8-HIS-01 | Integration | 45 trips, limit 20, give pages of 20, 20 and 5, newest first, with no duplicate or gap | P0 |
 | TC-8-HIS-02 | Integration | Two trips with the same `created_at` both come back across a page boundary | P0 |
 | TC-8-HIS-03 | API | Guest A's history never holds guest B's trips | P0 |
-| TC-8-HIS-04 | API | A bad cursor gets 400 `INVALID_CURSOR` | P1 |
+| TC-8-HIS-04 | API | A bad cursor gets 400 `VALIDATION_FAILED` with a `cursor` field error | P1 |
 | TC-8-API-01 | API | The track of a live trip gets 409 `TRIP_NOT_ENDED` | P1 |
 | TC-8-API-02 | API | A guest asking for `leg=approach` gets 404; the driver gets the points | P0 |
 | TC-8-API-03 | API | The timeline holds stages, moments and route versions in time order | P0 |
@@ -233,6 +235,8 @@ Accepted by the product owner on 2026-11-16:
 | No planned distance | `plannedDistanceM` from the first TRIP route | Phase 6 stores it |
 | One track for everyone | The approach leg only for the driver and admins | The driver's movements before the pickup are not the guest's business |
 | `/history` reachable during the trip | 409 until the trip ends | The live socket covers a running trip |
+| `?role=guest\|driver`, and both sides without it | No `role`: the token's role picks the side, an admin gets 403 | A user has one role, and `guest_id = ? OR driver_id = ?` cannot be read in order from one index |
+| 400 `INVALID_CURSOR` | 400 `VALIDATION_FAILED` with a `cursor` field error | The open-trips list already answers a bad cursor this way |
 
 ## As built (8a)
 
@@ -248,7 +252,20 @@ Accepted by the product owner on 2026-11-16:
 - **Known limit.** The summary is computed when the completion is delivered. A batch recorded during the ride
   that reaches the server after that is stored but missing from the summary until an admin computes it again.
 - TC-8-SUM-05 and TC-8-SUM-07 are covered by TripSummaryIT and ExposedTripIT, not by their own tests.
-  TC-8-STG-02 (approximate summary of an old trip) has no test yet.
+
+## As built (8b)
+
+- `TripRepository.findHistory(user, party, before, limit)` with `TripParty` GUEST or DRIVER. It runs in the
+  shared `TripRepositoryContract`, so the in-memory and the Postgres versions pass the same paging tests
+  (TC-8-HIS-01, TC-8-HIS-02).
+- `TripHistoryService` reads one page plus one row, then the page's summaries in one query
+  (`TripSummaryRepository.findAll`), not one query per trip.
+- `PageQuery` parses `cursor` and `limit` for both trip lists, so they answer a bad value the same way.
+- `trips_driver_history` is a partial index (`WHERE driver_id IS NOT NULL`).
+- TC-8-STG-02 is in TripHistoryIT: it clears a completed trip's stage times, as V13 left old trips, and the admin
+  recompute marks the summary approximate.
+- `/api/v1/me/trips` is outside `/api/v1/trips`, so AuthorizationMatrixIT does not cover it. TripHistoryIT tests
+  its callers instead: guests, drivers, an admin (403) and no token (401).
 
 ## Definition of Done
 

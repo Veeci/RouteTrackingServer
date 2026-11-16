@@ -28,6 +28,7 @@ import veeci.practicing.rts.trip.application.RerouteHandler
 import veeci.practicing.rts.trip.application.RerouteWorker
 import veeci.practicing.rts.trip.application.Rerouter
 import veeci.practicing.rts.trip.application.TripEventService
+import veeci.practicing.rts.trip.application.TripHistoryService
 import veeci.practicing.rts.trip.application.TripProgressService
 import veeci.practicing.rts.trip.application.TripRouteService
 import veeci.practicing.rts.trip.application.TripService
@@ -83,4 +84,5 @@ fun tripModule(events: EventsConfig): Module =
         single<TripSummaryRepository> { ExposedTripSummaryRepository() }
         single { TripSummaryService(get(), get(), get(), get(), get(), get(), get()) }
         single { TripSummaryListener(get()) } bind OutboxEventHandler::class
+        single { TripHistoryService(get(), get(), get()) }
     }

@@ -9,6 +9,7 @@ import veeci.practicing.rts.trip.application.port.out.RuleStateStore
 import veeci.practicing.rts.trip.application.port.out.TripCursor
 import veeci.practicing.rts.trip.application.port.out.TripEventOutbox
 import veeci.practicing.rts.trip.application.port.out.TripMomentRepository
+import veeci.practicing.rts.trip.application.port.out.TripParty
 import veeci.practicing.rts.trip.application.port.out.TripRepository
 import veeci.practicing.rts.trip.application.port.out.TripRouteRepository
 import veeci.practicing.rts.trip.domain.ArrivalState
@@ -70,6 +71,23 @@ class InMemoryTripRepository : TripRepository {
                 .filter {
                     after == null || it.createdAt > after.createdAt ||
                         (it.createdAt == after.createdAt && it.id.sortKey() > after.id.sortKey())
+                }.take(limit)
+                .map { it.toTrip() }
+        }
+
+    override suspend fun findHistory(
+        user: UserId,
+        party: TripParty,
+        before: TripCursor?,
+        limit: Int,
+    ): List<Trip> =
+        mutex.withLock {
+            rows.values
+                .filter { (if (party == TripParty.GUEST) it.guestId else it.driverId) == user }
+                .sortedWith(compareByDescending<Row> { it.createdAt }.thenByDescending { it.id.sortKey() })
+                .filter {
+                    before == null || it.createdAt < before.createdAt ||
+                        (it.createdAt == before.createdAt && it.id.sortKey() < before.id.sortKey())
                 }.take(limit)
                 .map { it.toTrip() }
         }

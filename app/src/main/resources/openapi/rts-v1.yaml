@@ -251,6 +251,34 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/me/trips:
+    get:
+      tags: [trips]
+      operationId: listMyTrips
+      summary: The caller's own trips, newest first
+      description: |
+        A guest gets the trips they booked, a driver the trips they accepted, in every stage, one page at a time
+        (keyset pagination). The token says whose trips: an admin has none and gets 403. An item never holds the
+        track; `rideDistanceM` is there once the trip is completed and summarized.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: cursor
+          in: query
+          description: The `nextCursor` of the previous page.
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: One page of the caller's trips.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TripHistoryPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
   /api/v1/routes:
     get:
       tags: [routing]
@@ -635,6 +663,43 @@ components:
         nextCursor:
           type: string
           description: Absent on the last page.
+    TripHistoryPage:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/TripHistoryItem' }
+        nextCursor:
+          type: string
+          description: Absent on the last page.
+    TripHistoryItem:
+      type: object
+      required: [id, guestId, pickup, destination, status, createdAt]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        guestId: { type: string, format: uuid }
+        driverId:
+          type: string
+          format: uuid
+          description: Absent until a driver accepts the trip.
+        pickup: { $ref: '#/components/schemas/Point' }
+        destination: { $ref: '#/components/schemas/Point' }
+        status: { $ref: '#/components/schemas/TripStatus' }
+        createdAt: { type: string, format: date-time }
+        acceptedAt: { type: string, format: date-time }
+        arrivedAt: { type: string, format: date-time }
+        startedAt: { type: string, format: date-time }
+        endedAt:
+          type: string
+          format: date-time
+          description: When the trip was completed or cancelled.
+        rideDistanceM:
+          type: number
+          minimum: 0
+          description: The distance driven during the ride, from the summary. Absent until the summary exists.
     TrackingAccuracy:
       type: string
       enum: [HIGH, BALANCED, LOW, PASSIVE]
