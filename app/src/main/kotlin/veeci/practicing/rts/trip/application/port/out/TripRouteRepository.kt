@@ -19,4 +19,7 @@ interface TripRouteRepository {
         tripId: TripId,
         kind: RouteKind,
     ): TripRoute?
+
+    /** Every route of the trip, every kind and version, oldest first (phase 8). */
+    suspend fun findAll(tripId: TripId): List<TripRoute>
 }

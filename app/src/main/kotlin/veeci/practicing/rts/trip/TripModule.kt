@@ -13,6 +13,7 @@ import veeci.practicing.rts.trip.adapter.inbound.event.BatteryListener
 import veeci.practicing.rts.trip.adapter.inbound.event.DriverRouteListener
 import veeci.practicing.rts.trip.adapter.inbound.event.FixesAcceptedListener
 import veeci.practicing.rts.trip.adapter.inbound.event.TripFinishedListener
+import veeci.practicing.rts.trip.adapter.inbound.event.TripSummaryListener
 import veeci.practicing.rts.trip.adapter.inbound.job.StaleDriverJob
 import veeci.practicing.rts.trip.adapter.out.driver.DriverRoutePush
 import veeci.practicing.rts.trip.adapter.out.live.LiveProgressPublisher
@@ -22,6 +23,7 @@ import veeci.practicing.rts.trip.adapter.out.persistence.ExposedTripEventOutbox
 import veeci.practicing.rts.trip.adapter.out.persistence.ExposedTripMomentRepository
 import veeci.practicing.rts.trip.adapter.out.persistence.ExposedTripRepository
 import veeci.practicing.rts.trip.adapter.out.persistence.ExposedTripRouteRepository
+import veeci.practicing.rts.trip.adapter.out.persistence.ExposedTripSummaryRepository
 import veeci.practicing.rts.trip.application.RerouteHandler
 import veeci.practicing.rts.trip.application.RerouteWorker
 import veeci.practicing.rts.trip.application.Rerouter
@@ -29,6 +31,7 @@ import veeci.practicing.rts.trip.application.TripEventService
 import veeci.practicing.rts.trip.application.TripProgressService
 import veeci.practicing.rts.trip.application.TripRouteService
 import veeci.practicing.rts.trip.application.TripService
+import veeci.practicing.rts.trip.application.TripSummaryService
 import veeci.practicing.rts.trip.application.api.TripQuery
 import veeci.practicing.rts.trip.application.port.out.ProgressPublisher
 import veeci.practicing.rts.trip.application.port.out.ProgressStateStore
@@ -37,6 +40,7 @@ import veeci.practicing.rts.trip.application.port.out.TripEventOutbox
 import veeci.practicing.rts.trip.application.port.out.TripMomentRepository
 import veeci.practicing.rts.trip.application.port.out.TripRepository
 import veeci.practicing.rts.trip.application.port.out.TripRouteRepository
+import veeci.practicing.rts.trip.application.port.out.TripSummaryRepository
 import veeci.practicing.rts.trip.domain.PresenceRules
 import veeci.practicing.rts.trip.domain.TripRules
 
@@ -74,4 +78,9 @@ fun tripModule(events: EventsConfig): Module =
         single { StaleDriverJob(get(), events.staleCheckEvery) } bind ScheduledJob::class
         single { ArrivalListener(get()) } bind OutboxEventHandler::class
         single { BatteryListener(get()) } bind OutboxEventHandler::class
+
+        // Phase 8a: a summary of every completed trip.
+        single<TripSummaryRepository> { ExposedTripSummaryRepository() }
+        single { TripSummaryService(get(), get(), get(), get(), get(), get(), get()) }
+        single { TripSummaryListener(get()) } bind OutboxEventHandler::class
     }

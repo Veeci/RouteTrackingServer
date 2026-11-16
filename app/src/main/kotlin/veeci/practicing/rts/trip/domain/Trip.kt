@@ -44,6 +44,7 @@ enum class TripAction { ACCEPT, ARRIVE, START, COMPLETE, CANCEL }
  *
  * Every change records a [TripStatusChanged]; the service writes it to the outbox in the same transaction.
  */
+@Suppress("LongParameterList") // one parameter per stored column, as in restore
 class Trip private constructor(
     val id: TripId,
     val guestId: UserId,
@@ -55,6 +56,7 @@ class Trip private constructor(
     updatedAt: Instant,
     /** The version this copy was read with. Saving checks that the stored trip still has it. */
     val version: Long,
+    stages: StageTimes,
 ) {
     var driverId: UserId? = driverId
         private set
@@ -63,6 +65,10 @@ class Trip private constructor(
         private set
 
     var updatedAt: Instant = updatedAt
+        private set
+
+    /** When the trip reached each stage; set in the same change as [status]. */
+    var stages: StageTimes = stages
         private set
 
     private val events = mutableListOf<TripStatusChanged>()
@@ -80,8 +86,7 @@ class Trip private constructor(
         }
         if (action == TripAction.ACCEPT) driverId = actor.userId
         record(from = status, to = target, now)
-        status = target
-        updatedAt = now
+        moveTo(target, now)
     }
 
     /**
@@ -93,8 +98,7 @@ class Trip private constructor(
         if (status != ACCEPTED) return false
         val target = TRANSITIONS.getValue(ACCEPTED to TripAction.ARRIVE)
         record(from = status, to = target, now, StatusCause.AUTO)
-        status = target
-        updatedAt = now
+        moveTo(target, now)
         return true
     }
 
@@ -122,6 +126,15 @@ class Trip private constructor(
             TripAction.ARRIVE, TripAction.START, TripAction.COMPLETE -> isAssignedDriver
             TripAction.CANCEL -> isAssignedDriver || (actor.role == Role.GUEST && actor.userId == guestId)
         }
+    }
+
+    private fun moveTo(
+        target: TripStatus,
+        now: Instant,
+    ) {
+        status = target
+        stages = stages.reached(target, now)
+        updatedAt = now
     }
 
     private fun record(
@@ -169,7 +182,7 @@ class Trip private constructor(
             now: Instant,
         ): Trip {
             ensureMayRequest(guest)
-            return Trip(id, guest.userId, null, pickup, destination, REQUESTED, now, now, version = 1)
+            return Trip(id, guest.userId, null, pickup, destination, REQUESTED, now, now, version = 1, StageTimes.NONE)
                 .also { it.record(from = null, to = REQUESTED, now) }
         }
 
@@ -185,6 +198,7 @@ class Trip private constructor(
             createdAt: Instant,
             updatedAt: Instant,
             version: Long,
-        ): Trip = Trip(id, guestId, driverId, pickup, destination, status, createdAt, updatedAt, version)
+            stages: StageTimes = StageTimes.NONE,
+        ): Trip = Trip(id, guestId, driverId, pickup, destination, status, createdAt, updatedAt, version, stages)
     }
 }

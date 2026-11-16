@@ -234,6 +234,23 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '412': { $ref: '#/components/responses/PreconditionFailed' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/trips/{id}/summary:
+    get:
+      tags: [trips]
+      operationId: getTripSummary
+      summary: The summary of a completed trip
+      description: |
+        For the guest, the assigned driver and admins. Computed when the trip completes, usually within a second;
+        until then 404 SUMMARY_NOT_READY. The guest never gets `approach`, where the driver drove before the pickup.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+      responses:
+        '200': { $ref: '#/components/responses/TripSummary' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
   /api/v1/routes:
     get:
       tags: [routing]
@@ -316,6 +333,23 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/admin/trips/{id}/summary:
+    post:
+      tags: [admin]
+      operationId: recomputeTripSummary
+      summary: Compute a trip's summary again (ADMIN)
+      description: Replaces the stored summary, for example after a fix in the calculation. 409 TRIP_NOT_ENDED for a trip that is not completed.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+      responses:
+        '200': { $ref: '#/components/responses/TripSummary' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /health/live:
     get:
@@ -406,6 +440,11 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Trip' }
+    TripSummary:
+      description: The trip's summary.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/TripSummary' }
     Unauthorized:
       description: No access token, or an invalid or expired one (UNAUTHORIZED).
       headers:
@@ -420,14 +459,15 @@ components:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
     NotFound:
-      description: TRIP_NOT_FOUND, no such trip or one the caller may not see.
+      description: TRIP_NOT_FOUND, no such trip or one the caller may not see. SUMMARY_NOT_READY, the trip has no summary yet.
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
     Conflict:
       description: |
         ILLEGAL_TRANSITION (not possible in the trip's stage, also when another driver accepted it first),
-        CONCURRENT_MODIFICATION (changed at the same time; read it again), or DRIVER_ALREADY_ON_TRIP.
+        CONCURRENT_MODIFICATION (changed at the same time; read it again), DRIVER_ALREADY_ON_TRIP, or TRIP_NOT_ENDED
+        (the request needs a trip that has ended).
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
@@ -497,6 +537,66 @@ components:
         route:
           $ref: '#/components/schemas/TripRoute'
           description: The road route from pickup to destination. Sent by POST /trips and GET /trips/{id} only.
+    TripSummary:
+      type: object
+      required: [tripId, ride, offRouteCount, rerouteCount, rejected, approximate, computedAt]
+      additionalProperties: false
+      properties:
+        tripId: { type: string, format: uuid }
+        ride:
+          $ref: '#/components/schemas/LegSummary'
+          description: From the start of the ride to its end.
+        approach:
+          $ref: '#/components/schemas/LegSummary'
+          description: From accept to arrival at the pickup. Only for the driver and admins.
+        plannedDistanceM:
+          description: The first planned pickup-to-destination route. Absent when the trip has none.
+          type: number
+          minimum: 0
+        offRouteCount:
+          description: How often the driver left the route.
+          type: integer
+          minimum: 0
+        rerouteCount:
+          description: How often a new route was planned after that. Lower than offRouteCount when a re-plan failed.
+          type: integer
+          minimum: 0
+        rejected:
+          description: Rejected fixes during the ride, by reason (for example POOR_ACCURACY).
+          type: object
+          additionalProperties: { type: integer, minimum: 1 }
+        approximate:
+          description: True for a trip stored before stage times existed; the ride then covers the trip's whole life.
+          type: boolean
+        computedAt: { type: string, format: date-time }
+    LegSummary:
+      type: object
+      required: [distanceM, durationS, movingTimeS, avgSpeedMps, maxSpeedMps, pointCount, startedAt, endedAt]
+      additionalProperties: false
+      properties:
+        distanceM:
+          description: Along the recorded points. A gap over 60 s between two points adds nothing.
+          type: number
+          minimum: 0
+        durationS:
+          description: The whole leg, stops included.
+          type: integer
+          minimum: 0
+        movingTimeS:
+          description: Only the time spent moving at 1 m/s or faster.
+          type: integer
+          minimum: 0
+        avgSpeedMps:
+          description: distanceM over movingTimeS; 0 when the driver never moved.
+          type: number
+          minimum: 0
+        maxSpeedMps:
+          description: The highest median of three consecutive speeds, so one GPS spike is never the maximum.
+          type: number
+          minimum: 0
+        pointCount: { type: integer, minimum: 0 }
+        startedAt: { type: string, format: date-time }
+        endedAt: { type: string, format: date-time }
     TripRoute:
       type: object
       required: [polyline, distanceM, durationS]

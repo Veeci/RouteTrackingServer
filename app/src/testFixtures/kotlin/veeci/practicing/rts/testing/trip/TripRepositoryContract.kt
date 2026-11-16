@@ -11,6 +11,7 @@ import veeci.practicing.rts.testing.tracking.DirectTransactionRunner
 import veeci.practicing.rts.testing.trip.TripSamples.T0
 import veeci.practicing.rts.trip.application.port.out.TripCursor
 import veeci.practicing.rts.trip.application.port.out.TripRepository
+import veeci.practicing.rts.trip.domain.StageTimes
 import veeci.practicing.rts.trip.domain.Trip
 import veeci.practicing.rts.trip.domain.TripAction
 import veeci.practicing.rts.trip.domain.TripError
@@ -32,7 +33,7 @@ abstract class TripRepositoryContract {
 
     protected suspend fun <T> tx(block: suspend () -> T): T = transactions.inTransaction(block)
 
-    private fun Trip.values() = listOf(id, guestId, driverId, pickup, destination, status, createdAt, updatedAt, version)
+    private fun Trip.values() = listOf(id, guestId, driverId, pickup, destination, status, createdAt, updatedAt, version, stages)
 
     @Test
     fun `a trip reads back exactly as it was inserted`() =
@@ -61,6 +62,7 @@ abstract class TripRepositoryContract {
             stored.driverId shouldBe driver.userId
             stored.updatedAt shouldBe T0 + 1.minutes
             stored.version shouldBe 2
+            stored.stages shouldBe StageTimes(acceptedAt = T0 + 1.minutes)
         }
 
     @Test

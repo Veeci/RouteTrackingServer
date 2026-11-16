@@ -51,6 +51,7 @@ import veeci.practicing.rts.routing.routingModule
 import veeci.practicing.rts.tracking.adapter.inbound.ws.driverSocket
 import veeci.practicing.rts.tracking.trackingModule
 import veeci.practicing.rts.trip.adapter.inbound.web.tripRoutes
+import veeci.practicing.rts.trip.adapter.inbound.web.tripSummaryRoutes
 import veeci.practicing.rts.trip.tripModule
 import kotlin.system.exitProcess
 
@@ -114,6 +115,7 @@ fun Application.module(
             driverSocket(get())
             guestSocket(get())
             tripRoutes(get(), get())
+            tripSummaryRoutes(get())
             routeRoutes(get())
             adminCommandRoutes(get())
         }

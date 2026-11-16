@@ -120,6 +120,16 @@ is closed, and sign-up and login for real users.
 | 51 | When the route to the pickup is planned | From the driver's first fix after accepting, not at the moment of accept: the server has no position before that. A failed plan (driver far from any road) is tried again every 30 s | Built P7 (7c) |
 | 52 | What the driver's app gets | The same `route_updated` as the guest: the route to the pickup, the trip route when the ride starts, and each re-route. It is sent again after every reconnect, so the app can draw it and later give directions | Built P7 (7c) |
 
+## Phase 8 (8a built, decided 2026-11-16)
+
+| # | Problem | What will happen | Source |
+|---|---|---|---|
+| 53 | Summary of a cancelled trip | None. The trip shows in the history with its stage times only | Plan |
+| 54 | Who sees where the driver drove before the pickup | Only the driver and admins. The guest sees the ride leg only | Plan |
+| 55 | A phone offline for a while during the ride | A gap over 60 s between points adds no distance and no moving time | Plan |
+| 56 | History and exports of a running trip | Refused with 409 TRIP_NOT_ENDED. The live socket covers a running trip | Plan |
+| 57 | A batch from the ride that arrives after "complete" | Stored, but missing from the summary, which is computed at completion. An admin can compute it again. Known limit | Built P8 (8a) |
+
 ## Open questions, most important first
 
 1. Login: who issues tokens in production, and how do guests and drivers sign up (row 27)?

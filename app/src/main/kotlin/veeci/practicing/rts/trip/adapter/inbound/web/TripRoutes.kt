@@ -91,7 +91,7 @@ private suspend fun ApplicationCall.respondTrip(trip: TripSnapshot) {
     respond(TripResponse.of(trip))
 }
 
-private fun ApplicationCall.tripId(): TripId {
+internal fun ApplicationCall.tripId(): TripId {
     val raw = parameters["id"]
     val uuid = raw?.let { runCatching { UUID.fromString(it) }.getOrNull() }
     return TripId(uuid ?: throw RequestInvalidException(listOf(FieldError("id", "must be a UUID"))))

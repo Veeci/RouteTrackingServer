@@ -15,6 +15,7 @@ import veeci.practicing.rts.trip.domain.ArrivalState
 import veeci.practicing.rts.trip.domain.BatteryState
 import veeci.practicing.rts.trip.domain.PresenceState
 import veeci.practicing.rts.trip.domain.RouteKind
+import veeci.practicing.rts.trip.domain.StageTimes
 import veeci.practicing.rts.trip.domain.Trip
 import veeci.practicing.rts.trip.domain.TripError
 import veeci.practicing.rts.trip.domain.TripId
@@ -41,8 +42,9 @@ class InMemoryTripRepository : TripRepository {
         val createdAt: Instant,
         val updatedAt: Instant,
         val version: Long,
+        val stages: StageTimes,
     ) {
-        fun toTrip() = Trip.restore(id, guestId, driverId, pickup, destination, status, createdAt, updatedAt, version)
+        fun toTrip() = Trip.restore(id, guestId, driverId, pickup, destination, status, createdAt, updatedAt, version, stages)
     }
 
     private val mutex = Mutex()
@@ -95,7 +97,7 @@ class InMemoryTripRepository : TripRepository {
     // compares two signed longs instead, so "8b57..." would come before "1d74...".
     private fun TripId.sortKey(): String = value.toString()
 
-    private fun Trip.toRow(version: Long) = Row(id, guestId, driverId, pickup, destination, status, createdAt, updatedAt, version)
+    private fun Trip.toRow(version: Long) = Row(id, guestId, driverId, pickup, destination, status, createdAt, updatedAt, version, stages)
 }
 
 /** Keeps the events and moments, in order, for assertions. */
@@ -124,6 +126,8 @@ class InMemoryTripMomentRepository : TripMomentRepository {
     override suspend fun append(moment: TripMoment) {
         moments += moment
     }
+
+    override suspend fun countOffRoute(trip: TripId): Int = moments.count { it is TripMoment.OffRoute && it.tripId == trip.value }
 }
 
 /** Rule state per trip. No locking: the unit tests run one batch at a time. */
@@ -181,4 +185,6 @@ class InMemoryTripRouteRepository : TripRouteRepository {
         tripId: TripId,
         kind: RouteKind,
     ): TripRoute? = routes.filter { it.tripId == tripId && it.kind == kind }.maxByOrNull { it.version }
+
+    override suspend fun findAll(tripId: TripId): List<TripRoute> = routes.filter { it.tripId == tripId }.sortedBy { it.createdAt }
 }

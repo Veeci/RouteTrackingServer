@@ -1,11 +1,15 @@
 package veeci.practicing.rts.trip
 
 import io.kotest.matchers.shouldBe
+import io.ktor.client.request.bearerAuth
+import io.ktor.client.request.get
 import io.ktor.client.statement.HttpResponse
+import io.ktor.http.HttpStatusCode
 import io.ktor.server.routing.Routing
 import io.ktor.server.routing.RoutingNode
 import io.ktor.server.routing.getAllRoutes
 import io.ktor.server.testing.ApplicationTestBuilder
+import kotlinx.coroutines.delay
 import org.junit.jupiter.api.DynamicTest
 import org.junit.jupiter.api.DynamicTest.dynamicTest
 import org.junit.jupiter.api.TestFactory
@@ -54,6 +58,8 @@ class AuthorizationMatrixIT {
             row("POST /api/v1/trips/{id}/start", listOf("accept", "arrive"), 401, 403, 404, 200, 404, 403),
             row("POST /api/v1/trips/{id}/complete", listOf("accept", "arrive", "start"), 401, 403, 404, 200, 404, 403),
             row("POST /api/v1/trips/{id}/cancel", listOf("accept"), 401, 200, 404, 200, 404, 403),
+            // Computed after the completion commits: call() waits until the summary exists.
+            row("GET /api/v1/trips/{id}/summary", listOf("accept", "arrive", "start", "complete"), 401, 200, 404, 200, 404, 200),
         )
 
     @TestFactory
@@ -98,12 +104,30 @@ class AuthorizationMatrixIT {
                 ADMIN -> TestTokens.admin()
             }
         val (method, path) = row.route.split(" ")
+        if (path.endsWith(SUMMARY)) awaitSummary(trip)
         return when {
+            path.endsWith(SUMMARY) -> client.get("${TripApi.TRIPS}/$trip$SUMMARY") { token?.let(::bearerAuth) }
             method == "POST" && path == TripApi.TRIPS -> api.request(token)
             method == "GET" && path == TripApi.TRIPS -> api.listOpen(token)
             method == "GET" -> api.get(trip, token)
             else -> api.act(trip, path.substringAfterLast("/"), token)
         }
+    }
+
+    /** Waits until the outbox relay has stored the trip's summary; an admin may always read it. */
+    private suspend fun ApplicationTestBuilder.awaitSummary(trip: String) {
+        val admin = TestTokens.admin()
+        val end = System.currentTimeMillis() + SUMMARY_WAIT_MS
+        while (client.get("${TripApi.TRIPS}/$trip$SUMMARY") { bearerAuth(admin) }.status != HttpStatusCode.OK) {
+            check(System.currentTimeMillis() < end) { "No summary for trip $trip" }
+            delay(POLL_MS)
+        }
+    }
+
+    private companion object {
+        const val SUMMARY = "/summary"
+        const val SUMMARY_WAIT_MS = 10_000L
+        const val POLL_MS = 50L
     }
 
     /** `GET /api/v1/trips/{id}` for a route that ends in an HTTP method selector; null for other nodes. */

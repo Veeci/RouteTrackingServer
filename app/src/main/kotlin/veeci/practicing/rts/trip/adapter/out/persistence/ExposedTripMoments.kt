@@ -55,6 +55,13 @@ class ExposedTripMomentRepository : TripMomentRepository {
             it[at] = moment.at
         }
     }
+
+    override suspend fun countOffRoute(trip: TripId): Int =
+        TripMomentsTable
+            .selectAll()
+            .where { (TripMomentsTable.tripId eq trip.value) and (TripMomentsTable.kind eq TripMomentRaisedV1.KIND_OFF_ROUTE) }
+            .count()
+            .toInt()
 }
 
 /**

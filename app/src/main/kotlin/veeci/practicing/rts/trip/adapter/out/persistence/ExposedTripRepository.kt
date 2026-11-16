@@ -10,6 +10,7 @@ import org.jetbrains.exposed.v1.core.greater
 import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.core.java.javaUUID
 import org.jetbrains.exposed.v1.core.or
+import org.jetbrains.exposed.v1.core.statements.UpdateBuilder
 import org.jetbrains.exposed.v1.datetime.timestamp
 import org.jetbrains.exposed.v1.exceptions.ExposedSQLException
 import org.jetbrains.exposed.v1.jdbc.insert
@@ -20,12 +21,13 @@ import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.shared.geo.GeoPoint
 import veeci.practicing.rts.trip.application.port.out.TripCursor
 import veeci.practicing.rts.trip.application.port.out.TripRepository
+import veeci.practicing.rts.trip.domain.StageTimes
 import veeci.practicing.rts.trip.domain.Trip
 import veeci.practicing.rts.trip.domain.TripError
 import veeci.practicing.rts.trip.domain.TripId
 import veeci.practicing.rts.trip.domain.event.TripStatus
 
-/** The `trips` table (migration V6). */
+/** The `trips` table (migrations V6 and V13). */
 internal object TripsTable : Table("trips") {
     val id = javaUUID("id")
     val guestId = javaUUID("guest_id")
@@ -38,6 +40,10 @@ internal object TripsTable : Table("trips") {
     val version = long("version")
     val createdAt = timestamp("created_at")
     val updatedAt = timestamp("updated_at")
+    val acceptedAt = timestamp("accepted_at").nullable()
+    val arrivedAt = timestamp("arrived_at").nullable()
+    val startedAt = timestamp("started_at").nullable()
+    val endedAt = timestamp("ended_at").nullable()
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -56,6 +62,7 @@ class ExposedTripRepository : TripRepository {
             it[version] = trip.version
             it[createdAt] = trip.createdAt
             it[updatedAt] = trip.updatedAt
+            it.stages(trip.stages)
         }
     }
 
@@ -98,6 +105,7 @@ class ExposedTripRepository : TripRepository {
                 it[driverId] = trip.driverId?.value
                 it[status] = trip.status.name
                 it[updatedAt] = trip.updatedAt
+                it.stages(trip.stages)
                 it[version] = trip.version + 1
             } == 1
         } catch (e: ExposedSQLException) {
@@ -115,6 +123,13 @@ class ExposedTripRepository : TripRepository {
             (TripsTable.createdAt greater createdAt) or ((TripsTable.createdAt eq createdAt) and (TripsTable.id greater id.value))
         }
 
+    private fun UpdateBuilder<*>.stages(stages: StageTimes) {
+        this[TripsTable.acceptedAt] = stages.acceptedAt
+        this[TripsTable.arrivedAt] = stages.arrivedAt
+        this[TripsTable.startedAt] = stages.startedAt
+        this[TripsTable.endedAt] = stages.endedAt
+    }
+
     private fun ResultRow.toTrip() =
         Trip.restore(
             id = TripId(this[TripsTable.id]),
@@ -126,6 +141,13 @@ class ExposedTripRepository : TripRepository {
             createdAt = this[TripsTable.createdAt],
             updatedAt = this[TripsTable.updatedAt],
             version = this[TripsTable.version],
+            stages =
+                StageTimes(
+                    this[TripsTable.acceptedAt],
+                    this[TripsTable.arrivedAt],
+                    this[TripsTable.startedAt],
+                    this[TripsTable.endedAt],
+                ),
         )
 
     private companion object {
