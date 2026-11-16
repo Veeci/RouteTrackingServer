@@ -1,22 +1,23 @@
 package veeci.practicing.rts.tracking.application.api
 
-import veeci.practicing.rts.protocol.Command
+import veeci.practicing.rts.protocol.ServerMessage
 import veeci.practicing.rts.shared.UserId
 import java.util.UUID
 
 /**
- * The driver sockets of this instance, as other contexts may use them (phase 5). Device control sends commands
- * through it and registers for "a driver connected" and "a device acked a command". Tracking knows nothing of
- * device control: the dependency goes one way only.
+ * The driver sockets of this instance, as other contexts may use them. Device control sends commands through it
+ * (phase 5) and the trip context sends routes (phase 7); both register for "a driver connected". Tracking knows
+ * nothing of either: the dependency goes one way only.
  */
 interface DriverLink {
     /**
-     * Sends [command] to every socket of [driver] on this instance. False when the driver has none here (offline,
-     * or connected to another instance): the command then waits for the driver's next `welcome`.
+     * Sends [message] (a `command`, a `route_updated`) to every socket of [driver] on this instance. False when the
+     * driver has none here (offline, or connected to another instance): the sender then resends it after the
+     * driver's next `welcome`.
      */
     suspend fun send(
         driver: UserId,
-        command: Command,
+        message: ServerMessage,
     ): Boolean
 
     /** [listener] runs right after a driver's `welcome`, before the socket handles its next message. */

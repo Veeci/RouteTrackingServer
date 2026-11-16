@@ -22,6 +22,8 @@ import veeci.practicing.rts.trip.domain.TripAction
 import veeci.practicing.rts.trip.domain.TripError
 import veeci.practicing.rts.trip.domain.TripId
 import veeci.practicing.rts.trip.domain.TripRoute
+import veeci.practicing.rts.trip.domain.event.RouteChangeReason
+import veeci.practicing.rts.trip.domain.event.TripRouteChanged
 import veeci.practicing.rts.trip.domain.event.TripStatus
 import java.time.Clock
 import java.time.temporal.ChronoUnit
@@ -145,6 +147,12 @@ class TripService(
                 throw DomainException(TripError.CONCURRENT_MODIFICATION, "Someone changed this trip at the same time; read it again")
             }
             publish(trip)
+            if (command.action == TripAction.START) {
+                // The TRIP route takes over from the APPROACH route: guest and driver draw it from now on.
+                routes.findLatest(trip.id, RouteKind.TRIP)?.let {
+                    outbox.add(TripRouteChanged(it, trip.guestId.value, trip.driverId?.value, RouteChangeReason.STATUS_CHANGED))
+                }
+            }
             trip.snapshot(version = trip.version + 1)
         }
 

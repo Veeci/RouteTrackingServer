@@ -345,11 +345,14 @@ class GuestSocketIT {
         }
     }
 
-    /** Status events from earlier changes may arrive first (the bus replays the latest update); skip them. */
+    /**
+     * Status events and the start's `route_updated` from earlier changes may arrive first (the relay delivers them
+     * after the subscribe, or the bus replays the latest update); skip them.
+     */
     private suspend fun DefaultClientWebSocketSession.receiveSkippingEvents(): Any {
         while (true) {
             val message = receiveGuest()
-            if (message !is TripEvent) return message
+            if (message !is TripEvent && message !is RouteUpdated) return message
         }
     }
 
@@ -427,7 +430,7 @@ class GuestSocketIT {
     private suspend fun DefaultClientWebSocketSession.receiveDriver(): ServerMessage {
         while (true) {
             val message = ProtocolJson.decodeFromString(ServerMessage.serializer(), (incoming.receive() as Frame.Text).readText())
-            if (message !is Command) return message
+            if (message !is Command && message !is RouteUpdated) return message
         }
     }
 

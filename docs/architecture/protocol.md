@@ -154,6 +154,19 @@ client → command_ack  { commandId, result: applied | rejected, reason? }
 - No reply to `command_ack`. An unknown `commandId` gets `error{COMMAND_NOT_FOUND}`; a malformed one or another
   `result` gets `error{INVALID_MESSAGE}`. The session stays open.
 
+### Routes (phase 7)
+
+```
+server → route_updated  { tripId, kind: TRIP | APPROACH, routeVersion, polyline, distanceM, durationS, reason: initial | status_changed | off_route }
+```
+
+- The route the driver follows from now on, the same message the guest gets. It comes when the APPROACH route is
+  planned (`initial`), when the ride starts and the TRIP route takes over (`status_changed`), after a re-route
+  (`off_route`), and right after every `welcome` while the driver has an active trip with a route (`initial` or
+  `off_route`, why that version exists).
+- It is not acked. The resend after each `welcome` is how a device that was offline catches up; the highest
+  `routeVersion` of a kind wins.
+
 ## Guest session
 
 ```
@@ -162,7 +175,7 @@ server → subscribed       { trip: { tripId, status, pickup, destination, drive
 server → driver_position  { tripId, lat, lng, bearingDeg?, speedMps?, recordedAt }
 server → trip_progress    { tripId, target: PICKUP | DESTINATION, remainingM, etaS, basis: STRAIGHT_LINE | ROUTE, routeVersion? }
 server → trip_event       { tripId, event: status_changed | driver_arriving | driver_low_battery | driver_stale | driver_back | off_route, status, at, remainingM?, levelPercent?, lastSeenAt? }
-server → route_updated    { tripId, kind: TRIP | APPROACH, routeVersion, polyline, distanceM, durationS, reason: off_route }
+server → route_updated    { tripId, kind: TRIP | APPROACH, routeVersion, polyline, distanceM, durationS, reason: initial | status_changed | off_route }
 ```
 
 - One socket watches one trip. A second `subscribe` on the same socket gets `error{INVALID_MESSAGE}`.
@@ -171,8 +184,9 @@ server → route_updated    { tripId, kind: TRIP | APPROACH, routeVersion, polyl
 - `subscribed` carries the trip as it is now. Live messages follow while the trip runs.
 - `subscribed.trip.route` (phase 7) is the route the driver follows now: `{ kind: TRIP | APPROACH, routeVersion,
   polyline, distanceM, durationS }`. TRIP (pickup to destination) during the ride, APPROACH (driver to pickup)
-  before it. It is absent when there is none; until phase 7c plans the APPROACH route, that is the whole time
-  before the ride. `polyline` is a Google Encoded Polyline, precision 5 (`PolyUtil.decode` on Android).
+  before it. It is absent when there is none: before a driver accepts, and after accept until the server has
+  planned the APPROACH route from the driver's first fix. `polyline` is a Google Encoded Polyline, precision 5
+  (`PolyUtil.decode` on Android).
 - `driver_position` and `trip_progress` are "latest wins": they are not stored, and a client that reads too
   slowly skips old ones (the server keeps at most 64 per trip). The server sends each position before the
   progress computed from it.
@@ -197,10 +211,12 @@ server → route_updated    { tripId, kind: TRIP | APPROACH, routeVersion, polyl
 - `trip_event` with `event: off_route` (phase 7) says the driver left the planned route: 3 fixes in a row more
   than 50 m beside it, each with an accuracy of 30 m or better. A fix within 30 m resets the count. The server
   then plans again from the driver's position, at most once every 30 s per trip.
-- `route_updated` (phase 7) follows `off_route` when the new plan succeeded. Draw its `polyline` instead of the
-  old line. Later `trip_progress` messages carry its `routeVersion`. When no route could be planned, only
-  `off_route` comes and the old route stays. `reason` may get new values, so a client ignores those it does not
-  know.
+- `route_updated` (phase 7) says the driver follows a new route: draw its `polyline` instead of the old line.
+  Later `trip_progress` messages carry its `routeVersion`. `reason` says why: `initial` (the APPROACH route,
+  planned from the driver's first fix after accept), `status_changed` (the ride started; the TRIP route takes
+  over) or `off_route` (after an `off_route` event). When no route could be planned after `off_route`, no
+  `route_updated` comes and the old route stays. `reason` may get new values, so a client ignores those it does
+  not know.
 - When the arrival rules see the driver at the pickup, the server moves the trip to ARRIVED itself, and the guest
   gets the usual `status_changed` with `status: ARRIVED`.
 - After a final stage (COMPLETED, CANCELLED) the server sends that `trip_event` and closes the socket with 1000.

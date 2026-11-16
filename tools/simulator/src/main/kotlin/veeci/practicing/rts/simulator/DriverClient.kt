@@ -21,6 +21,7 @@ import veeci.practicing.rts.protocol.FixDto
 import veeci.practicing.rts.protocol.Hello
 import veeci.practicing.rts.protocol.PROTOCOL_VERSION
 import veeci.practicing.rts.protocol.ProtocolJson
+import veeci.practicing.rts.protocol.RouteUpdated
 import veeci.practicing.rts.protocol.ServerMessage
 import veeci.practicing.rts.protocol.Welcome
 import java.util.UUID
@@ -144,8 +145,8 @@ class DriverClient(
                         error("Unexpected welcome")
                     }
 
-                    is Command -> {
-                        error("receiveSkippingCommands returned a command")
+                    is Command, is RouteUpdated -> {
+                        error("receiveSkippingCommands returned a ${reply::class.simpleName}")
                     }
                 }
             }
@@ -155,12 +156,17 @@ class DriverClient(
     private suspend fun DefaultClientWebSocketSession.sendMessage(message: ClientMessage) =
         send(Frame.Text(ProtocolJson.encodeToString(ClientMessage.serializer(), message)))
 
-    /** The next message that is not a `command`; commands in between are answered with `command_ack`. */
+    /**
+     * The next message that is neither a `command` nor a `route_updated`. Commands in between are answered with
+     * `command_ack`; routes go to [BatchHooks.routeUpdated].
+     */
     private suspend fun DefaultClientWebSocketSession.receiveSkippingCommands(): ServerMessage {
         while (true) {
-            val message = receiveMessage()
-            if (message !is Command) return message
-            sendMessage(CommandAck(message.commandId, hooks.answer(message)))
+            when (val message = receiveMessage()) {
+                is Command -> sendMessage(CommandAck(message.commandId, hooks.answer(message)))
+                is RouteUpdated -> hooks.routeUpdated(message)
+                else -> return message
+            }
         }
     }
 
@@ -188,6 +194,9 @@ interface BatchHooks {
 
     /** The answer to a server [command]: applied (the default) or rejected. */
     fun answer(command: Command): String = CommandAck.APPLIED
+
+    /** The server sent the route the driver follows now (phase 7). */
+    fun routeUpdated(route: RouteUpdated) = Unit
 
     companion object {
         /** Only batches, no heartbeats and no silences: the behaviour before phase 4. */

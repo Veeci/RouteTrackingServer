@@ -120,6 +120,7 @@ data class TripEvent(
 /**
  * The driver follows a new route from now on (phase 7): draw it instead of the old one. `trip_progress` messages
  * with this [routeVersion] measure along it. [reason] says why; a client ignores values it does not know.
+ * Both sockets carry it: the guest's, and the driver's (where it is a [ServerMessage]).
  */
 @Serializable
 @SerialName("route_updated")
@@ -133,8 +134,11 @@ data class RouteUpdated(
     val distanceM: Double,
     val durationS: Double,
     val reason: String,
-) : GuestServerMessage {
+) : GuestServerMessage,
+    ServerMessage {
     companion object {
+        const val INITIAL = "initial"
+        const val STATUS_CHANGED = "status_changed"
         const val OFF_ROUTE = "off_route"
     }
 }

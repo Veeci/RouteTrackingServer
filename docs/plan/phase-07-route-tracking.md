@@ -101,9 +101,9 @@ The current route = highest version per kind.
 - [x] T7.3 (with the route's average speed) Route-based ETA with correction factor.
 - [x] T7.4 Off-route rule (hysteresis + accuracy gate) and `TripRouteService.reroute` with cooldown.
 - [x] T7.5 Replace straight-line `TrackTripProgress` path when a route exists; keep fallback.
-- [ ] T7.6 (7b: V12 and versioning done; the switch on `start` is 7c) V8 migration, route versioning; approach route switches to trip route on `start`.
-- [ ] T7.7 (7b: guest done; driver in 7c) `route_updated` on guest and driver sockets.
-- [ ] T7.8 Fixtures: `detour_off_route.gpx`, `u_turn.gpx`, `loop_route.gpx`, `parallel_street.gpx` (drawn against `tiny_grid`).
+- [x] T7.6 (V12) V8 migration, route versioning; approach route switches to trip route on `start`.
+- [x] T7.7 `route_updated` on guest and driver sockets.
+- [x] T7.8 (tracks made in test code; simulator `--detour-at`) Fixtures: `detour_off_route.gpx`, `u_turn.gpx`, `loop_route.gpx`, `parallel_street.gpx` (drawn against `tiny_grid`).
 
 ## Test plan
 
@@ -231,3 +231,21 @@ Tests: TC-7-OFF-01 to 04 (plus unknown accuracy), TC-7-RR-01 to 04 and 06 (06 ag
 (`reason` and `insertIfAbsent` against Postgres), TC-7-WS-01 for the guest (`off_route`, then `route_updated`
 with version 2, on Netty with the test grid), the worker (order, a failing item, a full queue, stop), and golden
 files `route_updated` and `trip_event_off_route`.
+
+## As built: slice 7c (approach route, driver routes, end to end)
+
+| Plan | As built | Why |
+|---|---|---|
+| APPROACH route on accept, from tracking's last fix | Planned on the driver's first fix after accept: progress sends a `RerouteRequest` with `reason = INITIAL`, base version 0, to the pickup, through the same `RerouteWorker`. A failed plan is asked again after the 30 s cooldown | No new tracking query, and accept stays fast. The fix that arrives is the driver's position |
+| `RouteUpdated(reason = status_changed)` on `start` | `TripService.act(START)` adds `TripRouteChanged` for the newest TRIP route, `reason = STATUS_CHANGED`, in the action's transaction. Progress switches by itself, because `RouteKind.followedIn(IN_PROGRESS)` is TRIP | One transaction: the status and the route change commit together |
+| The tracking socket adapter pushes `route_updated` | `RouteUpdated` is now both a guest and a driver message. `DriverLink.send` takes any `ServerMessage`. `DriverRoutePush` (trip, adapter out) sends each `TripRouteChanged` (through `DriverRouteListener`) and resends the current route after every `welcome` | Tracking still knows nothing of trips. A route is not acked; the resend on connect is how an offline device catches up |
+| `reason: "off_route" \| "status_changed"` | Domain `RouteChangeReason`: INITIAL, STATUS_CHANGED, OFF_ROUTE; lower case on the wire | The APPROACH route needs its own reason |
+| Fixtures `detour_off_route.gpx` and others, E2E with the simulator | `RouteTrackingIT` on Netty: a driver socket sends fixes made along the routes the server planned (`track`), a guest socket records what it sees. The simulator gets `--detour-at S:D:M` (`Detour`, ramped so no step passes the 70 m/s jump limit) and prints `route_updated` | The tests follow whatever route the planner returns on the test grid, so they need no hand-drawn GPX. The simulator flag is for a manual demo |
+
+Tests: TC-7-E2E-01 (one detour gives exactly one `off_route`, both sides get version 2, every guest `trip_progress`
+has basis ROUTE, the last one under 50 m on version 2), TC-7-E2E-02 (a 45 s gap gives no `off_route`), TC-7-WS-01
+driver side (the route after `welcome`, version 2 after the detour), TC-7-RR-05 (`TripServiceTest`), the APPROACH
+route end to end (initial, then progress on it, then `status_changed` on start), the initial request and its
+cooldown (`TripProgressServiceTest`), the initial plan and `currentRouteOf` (`TripRouteServiceTest`), and `DetourTest`.
+
+Not done: TC-7-LOAD-01 (200 drivers with matching on) needs the load-test setup.
