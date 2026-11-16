@@ -31,6 +31,7 @@ import veeci.practicing.rts.trip.domain.Trip
 import veeci.practicing.rts.trip.domain.TripAction
 import veeci.practicing.rts.trip.domain.TripError
 import veeci.practicing.rts.trip.domain.TripId
+import veeci.practicing.rts.trip.domain.event.RouteChangeReason
 import veeci.practicing.rts.trip.domain.event.TripStatus
 import java.time.Clock
 import java.time.ZoneOffset
@@ -244,5 +245,40 @@ class TripServiceTest {
                 .single()
                 .route
                 .shouldBeNull()
+        }
+
+    @Test
+    fun `the current route is none before the ride without an approach route, and the trip route during the ride`() =
+        runTest {
+            val trip = requested()
+            val id = TripId(trip.id)
+            service.get(id, guest).currentRoute.shouldBeNull() // REQUESTED: nobody drives yet
+
+            act(id, TripAction.ACCEPT, driver)
+            service.get(id, guest).currentRoute.shouldBeNull() // no APPROACH route until phase 7c plans one
+
+            act(id, TripAction.ARRIVE, driver)
+            act(id, TripAction.START, driver)
+            val during = service.get(id, guest)
+            during.currentRoute shouldBe during.route
+            during.currentRoute.shouldNotBeNull().kind shouldBe "TRIP"
+            during.currentRoute.version shouldBe 1
+        }
+
+    @Test
+    fun `TC-7-RR-05 starting the ride hands guest and driver the trip route, reason status_changed`() =
+        runTest {
+            val trip = requested()
+            val id = TripId(trip.id)
+            act(id, TripAction.ACCEPT, driver)
+            act(id, TripAction.ARRIVE, driver)
+            outbox.routeChanges.shouldBeEmpty()
+
+            act(id, TripAction.START, driver)
+
+            val change = outbox.routeChanges.single()
+            change.reason shouldBe RouteChangeReason.STATUS_CHANGED
+            change.route shouldBe routes.findLatest(id, RouteKind.TRIP)
+            change.driverId shouldBe driver.userId.value
         }
 }

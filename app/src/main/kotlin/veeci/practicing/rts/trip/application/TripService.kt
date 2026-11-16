@@ -22,6 +22,8 @@ import veeci.practicing.rts.trip.domain.TripAction
 import veeci.practicing.rts.trip.domain.TripError
 import veeci.practicing.rts.trip.domain.TripId
 import veeci.practicing.rts.trip.domain.TripRoute
+import veeci.practicing.rts.trip.domain.event.RouteChangeReason
+import veeci.practicing.rts.trip.domain.event.TripRouteChanged
 import veeci.practicing.rts.trip.domain.event.TripStatus
 import java.time.Clock
 import java.time.temporal.ChronoUnit
@@ -90,7 +92,14 @@ class TripService(
     ): TripSnapshot =
         transactions.inTransaction {
             val trip = load(id, actor)
-            trip.snapshot(route = routes.findLatest(trip.id, RouteKind.TRIP))
+            val route = routes.findLatest(trip.id, RouteKind.TRIP)
+            val current =
+                when (val kind = RouteKind.followedIn(trip.status)) {
+                    null -> null
+                    RouteKind.TRIP -> route
+                    else -> routes.findLatest(trip.id, kind)
+                }
+            trip.snapshot(route = route, currentRoute = current)
         }
 
     override suspend fun snapshotFor(
@@ -138,6 +147,12 @@ class TripService(
                 throw DomainException(TripError.CONCURRENT_MODIFICATION, "Someone changed this trip at the same time; read it again")
             }
             publish(trip)
+            if (command.action == TripAction.START) {
+                // The TRIP route takes over from the APPROACH route: guest and driver draw it from now on.
+                routes.findLatest(trip.id, RouteKind.TRIP)?.let {
+                    outbox.add(TripRouteChanged(it, trip.guestId.value, trip.driverId?.value, RouteChangeReason.STATUS_CHANGED))
+                }
+            }
             trip.snapshot(version = trip.version + 1)
         }
 
@@ -164,6 +179,7 @@ private fun newTripId() = TripId(Uuid.generateV7().toJavaUuid())
 fun Trip.snapshot(
     version: Long = this.version,
     route: TripRoute? = null,
+    currentRoute: TripRoute? = null,
 ) = TripSnapshot(
     id.value,
     guestId.value,
@@ -174,8 +190,11 @@ fun Trip.snapshot(
     createdAt,
     updatedAt,
     version,
-    route?.let { RouteSummary(it.polyline, it.distanceM, it.durationS) },
+    route?.summary(),
+    currentRoute?.summary(),
 )
+
+private fun TripRoute.summary() = RouteSummary(kind.name, version, polyline, distanceM, durationS)
 
 private fun PlannedRoute.toTripRoute(
     tripId: TripId,

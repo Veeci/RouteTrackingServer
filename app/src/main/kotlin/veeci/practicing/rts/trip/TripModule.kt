@@ -2,15 +2,19 @@ package veeci.practicing.rts.trip
 
 import org.koin.core.module.Module
 import org.koin.dsl.bind
+import org.koin.dsl.binds
 import org.koin.dsl.module
 import veeci.practicing.rts.platform.config.EventsConfig
 import veeci.practicing.rts.platform.events.OutboxEventHandler
+import veeci.practicing.rts.platform.jobs.BackgroundWorker
 import veeci.practicing.rts.platform.jobs.ScheduledJob
 import veeci.practicing.rts.trip.adapter.inbound.event.ArrivalListener
 import veeci.practicing.rts.trip.adapter.inbound.event.BatteryListener
+import veeci.practicing.rts.trip.adapter.inbound.event.DriverRouteListener
 import veeci.practicing.rts.trip.adapter.inbound.event.FixesAcceptedListener
 import veeci.practicing.rts.trip.adapter.inbound.event.TripFinishedListener
 import veeci.practicing.rts.trip.adapter.inbound.job.StaleDriverJob
+import veeci.practicing.rts.trip.adapter.out.driver.DriverRoutePush
 import veeci.practicing.rts.trip.adapter.out.live.LiveProgressPublisher
 import veeci.practicing.rts.trip.adapter.out.memory.InMemoryProgressStateStore
 import veeci.practicing.rts.trip.adapter.out.persistence.ExposedRuleStateStore
@@ -18,8 +22,12 @@ import veeci.practicing.rts.trip.adapter.out.persistence.ExposedTripEventOutbox
 import veeci.practicing.rts.trip.adapter.out.persistence.ExposedTripMomentRepository
 import veeci.practicing.rts.trip.adapter.out.persistence.ExposedTripRepository
 import veeci.practicing.rts.trip.adapter.out.persistence.ExposedTripRouteRepository
+import veeci.practicing.rts.trip.application.RerouteHandler
+import veeci.practicing.rts.trip.application.RerouteWorker
+import veeci.practicing.rts.trip.application.Rerouter
 import veeci.practicing.rts.trip.application.TripEventService
 import veeci.practicing.rts.trip.application.TripProgressService
+import veeci.practicing.rts.trip.application.TripRouteService
 import veeci.practicing.rts.trip.application.TripService
 import veeci.practicing.rts.trip.application.api.TripQuery
 import veeci.practicing.rts.trip.application.port.out.ProgressPublisher
@@ -45,7 +53,15 @@ fun tripModule(events: EventsConfig): Module =
 
         single<ProgressStateStore> { InMemoryProgressStateStore() }
         single<ProgressPublisher> { LiveProgressPublisher(get()) }
-        single { TripProgressService(get(), get(), get(), get()) }
+        single { TripProgressService(get(), get(), get(), get(), get(), get()) }
+
+        // Phase 7b: re-routes, planned by a worker outside the relay's transaction.
+        single { TripRouteService(get(), get(), get(), get(), get(), get(), get()) } bind RerouteHandler::class
+        single { RerouteWorker(get()) } binds arrayOf(Rerouter::class, BackgroundWorker::class)
+
+        // Phase 7c: the driver's device gets the route it follows, live and after every connect.
+        single(createdAtStart = true) { DriverRoutePush(get(), get()).also { it.start() } }
+        single { DriverRouteListener(get()) } bind OutboxEventHandler::class
         single { FixesAcceptedListener(get()) } bind OutboxEventHandler::class
         single { TripFinishedListener(get()) } bind OutboxEventHandler::class
 

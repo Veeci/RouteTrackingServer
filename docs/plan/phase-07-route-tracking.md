@@ -96,14 +96,14 @@ The current route = highest version per kind.
 
 ## Tasks
 
-- [ ] T7.1 `MeasuredPolyline` + projection math.
-- [ ] T7.2 `RouteMatcher` + `MatchState` store.
-- [ ] T7.3 Route-based ETA with correction factor.
-- [ ] T7.4 Off-route rule (hysteresis + accuracy gate) and `TripRouteService.reroute` with cooldown.
-- [ ] T7.5 Replace straight-line `TrackTripProgress` path when a route exists; keep fallback.
-- [ ] T7.6 V8 migration, route versioning; approach route switches to trip route on `start`.
-- [ ] T7.7 `route_updated` on guest and driver sockets.
-- [ ] T7.8 Fixtures: `detour_off_route.gpx`, `u_turn.gpx`, `loop_route.gpx`, `parallel_street.gpx` (drawn against `tiny_grid`).
+- [x] T7.1 `MeasuredPolyline` + projection math.
+- [x] T7.2 (state in `ProgressState`) `RouteMatcher` + `MatchState` store.
+- [x] T7.3 (with the route's average speed) Route-based ETA with correction factor.
+- [x] T7.4 Off-route rule (hysteresis + accuracy gate) and `TripRouteService.reroute` with cooldown.
+- [x] T7.5 Replace straight-line `TrackTripProgress` path when a route exists; keep fallback.
+- [x] T7.6 (V12) V8 migration, route versioning; approach route switches to trip route on `start`.
+- [x] T7.7 `route_updated` on guest and driver sockets.
+- [x] T7.8 (tracks made in test code; simulator `--detour-at`) Fixtures: `detour_off_route.gpx`, `u_turn.gpx`, `loop_route.gpx`, `parallel_street.gpx` (drawn against `tiny_grid`).
 
 ## Test plan
 
@@ -154,3 +154,98 @@ The current route = highest version per kind.
 - The guest sees distance-left along the road decrease smoothly; a detour produces one re-route and the new line.
 - No false off-route on the tunnel and jitter fixtures.
 - All P0 cases pass.
+
+## As built: slice 7a (route matching and route ETA)
+
+Phase 7 is built in three slices, one PR each: 7a matching and the route ETA; 7b off-route, re-route and
+`route_updated` to the guest; 7c the APPROACH route, the switch on `start`, `route_updated` to the driver and the
+end-to-end cases. The design was agreed again before 7a, because this plan predates phases 3 to 6:
+
+| Plan | As built | Why |
+|---|---|---|
+| `V8__route_reason.sql` with a unique `(trip_id, kind, version)` | 7b adds `V12__route_reason.sql` with `reason` only | V8 to V11 are taken. The key is already the primary key of `trip_routes` (V11) |
+| `MatchState` in a store of its own | `ProgressState.route` (`FollowedRoute`: kind, version, decoded `MeasuredPolyline`, cursor and distance) in the existing `InMemoryProgressStateStore` | The state is derived from the fixes. A restart decodes the route again and matches from its start |
+| ETA sums per-segment durations | `RouteEta`: `durationS × remainingM ÷ distanceM × k`, k = planned average speed ÷ smoothed speed, clamped to [0.5, 3] | `trip_routes` stores only totals. Per-point times need the planner and a new column; a known limit |
+| `basis: "route"` | `basis: ROUTE` and an optional `routeVersion` on `trip_progress` | The existing value is upper case (`STRAIGHT_LINE`) |
+| The guest gets the route only from `route_updated` | `subscribed.trip.route` holds the current route too (`TripSnapshot.currentRoute`) | A guest who reconnects gets the whole state in one message |
+| Search window `[cursor − 2, cursor + 25]` | The same, and when its best match is more than 50 m away, the rest of the route ahead is searched | Finds the driver again after a gap (a tunnel) longer than the window. Without a state the window starts at segment 0 |
+| Fixtures `*.gpx` drawn against `tiny_grid` | Tracks made in test code: `polylineFrom` and `track(along, speedMps, stepS, noiseM, seed)` in `testFixtures/.../testing/geo/Tracks.kt` | The expected distance is known by construction. GPX files stay for the simulator demo (7c) |
+
+How it works:
+- `MeasuredPolyline` (`shared/geo`) adds up the distance to each point once. `projectOnSegment` works in a flat
+  frame around the segment (x = Δlng · cos(lat) · R, y = Δlat · R), clamps the foot of the perpendicular to the
+  segment, and returns the distance along, the cross-track distance and the segment's bearing.
+- `RouteKind.followedIn(status)` says which route a stage follows: APPROACH for ACCEPTED and ARRIVED, TRIP for
+  IN_PROGRESS. `TripProgressService` loads the trip and the newest route of that kind in one transaction (one more
+  query by primary key per batch). It decodes the polyline only when the kind or version changed.
+- `RouteMatcher` is pure. The score is the cross-track distance, plus 30 m when the driver moves faster than 3 m/s
+  against the segment's direction by more than 60°. On a tie the earlier segment wins. A step back of up to 20 m
+  keeps the previous distance (jitter); a larger one counts (U-turn).
+- Without a route for the stage the progress is the straight line, as in phase 3. Before 7c that is the whole time
+  before the ride.
+- The arrival rules (`TripEventService`) still use the straight line (decisions row 48).
+
+Known limits: the window counts segments, not metres, so it is shorter where the graph has many short segments.
+A driver more than 50 m off the route makes every fix search the rest of the route; 7b re-routes such a driver.
+With several instances each keeps its own matcher state (phase 10 moves it to Redis).
+
+Tests: TC-7-GEO-01 to 05, TC-7-MAT-01 to 05 (plus the second pass of a loop and the search ahead after a gap),
+TC-7-ETA-01 to 04, the current route in `TripServiceTest`, golden files `subscribed_route` and
+`trip_progress_route`, and two `GuestSocketIT` cases (route on subscribe and `basis = ROUTE` during the ride; no
+route before it).
+
+## As built: slice 7b (off-route and re-route)
+
+| Plan | As built | Why |
+|---|---|---|
+| `TripRouteService.reroute` called from progress | `TripProgressService` queues a `RerouteRequest` with `Rerouter.request` (never waits). `RerouteWorker`, a `BackgroundWorker`, takes requests one at a time and calls `RerouteHandler.reroute`, which `TripRouteService` implements | Progress runs in the outbox relay's transaction, and the relay delivers one event at a time. A 500 ms plan there would hold a connection and delay every other event |
+| Concurrent re-routes: the loser gets a conflict | `TripRouteRepository.insertIfAbsent` (`INSERT ... ON CONFLICT DO NOTHING`) returns false, and the service stores nothing. A request whose base version is no longer the newest is dropped before that | A plain insert that hits the primary key aborts the whole Postgres transaction |
+| `V8__route_reason.sql` | `V12__route_reason.sql`: `reason` (INITIAL, OFF_ROUTE), default INITIAL | The default keeps the previous release's inserts valid during a rolling deploy |
+| `OffRoute` and `RouteUpdated` in `trip_events` | `TripMoment.OffRoute` (stored in `trip_moments`, sent as `trip_event{off_route}`) and `TripRouteChanged` (`trip.TripRouteChanged.v1`, with the whole route) in the outbox | Phase 4's moment pattern. The live context sends the route on without reading the trip tables |
+| `accuracyM` of each fix | Added to `FixesAccepted.Position` and `FixesAcceptedV1` as optional. Events stored before 7b decode with null, and such fixes never count | Old outbox rows must still decode |
+| `route_updated { tripId, routeVersion, polyline, distanceM, durationS, reason }` | The same, plus `kind` | The client needs to know whether it is the line to the pickup or to the destination |
+
+How it works:
+- `OffRouteRule` is pure. It counts a fix more than 50 m beside the route with an accuracy of 30 m or better, resets
+  at 30 m or closer, and leaves the count alone in between. 3 fixes in a row make the driver off-route.
+- The count lives in `FollowedRoute.offRouteCount`, so a new version starts at 0. `ProgressState.lastRerouteAt`
+  (the fix time) lives across versions and gives the 30 s cooldown. A count that reached 3 during the cooldown
+  stays, so the first fix after it asks at once.
+- `TripRouteService.reroute` plans first, outside any transaction. In one transaction it then checks that the trip
+  still follows a route of that kind and that the newest version is the request's base. It inserts the next
+  version, stores the `OffRoute` moment and adds `TripRouteChanged` to the outbox. When the planner fails
+  (`DomainException`), only the moment is stored and the old route stays.
+- The new route starts at the driver's fix, so the matcher, which starts from segment 0 without a state, finds the
+  driver at once.
+- `TripRouteListener` (live) turns `TripRouteChangedV1` into a `RouteUpdate`, and the guest socket sends
+  `route_updated`. Its `reason` is lower case on the wire.
+- `BackgroundWorker` (platform) is new. The application starts every one in Koin, and graceful shutdown stops them
+  after the jobs and before the relay. The queue holds 64 requests and drops the oldest when full. A request lost
+  in a restart does no harm, because the rule fires again 3 fixes later.
+
+Known limits: the queue is per instance and in memory. With several instances, the relay's instance plans, which
+is fine because one version wins in the database. The cooldown uses fix times, so a phone with a wrong clock moves
+it.
+
+Tests: TC-7-OFF-01 to 04 (plus unknown accuracy), TC-7-RR-01 to 04 and 06 (06 against Postgres), TC-7-DB-01
+(`reason` and `insertIfAbsent` against Postgres), TC-7-WS-01 for the guest (`off_route`, then `route_updated`
+with version 2, on Netty with the test grid), the worker (order, a failing item, a full queue, stop), and golden
+files `route_updated` and `trip_event_off_route`.
+
+## As built: slice 7c (approach route, driver routes, end to end)
+
+| Plan | As built | Why |
+|---|---|---|
+| APPROACH route on accept, from tracking's last fix | Planned on the driver's first fix after accept: progress sends a `RerouteRequest` with `reason = INITIAL`, base version 0, to the pickup, through the same `RerouteWorker`. A failed plan is asked again after the 30 s cooldown | No new tracking query, and accept stays fast. The fix that arrives is the driver's position |
+| `RouteUpdated(reason = status_changed)` on `start` | `TripService.act(START)` adds `TripRouteChanged` for the newest TRIP route, `reason = STATUS_CHANGED`, in the action's transaction. Progress switches by itself, because `RouteKind.followedIn(IN_PROGRESS)` is TRIP | One transaction: the status and the route change commit together |
+| The tracking socket adapter pushes `route_updated` | `RouteUpdated` is now both a guest and a driver message. `DriverLink.send` takes any `ServerMessage`. `DriverRoutePush` (trip, adapter out) sends each `TripRouteChanged` (through `DriverRouteListener`) and resends the current route after every `welcome` | Tracking still knows nothing of trips. A route is not acked; the resend on connect is how an offline device catches up |
+| `reason: "off_route" \| "status_changed"` | Domain `RouteChangeReason`: INITIAL, STATUS_CHANGED, OFF_ROUTE; lower case on the wire | The APPROACH route needs its own reason |
+| Fixtures `detour_off_route.gpx` and others, E2E with the simulator | `RouteTrackingIT` on Netty: a driver socket sends fixes made along the routes the server planned (`track`), a guest socket records what it sees. The simulator gets `--detour-at S:D:M` (`Detour`, ramped so no step passes the 70 m/s jump limit) and prints `route_updated` | The tests follow whatever route the planner returns on the test grid, so they need no hand-drawn GPX. The simulator flag is for a manual demo |
+
+Tests: TC-7-E2E-01 (one detour gives exactly one `off_route`, both sides get version 2, every guest `trip_progress`
+has basis ROUTE, the last one under 50 m on version 2), TC-7-E2E-02 (a 45 s gap gives no `off_route`), TC-7-WS-01
+driver side (the route after `welcome`, version 2 after the detour), TC-7-RR-05 (`TripServiceTest`), the APPROACH
+route end to end (initial, then progress on it, then `status_changed` on start), the initial request and its
+cooldown (`TripProgressServiceTest`), the initial plan and `currentRouteOf` (`TripRouteServiceTest`), and `DetourTest`.
+
+Not done: TC-7-LOAD-01 (200 drivers with matching on) needs the load-test setup.

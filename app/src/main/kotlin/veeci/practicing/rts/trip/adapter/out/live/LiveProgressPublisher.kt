@@ -19,7 +19,14 @@ class LiveProgressPublisher(
             DriverPositionUpdate(position.tripId.value, position.point, position.bearingDeg, position.speedMps, position.recordedAt),
         )
         live.publish(
-            TripProgressUpdate(progress.tripId.value, progress.target.name, progress.remainingM, progress.etaS, basis = "STRAIGHT_LINE"),
+            TripProgressUpdate(
+                progress.tripId.value,
+                progress.target.name,
+                progress.remainingM,
+                progress.etaS,
+                progress.basis.name,
+                progress.routeVersion,
+            ),
         )
     }
 }

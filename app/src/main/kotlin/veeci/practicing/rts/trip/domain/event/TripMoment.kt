@@ -51,6 +51,17 @@ sealed interface TripMoment {
         override val status: TripStatus,
         override val at: Instant,
     ) : TripMoment
+
+    /**
+     * The driver left the planned route and the server planned again from their position (phase 7b). A new route
+     * follows as a separate event when the plan succeeded; when it failed the old route stays.
+     */
+    data class OffRoute(
+        override val tripId: UUID,
+        override val guestId: UUID,
+        override val status: TripStatus,
+        override val at: Instant,
+    ) : TripMoment
 }
 
 /**
@@ -105,6 +116,10 @@ data class TripMomentRaisedV1(
                 TripMoment.DriverBack(UUID.fromString(tripId), UUID.fromString(guestId), TripStatus.valueOf(status), at)
             }
 
+            KIND_OFF_ROUTE -> {
+                TripMoment.OffRoute(UUID.fromString(tripId), UUID.fromString(guestId), TripStatus.valueOf(status), at)
+            }
+
             else -> {
                 null
             }
@@ -116,6 +131,7 @@ data class TripMomentRaisedV1(
         const val KIND_DRIVER_LOW_BATTERY = "DRIVER_LOW_BATTERY"
         const val KIND_DRIVER_STALE = "DRIVER_STALE"
         const val KIND_DRIVER_BACK = "DRIVER_BACK"
+        const val KIND_OFF_ROUTE = "OFF_ROUTE"
 
         fun of(moment: TripMoment) =
             when (moment) {
@@ -154,6 +170,10 @@ data class TripMomentRaisedV1(
 
                 is TripMoment.DriverBack -> {
                     TripMomentRaisedV1(moment.tripId.toString(), moment.guestId.toString(), KIND_DRIVER_BACK, moment.status.name, moment.at)
+                }
+
+                is TripMoment.OffRoute -> {
+                    TripMomentRaisedV1(moment.tripId.toString(), moment.guestId.toString(), KIND_OFF_ROUTE, moment.status.name, moment.at)
                 }
             }
     }

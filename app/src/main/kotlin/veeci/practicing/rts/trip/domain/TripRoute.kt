@@ -1,5 +1,6 @@
 package veeci.practicing.rts.trip.domain
 
+import veeci.practicing.rts.trip.domain.event.TripStatus
 import kotlin.time.Instant
 
 /** Which leg of a trip a route covers. */
@@ -7,8 +8,28 @@ enum class RouteKind {
     /** Pickup to destination, planned when the trip is booked. */
     TRIP,
 
-    /** The driver's position to the pickup. Not planned yet: phase 7 adds it once tracking can say where a driver is. */
+    /** The driver's position to the pickup. Not planned yet: phase 7c plans it from the driver's first fix. */
     APPROACH,
+    ;
+
+    companion object {
+        /** The route the driver follows in [status]: none before a driver accepts and after the trip ends. */
+        fun followedIn(status: TripStatus): RouteKind? =
+            when (status) {
+                TripStatus.ACCEPTED, TripStatus.ARRIVED -> APPROACH
+                TripStatus.IN_PROGRESS -> TRIP
+                TripStatus.REQUESTED, TripStatus.COMPLETED, TripStatus.CANCELLED -> null
+            }
+    }
+}
+
+/** Why a route was planned. Stored, so a trip's history shows each re-route. */
+enum class RouteReason {
+    /** The first plan of its kind. */
+    INITIAL,
+
+    /** The driver left the previous version. */
+    OFF_ROUTE,
 }
 
 /**
@@ -25,6 +46,7 @@ data class TripRoute(
     val distanceM: Double,
     val durationS: Double,
     val createdAt: Instant,
+    val reason: RouteReason = RouteReason.INITIAL,
 ) {
     init {
         require(version > 0) { "version must be positive, was $version" }

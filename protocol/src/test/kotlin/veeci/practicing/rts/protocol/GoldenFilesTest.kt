@@ -114,7 +114,7 @@ class GoldenFilesTest {
         private val at = Instant.parse("2026-09-30T02:15:04.120Z")
 
         @JvmStatic
-        fun samples(): List<Sample<*>> = driverSamples() + commandSamples() + guestSamples() + tripEventSamples()
+        fun samples(): List<Sample<*>> = driverSamples() + commandSamples() + guestSamples() + tripEventSamples() + routeSamples()
 
         private fun driverSamples(): List<Sample<*>> =
             listOf(
@@ -190,6 +190,22 @@ class GoldenFilesTest {
                     GuestServerMessage.serializer(),
                 ),
                 Sample(
+                    "subscribed",
+                    Subscribed(
+                        GuestTrip(
+                            tripId = TRIP,
+                            status = "IN_PROGRESS",
+                            pickup = Point(10.7725, 106.698),
+                            destination = Point(10.7798, 106.699),
+                            driverId = "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+                            updatedAt = Instant.parse("2026-09-30T02:15:00Z"),
+                            route = GuestRoute("TRIP", routeVersion = 1, "_wd`Ase}iSkk@_E", distanceM = 812.4, durationS = 97.5),
+                        ),
+                    ),
+                    GuestServerMessage.serializer(),
+                    file = "subscribed_route",
+                ),
+                Sample(
                     "driver_position",
                     DriverPosition(TRIP, 10.7769, 106.7009, bearingDeg = 87.0, speedMps = 11.2, recordedAt = at),
                     GuestServerMessage.serializer(),
@@ -198,6 +214,12 @@ class GoldenFilesTest {
                     "trip_progress",
                     TripProgress(TRIP, "PICKUP", remainingM = 1240.5, etaS = 112.0, basis = "STRAIGHT_LINE"),
                     GuestServerMessage.serializer(),
+                ),
+                Sample(
+                    "trip_progress",
+                    TripProgress(TRIP, "DESTINATION", remainingM = 640.0, etaS = 88.5, basis = "ROUTE", routeVersion = 1),
+                    GuestServerMessage.serializer(),
+                    file = "trip_progress_route",
                 ),
             )
 
@@ -256,6 +278,21 @@ class GoldenFilesTest {
                     GuestServerMessage.serializer(),
                     file = "trip_event_driver_back",
                 ),
+                Sample(
+                    "trip_event",
+                    TripEvent(TRIP, TripEvent.OFF_ROUTE, "IN_PROGRESS", Instant.parse("2026-09-30T02:33:00Z")),
+                    GuestServerMessage.serializer(),
+                    file = "trip_event_off_route",
+                ),
             )
+
+        /** `route_updated` (phase 7): the guest's frame, and the same frame decoded with the driver's family. */
+        private fun routeSamples(): List<Sample<*>> {
+            val route = RouteUpdated(TRIP, "TRIP", routeVersion = 2, "_wd`Ase}iSkk@_E", 655.0, 80.5, RouteUpdated.OFF_ROUTE)
+            return listOf(
+                Sample("route_updated", route, GuestServerMessage.serializer()),
+                Sample("route_updated", route, ServerMessage.serializer()),
+            )
+        }
     }
 }

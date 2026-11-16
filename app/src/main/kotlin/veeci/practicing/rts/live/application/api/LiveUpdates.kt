@@ -24,14 +24,30 @@ data class TripProgressUpdate(
     val target: String,
     val remainingM: Double,
     val etaS: Double,
-    /** How [remainingM] was measured: "STRAIGHT_LINE" until road routing arrives (phase 7). */
+    /** How [remainingM] was measured: "ROUTE" along the planned road, or "STRAIGHT_LINE" when there is no route. */
     val basis: String,
+    /** The version of the route [remainingM] is measured on; null for "STRAIGHT_LINE". */
+    val routeVersion: Int? = null,
 ) : LiveUpdate
 
 data class TripStatusUpdate(
     override val tripId: UUID,
     val status: TripStatus,
     val at: Instant,
+) : LiveUpdate
+
+/** The driver follows a new route from now on (phase 7b: a re-route). */
+data class RouteUpdate(
+    override val tripId: UUID,
+    /** TRIP or APPROACH. */
+    val kind: String,
+    val version: Int,
+    /** Google Encoded Polyline, precision 5. */
+    val polyline: String,
+    val distanceM: Double,
+    val durationS: Double,
+    /** Why, as the trip context stored it, for example OFF_ROUTE. */
+    val reason: String,
 ) : LiveUpdate
 
 /** Something happened on the trip that is not a change of stage, for example "driver arriving". */

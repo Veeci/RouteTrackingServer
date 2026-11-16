@@ -14,6 +14,7 @@ import org.slf4j.LoggerFactory
 import veeci.practicing.rts.devicecontrol.application.api.GuestWatching
 import veeci.practicing.rts.live.application.api.DriverPositionUpdate
 import veeci.practicing.rts.live.application.api.LiveUpdate
+import veeci.practicing.rts.live.application.api.RouteUpdate
 import veeci.practicing.rts.live.application.api.TripMomentUpdate
 import veeci.practicing.rts.live.application.api.TripProgressUpdate
 import veeci.practicing.rts.live.application.api.TripStatusUpdate
@@ -23,9 +24,11 @@ import veeci.practicing.rts.platform.ws.WsSession
 import veeci.practicing.rts.platform.ws.WsSessionRunner
 import veeci.practicing.rts.protocol.DriverPosition
 import veeci.practicing.rts.protocol.GuestClientMessage
+import veeci.practicing.rts.protocol.GuestRoute
 import veeci.practicing.rts.protocol.GuestServerMessage
 import veeci.practicing.rts.protocol.GuestTrip
 import veeci.practicing.rts.protocol.Point
+import veeci.practicing.rts.protocol.RouteUpdated
 import veeci.practicing.rts.protocol.Subscribe
 import veeci.practicing.rts.protocol.Subscribed
 import veeci.practicing.rts.protocol.TripEvent
@@ -158,7 +161,21 @@ class GuestSocket(
             }
 
             is TripProgressUpdate -> {
-                send(TripProgress(update.tripId.toString(), update.target, update.remainingM, update.etaS, update.basis))
+                send(
+                    TripProgress(
+                        update.tripId.toString(),
+                        update.target,
+                        update.remainingM,
+                        update.etaS,
+                        update.basis,
+                        update.routeVersion,
+                    ),
+                )
+                true
+            }
+
+            is RouteUpdate -> {
+                send(update.toMessage())
                 true
             }
 
@@ -209,9 +226,20 @@ class GuestSocket(
     private suspend fun WsSession.send(message: GuestServerMessage) = send(GuestServerMessage.serializer(), message)
 
     private fun TripSnapshot.toGuestTrip() =
-        GuestTrip(id.toString(), status.name, pickup.toPoint(), destination.toPoint(), driverId?.toString(), updatedAt)
+        GuestTrip(
+            id.toString(),
+            status.name,
+            pickup.toPoint(),
+            destination.toPoint(),
+            driverId?.toString(),
+            updatedAt,
+            currentRoute?.let { GuestRoute(it.kind, it.version, it.polyline, it.distanceM, it.durationS) },
+        )
 
     private fun GeoPoint.toPoint() = Point(lat, lng)
+
+    // Stored reasons are upper case (OFF_ROUTE); the protocol names them in lower case (off_route).
+    private fun RouteUpdate.toMessage() = RouteUpdated(tripId.toString(), kind, version, polyline, distanceM, durationS, reason.lowercase())
 
     private companion object {
         const val ENDPOINT = "guest"
