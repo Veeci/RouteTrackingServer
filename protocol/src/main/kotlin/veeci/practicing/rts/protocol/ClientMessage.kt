@@ -15,7 +15,27 @@ data class Hello(
     val sessionId: String,
     val lastAckedSeq: Long? = null,
     val sdkVersion: String,
+    /** What the phone is (phase 9). Optional: an SDK older than phase 9 sends no block, and the server stores none. */
+    val device: DeviceDto? = null,
 ) : ClientMessage
+
+/**
+ * The phone a session runs on, for comparing location stacks across devices and ROMs (phase 9). Every field is
+ * optional: an SDK sends what it can read.
+ */
+@Serializable
+data class DeviceDto(
+    /** `Build.MANUFACTURER`, for example Google. */
+    val manufacturer: String? = null,
+    /** `Build.MODEL`, for example Pixel 7. */
+    val model: String? = null,
+    /** `Build.VERSION.SDK_INT`, the Android API level, for example 35. */
+    val androidSdk: Int? = null,
+    /** The ROM's name and version when it is not the stock one, for example LineageOS 22.1. */
+    val rom: String? = null,
+    /** Whether Google Play services is installed and usable. */
+    val hasGms: Boolean? = null,
+)
 
 /**
  * The device's state, sent every 30 s while tracking runs, also when the driver is parked and sends no batches:

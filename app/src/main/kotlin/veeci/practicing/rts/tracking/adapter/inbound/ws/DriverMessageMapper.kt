@@ -1,5 +1,6 @@
 package veeci.practicing.rts.tracking.adapter.inbound.ws
 
+import veeci.practicing.rts.protocol.DeviceDto
 import veeci.practicing.rts.protocol.DeviceStatus
 import veeci.practicing.rts.protocol.FixBatch
 import veeci.practicing.rts.protocol.FixDto
@@ -9,6 +10,7 @@ import veeci.practicing.rts.tracking.application.IngestBatch
 import veeci.practicing.rts.tracking.application.OpenSession
 import veeci.practicing.rts.tracking.application.ReportStatus
 import veeci.practicing.rts.tracking.domain.DeviceId
+import veeci.practicing.rts.tracking.domain.DeviceInfo
 import veeci.practicing.rts.tracking.domain.FixReading
 import veeci.practicing.rts.tracking.domain.LocationProvider
 import veeci.practicing.rts.tracking.domain.SatelliteHealth
@@ -25,11 +27,13 @@ internal object DriverMessageMapper {
     ): OpenSession? {
         val sessionId = parseUuid(hello.sessionId)
         return if (sessionId != null && DeviceId.isValid(hello.deviceId)) {
-            OpenSession(SessionId(sessionId), DeviceId(hello.deviceId), hello.sdkVersion, driver)
+            OpenSession(SessionId(sessionId), DeviceId(hello.deviceId), hello.sdkVersion, driver, hello.device?.toInfo())
         } else {
             null
         }
     }
+
+    private fun DeviceDto.toInfo() = DeviceInfo(manufacturer, model, androidSdk, rom, hasGms)
 
     fun ingest(
         sessionId: SessionId,

@@ -136,6 +136,15 @@ is closed, and sign-up and login for real users.
 | 62 | Where a timeline entry sits on the GeoJSON map | At the driver's last fix at or before its time, inside the leg including its end. With no such fix, the point has no geometry, never a guessed position | Built P8 (8d) |
 | 63 | What the exports hold | One leg each, with the same access rules as the track. GPX holds the points and their times only; GeoJSON adds the timeline as points | Built P8 (8d) |
 
+## Phase 9 (9a built, decided 2026-11-16)
+
+| # | Problem | What will happen | Source |
+|---|---|---|---|
+| 64 | A phone that sends no device block | It still connects. Its session has no device, and every device column stays null | Built P9 (9a) |
+| 65 | A reconnect whose hello has no device block | The stored device stays. Only a hello with a block replaces it | Built P9 (9a) |
+| 66 | The same device status sent twice | Stored once, keyed by session and reading time. The event is still announced again, as before phase 9 | Built P9 (9a) |
+| 67 | When a session's health is computed | 10 minutes after its last message, by a job every 5 minutes, and again if the session resumes. There is no "session closed" signal | Plan (corrected) |
+
 ## Open questions, most important first
 
 1. Login: who issues tokens in production, and how do guests and drivers sign up (row 27)?

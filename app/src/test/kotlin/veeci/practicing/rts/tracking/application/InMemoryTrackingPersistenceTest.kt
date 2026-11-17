@@ -1,5 +1,6 @@
 package veeci.practicing.rts.tracking.application
 
+import veeci.practicing.rts.testing.tracking.InMemoryDeviceStatusSampleRepository
 import veeci.practicing.rts.testing.tracking.InMemoryFixBatchRepository
 import veeci.practicing.rts.testing.tracking.InMemoryTrackingSessionRepository
 import veeci.practicing.rts.testing.tracking.TrackingPersistenceContract
@@ -8,4 +9,5 @@ import veeci.practicing.rts.testing.tracking.TrackingPersistenceContract
 class InMemoryTrackingPersistenceTest : TrackingPersistenceContract() {
     override val sessions = InMemoryTrackingSessionRepository()
     override val batches = InMemoryFixBatchRepository()
+    override val statusSamples = InMemoryDeviceStatusSampleRepository()
 }

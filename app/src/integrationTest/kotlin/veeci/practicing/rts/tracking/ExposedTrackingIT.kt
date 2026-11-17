@@ -24,6 +24,7 @@ import veeci.practicing.rts.testing.tracking.TrackingSamples.T0
 import veeci.practicing.rts.testing.tracking.TrackingSamples.fullFix
 import veeci.practicing.rts.testing.tracking.TrackingSamples.newBatch
 import veeci.practicing.rts.testing.tracking.TrackingSamples.reading
+import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedDeviceStatusSampleRepository
 import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedFixBatchRepository
 import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedTrackingEventOutbox
 import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedTrackingSessionRepository
@@ -47,6 +48,7 @@ class ExposedTrackingIT : TrackingPersistenceContract() {
     override val transactions = ExposedTransactionRunner(Database.connect(dataSource))
     override val sessions = ExposedTrackingSessionRepository()
     override val batches = ExposedFixBatchRepository()
+    override val statusSamples = ExposedDeviceStatusSampleRepository()
 
     @AfterEach
     fun closePool() = dataSource.close()
@@ -79,6 +81,7 @@ class ExposedTrackingIT : TrackingPersistenceContract() {
                     FixPipeline(PipelineConfig()),
                     Clock.fixed((T0 + 1.minutes).toJavaInstant(), ZoneOffset.UTC),
                     maxFixesPerBatch = 100,
+                    statusSamples,
                 )
             service.openSession(OpenSession(session.id, session.deviceId, sdkVersion = "0.9.0", driverId = DRIVER))
 

@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test
 import veeci.practicing.rts.shared.DomainException
 import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.testing.tracking.DirectTransactionRunner
+import veeci.practicing.rts.testing.tracking.InMemoryDeviceStatusSampleRepository
 import veeci.practicing.rts.testing.tracking.InMemoryFixBatchRepository
 import veeci.practicing.rts.testing.tracking.InMemoryTrackingEventOutbox
 import veeci.practicing.rts.testing.tracking.InMemoryTrackingSessionRepository
@@ -18,6 +19,8 @@ import veeci.practicing.rts.tracking.application.port.out.InsertResult
 import veeci.practicing.rts.tracking.application.port.out.NewBatch
 import veeci.practicing.rts.tracking.application.port.out.StoredBatch
 import veeci.practicing.rts.tracking.domain.DeviceId
+import veeci.practicing.rts.tracking.domain.DeviceInfo
+import veeci.practicing.rts.tracking.domain.DeviceStatusSample
 import veeci.practicing.rts.tracking.domain.FixPipeline
 import veeci.practicing.rts.tracking.domain.FixReading
 import veeci.practicing.rts.tracking.domain.PipelineConfig
@@ -42,6 +45,7 @@ class TrackingServiceTest {
     private val sessions = InMemoryTrackingSessionRepository()
     private val batches = InMemoryFixBatchRepository()
     private val outbox = InMemoryTrackingEventOutbox()
+    private val statusSamples = InMemoryDeviceStatusSampleRepository()
 
     private val sessionId = SessionId(UUID.fromString("0f8fad5b-d9cb-469f-a165-70867728950e"))
     private val phone = DeviceId("phone-1")
@@ -57,6 +61,7 @@ class TrackingServiceTest {
         FixPipeline(PipelineConfig()),
         Clock.fixed(now.toJavaInstant(), ZoneOffset.UTC),
         maxFixesPerBatch = 100,
+        statusSamples,
     )
 
     private val service = service()
@@ -119,6 +124,18 @@ class TrackingServiceTest {
             reported.at shouldBe NOW - 2.seconds
             reported.battery shouldBe battery
             reported.motion shouldBe "STILL"
+            statusSamples.forSession(sessionId) shouldBe listOf(DeviceStatusSample(sessionId, NOW - 2.seconds, battery, "STILL"))
+        }
+
+    @Test
+    fun `the device from hello is stored, and a later hello without one keeps it`() =
+        runTest {
+            val pixel = DeviceInfo("Google", "Pixel 7", 35, "LineageOS 22.1", hasGms = false)
+
+            service.openSession(OpenSession(sessionId, phone, "0.10.0", driver, pixel))
+            service.openSession(OpenSession(sessionId, phone, "0.10.0", driver, device = null))
+
+            sessions.find(sessionId)!!.device shouldBe pixel
         }
 
     @Test

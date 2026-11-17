@@ -26,7 +26,7 @@ gap/dropout detection, battery drain rate, provider comparison report (JSON + CS
 "device": { "manufacturer": "Google", "model": "Pixel 7", "androidSdk": 35, "rom": "LineageOS 22.1", "hasGms": false }
 ```
 
-`device_status` (phase 4) samples are now persisted: `V10__telemetry.sql` → `device_status_samples(session_id, at, level_percent, is_charging, temperature_c, profile, motion)`,
+`device_status` (phase 4) samples are now persisted: `V15__device_telemetry.sql` → `device_status_samples(session_id, at, level_percent, is_charging, temperature_c, profile, motion)`,
 and `tracking_sessions` gains the device columns.
 
 ### Metrics (`telemetry/domain`)
@@ -60,9 +60,29 @@ flagged `lowSample = true`.
 | GET | `/api/v1/admin/reports/providers?from&to` | `ProviderReportDto` |
 | GET | `/api/v1/admin/reports/providers.csv?from&to` | CSV, one row per group |
 
+### Corrections to this plan (approved 2026-11-16)
+
+The plan above was written before phases 4 to 8. These corrections replace the parts they name:
+
+- The migration is V15, not V8 or V10.
+- There is no `SessionClosed` event. A socket close does not end a session, because the SDK reconnects with
+  the same session id. A scheduled job runs every 5 minutes and computes health for sessions idle for 10 minutes
+  or more. A session that resumes is computed again when it next goes idle.
+- `expectedIntervalS` comes from the APPLIED `SET_CONSTRAINT` in effect when each gap starts, not from the last
+  one of the session.
+- Battery drain is one regression slope per run of non-charging samples, then a mean weighted by each run's
+  duration. One slope over all samples would join two runs across a charge.
+- `likelyDoze` needs `motion == "STILL"` and not charging in the samples on both sides of the gap. A sample with
+  no motion gives no flag.
+- The report groups by `(primaryProvider, hasGms, rom, androidSdk)`. The SDK version says nothing about the
+  location stack.
+- Percentiles use linear interpolation between closest ranks, so TC-9-STAT-01 expects p95 = 95.05.
+- The simulator gains `--provider`, `--rom`, `--has-gms` and `--motion`.
+- Slices: 9a is T9.1. 9b is T9.2 to T9.4 plus the health endpoint. 9c is T9.5 to T9.7.
+
 ## Tasks
 
-- [ ] T9.1 Protocol: `device` in `hello`, persistence of device info and status samples (V8).
+- [x] T9.1 Protocol: `device` in `hello`, persistence of device info and status samples (V15).
 - [ ] T9.2 Percentile helper, linear regression helper (pure, in `shared/stats`).
 - [ ] T9.3 `SessionHealthCalculator` including gap and Doze heuristics.
 - [ ] T9.4 `ComputeSessionHealth` on close + admin recompute; `session_health` repository.
@@ -99,6 +119,21 @@ flagged `lowSample = true`.
   hand calculation, and state the percentile method (linear interpolation between closest ranks) in KDoc.
 - **Doze heuristic** tests build fixes and samples with the fixture builders (`aFix`, `aStatusSample`)
   at explicit timestamps — no GPX needed.
+
+## As built (9a)
+
+- `Hello.device` is an optional `DeviceDto`. Every field in it is optional too. AsyncAPI has a `Device` schema
+  with `additionalProperties: false`, and the golden file `hello_device.json` pins the frame.
+- `TrackingSession.device` holds a `DeviceInfo`. A hello with a device block replaces it. A hello without one
+  keeps the stored device, so a reconnect from an older SDK build erases nothing. A row with every device column
+  null reads back as `device = null`.
+- `TrackingService.reportStatus` stores a `DeviceStatusSample` in the same transaction as the last-seen update
+  and the `DeviceStatusReported` outbox row. The key `(session_id, at)` makes a resent sample a no-op
+  (`insertIgnore`, which is `ON CONFLICT DO NOTHING`).
+- `temperature_c` is `double precision`, not `real` as in `fixes`: a `real` would read 38.7 back as 38.70000076.
+- `DeviceStatusSampleRepository.forSession` returns samples oldest first. Session health (9b) reads it.
+- TC-9-DB-01 covers the samples in the persistence contract, so the in-memory and Postgres versions pass the
+  same test. The session health half of TC-9-DB-01 comes with 9b.
 
 ## Definition of Done
 

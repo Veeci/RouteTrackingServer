@@ -9,13 +9,17 @@ import veeci.practicing.rts.testing.tracking.TrackingSamples.T0
 import veeci.practicing.rts.testing.tracking.TrackingSamples.bareFix
 import veeci.practicing.rts.testing.tracking.TrackingSamples.fullFix
 import veeci.practicing.rts.testing.tracking.TrackingSamples.newBatch
+import veeci.practicing.rts.tracking.application.port.out.DeviceStatusSampleRepository
 import veeci.practicing.rts.tracking.application.port.out.FixBatchRepository
 import veeci.practicing.rts.tracking.application.port.out.InsertResult
 import veeci.practicing.rts.tracking.application.port.out.StoredBatch
 import veeci.practicing.rts.tracking.application.port.out.TrackingSessionRepository
+import veeci.practicing.rts.tracking.domain.DeviceInfo
+import veeci.practicing.rts.tracking.domain.DeviceStatusSample
 import veeci.practicing.rts.tracking.domain.Rejection
 import veeci.practicing.rts.tracking.domain.RejectionReason
 import veeci.practicing.rts.tracking.domain.TrackingSession
+import veeci.practicing.rts.tracking.domain.event.DeviceStatusReported
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
@@ -27,6 +31,7 @@ import kotlin.time.Duration.Companion.seconds
 abstract class TrackingPersistenceContract {
     abstract val sessions: TrackingSessionRepository
     abstract val batches: FixBatchRepository
+    abstract val statusSamples: DeviceStatusSampleRepository
 
     /** The database versions run every call in a transaction; the in-memory versions need none. */
     open val transactions: TransactionRunner = DirectTransactionRunner
@@ -37,7 +42,7 @@ abstract class TrackingPersistenceContract {
 
     private suspend fun givenSession() = tx { sessions.save(session) }
 
-    private fun TrackingSession.values() = listOf(id, deviceId, sdkVersion, startedAt, lastSeenAt, driverId)
+    private fun TrackingSession.values() = listOf(id, deviceId, sdkVersion, startedAt, lastSeenAt, driverId, device)
 
     @Test
     fun `a saved session is found with all its values`() =
@@ -56,6 +61,36 @@ abstract class TrackingPersistenceContract {
             tx { sessions.save(session) }
 
             tx { sessions.find(session.id) }!!.values() shouldBe session.values()
+        }
+
+    @Test
+    fun `a device comes back with every field, a hello without one keeps it, and none at all reads as null`() =
+        runTest {
+            givenSession()
+            tx { sessions.find(session.id) }!!.device.shouldBeNull()
+            val pixel = DeviceInfo("Google", "Pixel 7", 35, "LineageOS 22.1", hasGms = false)
+
+            session.reconnect(session.deviceId, TrackingSamples.DRIVER, "0.10.0", T0 + 1.minutes, pixel)
+            tx { sessions.save(session) }
+            session.reconnect(session.deviceId, TrackingSamples.DRIVER, "0.10.0", T0 + 2.minutes, device = null)
+            tx { sessions.save(session) }
+
+            tx { sessions.find(session.id) }!!.device shouldBe pixel
+        }
+
+    @Test
+    fun `TC-9-DB-01 status samples come back oldest first with every value, and a resend is ignored`() =
+        runTest {
+            givenSession()
+            val later = DeviceStatusSample(session.id, T0 + 1.minutes, DeviceStatusReported.Battery(14, false, 38.7, "LOW"), "STILL")
+            val first = DeviceStatusSample(session.id, T0, DeviceStatusReported.Battery(15, true, null, null), null)
+
+            tx { statusSamples.insert(later) }
+            tx { statusSamples.insert(first) }
+            tx { statusSamples.insert(later.copy(motion = "IN_VEHICLE")) } // same (session, at): a resend
+
+            tx { statusSamples.forSession(session.id) } shouldBe listOf(first, later)
+            tx { statusSamples.forSession(TrackingSamples.session().id) } shouldBe emptyList()
         }
 
     @Test

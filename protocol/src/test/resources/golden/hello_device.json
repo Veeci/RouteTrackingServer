@@ -1,0 +1,14 @@
+{
+  "type": "hello",
+  "protocolVersion": 1,
+  "deviceId": "dev-sim-1",
+  "sessionId": "0f8fad5b-d9cb-469f-a165-70867728950e",
+  "sdkVersion": "0.10.0",
+  "device": {
+    "manufacturer": "Google",
+    "model": "Pixel 7",
+    "androidSdk": 35,
+    "rom": "LineageOS 22.1",
+    "hasGms": false
+  }
+}

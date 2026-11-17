@@ -8,7 +8,7 @@ import org.jetbrains.exposed.v1.core.java.javaUUID
 import org.jetbrains.exposed.v1.datetime.timestamp
 import org.jetbrains.exposed.v1.json.jsonb
 
-// Exposed descriptions of the tables in migration V3. They must match the SQL; ExposedTrackingIT checks
+// Exposed descriptions of the tables in migration V3 and later. They must match the SQL; ExposedTrackingIT checks
 // every column by writing and reading it back.
 
 internal object TrackingSessionsTable : Table("tracking_sessions") {
@@ -18,7 +18,26 @@ internal object TrackingSessionsTable : Table("tracking_sessions") {
     val startedAt = timestamp("started_at")
     val lastSeenAt = timestamp("last_seen_at")
     val driverId = javaUUID("driver_id").nullable() // migration V5
+
+    // Migration V15
+    val deviceManufacturer = text("device_manufacturer").nullable()
+    val deviceModel = text("device_model").nullable()
+    val deviceAndroidSdk = integer("device_android_sdk").nullable()
+    val deviceRom = text("device_rom").nullable()
+    val deviceHasGms = bool("device_has_gms").nullable()
     override val primaryKey = PrimaryKey(id)
+}
+
+/** Migration V15. */
+internal object DeviceStatusSamplesTable : Table("device_status_samples") {
+    val sessionId = javaUUID("session_id")
+    val at = timestamp("at")
+    val levelPercent = short("level_percent")
+    val isCharging = bool("is_charging")
+    val temperatureC = double("temperature_c").nullable()
+    val profile = text("profile").nullable()
+    val motion = text("motion").nullable()
+    override val primaryKey = PrimaryKey(sessionId, at)
 }
 
 /** A rejection as stored in `fix_batches.rejections`. */

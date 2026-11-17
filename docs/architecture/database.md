@@ -121,7 +121,8 @@ erDiagram
 | Table | Owner | One row is | Written when | Migration |
 |---|---|---|---|---|
 | `users` | identity | One person and the role they act in | Phase 3: by the dev token endpoint only (dev and test) | V4 |
-| `tracking_sessions` | tracking | One tracking run of one phone | On `hello`; updated on every reconnect and every stored batch | V3, V5 (`driver_id`) |
+| `tracking_sessions` | tracking | One tracking run of one phone | On `hello`; updated on every reconnect and every stored batch | V3, V5 (`driver_id`), V15 (device columns) |
+| `device_status_samples` | tracking | One battery and motion reading of a session's phone | On every `device_status` message | V15 |
 | `fix_batches` | tracking | One numbered upload (`seq`) of a session | Once per new `seq` | V3 |
 | `fixes` | tracking | One GPS point that passed the fix pipeline | Together with its batch | V3 |
 | `trips` | trip | One ride from a pickup to a destination | On booking; updated on every change of stage | V6 |
@@ -144,6 +145,17 @@ when tracking starts, so the same id survives reconnects. `device_id`, `driver_i
 change after the first insert; `sdk_version` and `last_seen_at` change on a reconnect. `driver_id` is the
 user id from the driver's token (phase 3); the trip context uses it to find the driver's active trip.
 Sessions stored before phase 3 have none.
+
+Since V15, the `device_*` columns describe the phone: manufacturer, model, Android SDK level, ROM and whether it
+has Google Play services. They come from the optional `device` block of `hello`. A hello without the block leaves
+them as they are. Session health (phase 9) groups its report by them.
+
+### `device_status_samples`
+
+Every `device_status` message of a session (phase 9): battery level, charging, temperature, power profile and
+motion, at the time the device read them. Session health reads them to compute battery drain and to flag gaps
+that look like Doze. The primary key `(session_id, at)` makes a resent sample harmless, like `fix_batches`. The
+row is written in the same transaction as the session's `last_seen_at` and the `DeviceStatusReported` outbox row.
 
 ### `fix_batches`
 

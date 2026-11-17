@@ -12,6 +12,7 @@ class TrackingSession(
     lastSeenAt: Instant = startedAt,
     /** The user who opened the session. Null only for sessions stored before drivers had accounts. */
     val driverId: UserId? = null,
+    device: DeviceInfo? = null,
 ) {
     var sdkVersion: String = sdkVersion
         private set
@@ -19,11 +20,16 @@ class TrackingSession(
     var lastSeenAt: Instant = lastSeenAt
         private set
 
+    /** The phone, from the latest hello that carried a device block (phase 9). */
+    var device: DeviceInfo? = device
+        private set
+
     fun reconnect(
         deviceId: DeviceId,
         driverId: UserId,
         sdkVersion: String,
         at: Instant,
+        device: DeviceInfo? = null,
     ) {
         if (deviceId != this.deviceId || driverId != this.driverId) {
             throw DomainException(
@@ -32,6 +38,8 @@ class TrackingSession(
             )
         }
         this.sdkVersion = sdkVersion
+        // A hello without the block keeps what is stored: an SDK downgrade does not erase the device.
+        if (device != null) this.device = device
         touch(at)
     }
 

@@ -10,6 +10,7 @@ import org.jetbrains.exposed.v1.jdbc.upsert
 import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.tracking.application.port.out.TrackingSessionRepository
 import veeci.practicing.rts.tracking.domain.DeviceId
+import veeci.practicing.rts.tracking.domain.DeviceInfo
 import veeci.practicing.rts.tracking.domain.SessionId
 import veeci.practicing.rts.tracking.domain.TrackingSession
 import kotlin.time.Instant
@@ -34,6 +35,11 @@ class ExposedTrackingSessionRepository : TrackingSessionRepository {
             it[startedAt] = session.startedAt
             it[lastSeenAt] = session.lastSeenAt
             it[driverId] = session.driverId?.value
+            it[deviceManufacturer] = session.device?.manufacturer
+            it[deviceModel] = session.device?.model
+            it[deviceAndroidSdk] = session.device?.androidSdk
+            it[deviceRom] = session.device?.rom
+            it[deviceHasGms] = session.device?.hasGms
         }
     }
 
@@ -45,7 +51,18 @@ class ExposedTrackingSessionRepository : TrackingSessionRepository {
             startedAt = this[TrackingSessionsTable.startedAt],
             lastSeenAt = this[TrackingSessionsTable.lastSeenAt],
             driverId = this[TrackingSessionsTable.driverId]?.let(::UserId),
+            device = toDevice(),
         )
+
+    /** Null when no column is set: the session's hellos never carried a device block. */
+    private fun ResultRow.toDevice(): DeviceInfo? =
+        DeviceInfo(
+            manufacturer = this[TrackingSessionsTable.deviceManufacturer],
+            model = this[TrackingSessionsTable.deviceModel],
+            androidSdk = this[TrackingSessionsTable.deviceAndroidSdk],
+            rom = this[TrackingSessionsTable.deviceRom],
+            hasGms = this[TrackingSessionsTable.deviceHasGms],
+        ).takeUnless { it == DeviceInfo() }
 
     override suspend fun lastSeenByDriver(drivers: Collection<UserId>): Map<UserId, Instant> {
         val latest = TrackingSessionsTable.lastSeenAt.max()
