@@ -151,13 +151,14 @@ is closed, and sign-up and login for real users.
 | 72 | How gaps are compared across groups | Per tracked hour, so long sessions are not penalised for their length | Built P9 (9c) |
 | 73 | Who may download the report | Admins only, as JSON or CSV | Built P9 (9c) |
 
-## Phase 10 (10a built, decided 2026-11-17)
+## Phase 10 (10a and 10b built, decided 2026-11-17)
 
 | # | Problem | What will happen | Source |
 |---|---|---|---|
 | 74 | Redis is down while instances run | Fixes are stored and acked, trips change stage, commands wait for the next reconnect. Guests see no live updates until Redis is back. The instances stay ready | Built P10 (10a) |
 | 75 | Two guests start watching at the same moment on two instances | Both may count as first, so the driver's device gets the same precision command twice and applies it once | Built P10 (10a) |
 | 76 | Events of one trip on several instances | One instance handles events at a time, oldest first, so a trip's events stay in order | Built P10 (10a) |
+| 77 | A guest reconnects after a deploy | They get the trip's latest update again, then new ones. The app treats a `trip_event` with the same kind and time as the one it already showed | Built P10 (10b) |
 
 ## Open questions, most important first
 

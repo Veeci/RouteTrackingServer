@@ -39,7 +39,8 @@ import kotlin.time.Duration.Companion.seconds
  */
 class DriverClient(
     private val http: HttpClient,
-    private val url: String,
+    /** Where the next connection goes. Behind a load balancer it never changes; a test moves it to another instance. */
+    var url: String,
     val deviceId: String,
     val sessionId: String = UUID.randomUUID().toString(),
     /** The driver's access token, sent as `Authorization: Bearer` when the socket opens. */
@@ -87,23 +88,20 @@ class DriverClient(
         maxFailures: Int = DEFAULT_MAX_FAILURES,
     ): Boolean {
         var failures = 0
-        var wait = retryDelay
+        val backoff = Backoff(base = retryDelay, cap = MAX_RETRY_DELAY)
         while (outbox.isNotEmpty() && failures < maxFailures) {
             connections++
             try {
                 connectAndSend(pace, batchesPerConnection)
                 failures = 0
-                wait = retryDelay
+                backoff.reset()
             } catch (e: Exception) {
                 // A dropped connection can also end in a CancellationException: Ktor cancels the socket's channels.
                 // Only a cancelled caller stops the client.
                 currentCoroutineContext().ensureActive()
                 failures++
                 onConnectionFailed(e)
-                if (failures < maxFailures) {
-                    delay(wait)
-                    wait = (wait * 2).coerceAtMost(MAX_RETRY_DELAY)
-                }
+                if (failures < maxFailures) delay(backoff.next())
             }
         }
         return outbox.isEmpty()

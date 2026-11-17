@@ -222,6 +222,11 @@ server → route_updated    { tripId, kind: TRIP | APPROACH, routeVersion, polyl
 - When the arrival rules see the driver at the pickup, the server moves the trip to ARRIVED itself, and the guest
   gets the usual `status_changed` with `status: ARRIVED`.
 - After a final stage (COMPLETED, CANCELLED) the server sends that `trip_event` and closes the socket with 1000.
+- A guest who reconnects (phase 10) gets the trip's latest update again, which may be a `trip_event` it already
+  showed. Treat `trip_event` as idempotent by `(event, at)`: the same pair is the same event.
+- Reconnect after close 1001 (a deploy) or a dropped connection with "full jitter": wait a random time between 0
+  and a ceiling that starts at 1 s and doubles after each failure, up to 30 s. Without the randomness, every phone
+  a deploy disconnected retries at the same moments. The simulator's `Backoff` is the reference.
   A `subscribe` to a trip that has already ended gets `subscribed` and then the same close.
 
 ## Errors and close codes
