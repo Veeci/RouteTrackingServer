@@ -30,7 +30,7 @@ import veeci.practicing.rts.testing.TestTokens
 import veeci.practicing.rts.testing.shouldMatchContract
 import veeci.practicing.rts.testing.socketApp
 import java.util.UUID
-import kotlin.random.Random
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.hours
@@ -47,8 +47,11 @@ class ProviderReportIT {
     private val json = Json { ignoreUnknownKeys = true }
     private val admin = TestTokens.admin()
 
-    /** A one-day range in 2020 that no other test writes to. */
-    private val day = Instant.parse("2020-01-01T00:00:00Z") + Random.nextInt(0, 360).days
+    /**
+     * A one-day range in 2020 that no other test writes to. JUnit makes a new instance per test, so each test takes
+     * the next slot. Slots are 3 days apart because TC-9-RPT-02 also writes into the day before and the day after.
+     */
+    private val day = Instant.parse("2020-01-02T00:00:00Z") + (nextSlot.getAndIncrement() * 3).days
 
     private fun SocketTestApp.store(
         provider: String,
@@ -169,4 +172,8 @@ class ProviderReportIT {
             aospGroup.gapsPerHour!! shouldBeGreaterThan gmsGroup.gapsPerHour!!
             aospGroup.dozeGapsPerHour!! shouldBeGreaterThan 0.0
         }
+
+    private companion object {
+        val nextSlot = AtomicInteger()
+    }
 }

@@ -2,6 +2,8 @@ package veeci.practicing.rts.tracking.adapter.inbound.ws
 
 import io.ktor.websocket.CloseReason
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import org.slf4j.LoggerFactory
 import veeci.practicing.rts.platform.ws.WsSession
 import veeci.practicing.rts.protocol.ServerMessage
@@ -37,7 +39,11 @@ class ConnectedDrivers : LocalDriverLink {
                 session.send(message)
                 true
             } catch (e: CancellationException) {
-                throw e
+                // A socket that closes during send cancels its outgoing channel, and send() throws
+                // CancellationException. The caller (the outbox relay) is still active: count it as not sent.
+                currentCoroutineContext().ensureActive()
+                log.info("{} not sent to a closing socket: {}", message::class.simpleName, e.toString())
+                false
             } catch (e: Exception) {
                 log.info("{} not sent to a closing socket: {}", message::class.simpleName, e.toString())
                 false

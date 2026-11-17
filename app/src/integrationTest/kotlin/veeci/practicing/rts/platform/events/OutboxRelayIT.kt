@@ -2,12 +2,18 @@ package veeci.practicing.rts.platform.events
 
 import io.kotest.matchers.shouldBe
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -30,6 +36,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 @Testcontainers(disabledWithoutDocker = true)
 class OutboxRelayIT {
@@ -259,6 +266,39 @@ class OutboxRelayIT {
         while (unpublished() > 0) delivered += deliverPending()
         return delivered
     }
+
+    @Test
+    fun `a handler that throws CancellationException fails its event but never stops the running relay`() =
+        runBlocking<Unit> {
+            // A driver socket that closes while the relay sends it a command throws CancellationException from send().
+            // The relay's own coroutine is still active, so this is a failed delivery, not a reason to stop.
+            var thrown = false
+            val closingSocket =
+                object : OutboxEventHandler {
+                    override val eventType = TYPE
+
+                    override suspend fun handle(payload: JsonElement) {
+                        if (!thrown) {
+                            thrown = true
+                            throw CancellationException("socket closed")
+                        }
+                    }
+                }
+            val recorder = Recorder()
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            try {
+                val relay = OutboxRelay(transactions, listOf(closingSocket, recorder), config)
+                relay.start(scope)
+                append(1, 2)
+
+                withTimeout(5.seconds) { while (unpublished() > 0) delay(20) }
+
+                relay.isRunning shouldBe true
+                recorder.handled.toList() shouldBe listOf(1, 2)
+            } finally {
+                scope.cancel()
+            }
+        }
 
     private companion object {
         const val TYPE = "test.Numbered.v1"

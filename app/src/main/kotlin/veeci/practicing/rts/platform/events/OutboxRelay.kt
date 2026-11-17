@@ -5,7 +5,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
@@ -128,7 +130,11 @@ class OutboxRelay(
                     rows.map { it[OutboxTable.id] }.also { if (it.isNotEmpty()) markPublished(it) }
                 }
             } catch (e: CancellationException) {
-                throw e
+                // Rethrow only when the relay itself is being stopped. A handler can throw CancellationException
+                // while the relay is active (a driver socket that closes during send). Rethrown, it would end the
+                // delivery loop without a log line, and no event would be delivered again until a restart.
+                currentCoroutineContext().ensureActive()
+                throw BatchFailed(current, handled, e)
             } catch (e: Exception) {
                 throw BatchFailed(current, handled, e)
             }
