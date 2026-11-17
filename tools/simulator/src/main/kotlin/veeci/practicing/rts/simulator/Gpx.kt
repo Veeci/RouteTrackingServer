@@ -70,6 +70,7 @@ object GpxReader {
 fun List<TrackPoint>.toFixes(
     now: Instant,
     accuracyM: Double = 5.0,
+    provider: LocationProviderDto = LocationProviderDto.GMS_FUSED,
 ): List<FixDto> {
     val shift = now - last().time
     return map {
@@ -78,7 +79,7 @@ fun List<TrackPoint>.toFixes(
             lng = it.lng,
             accuracyM = accuracyM,
             recordedAt = it.time + shift,
-            provider = LocationProviderDto.GMS_FUSED,
+            provider = provider,
         )
     }
 }

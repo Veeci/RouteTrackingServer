@@ -51,6 +51,7 @@ Every `/api/v1/trips` route and both WebSockets need an access token. In dev, ge
 | `./gradlew :tools:simulator:run --args="driver --token T --gpx routes/city_loop.gpx"` | Fake driver that replays a GPX route against the server | server running |
 | `... --args="driver --token T --battery 20 --battery-drain 2 --pause-at 120:70"` | Same, with a draining battery (low-battery notice) and a 70 s silence (stale, then back) | server running |
 | `... --args="driver --token T --detour-at 60:60:150"` | Same, driving 150 m beside the route for a minute: during a ride the server re-routes (phase 7) | server running |
+| `... --args="driver --token T --provider AOSP_GPS --rom LineageOS-22.1 --has-gms false --doze-gap 60:360"` | Same, as an AOSP phone that lies still for 6 minutes: the provider report shows a likely-Doze gap (phase 9, `docs/data/field-test.md`) | server running |
 | `./gradlew :tools:simulator:run --args="guest --token T --trip ID"` | Fake guest that prints a trip's live positions, ETA and stages | server running |
 
 Local stack:

@@ -12,7 +12,8 @@ import kotlin.time.Instant
  * What the simulated phone does besides sending fixes, measured in route time (the recorded times of the fixes):
  * - a `device_status` every [statusEvery], like the SDK's heartbeat, with a battery that starts at [batteryPercent]
  *   and loses [drainPerMinute] percent per minute;
- * - one silence of [pauseFor] (real time) when the route reaches [pauseAt], to make the server report the driver gone.
+ * - one silence of [pauseFor] (real time) when the route reaches [pauseAt], to make the server report the driver gone;
+ * - a [motion] in each status, STILL near the [dozeGap].
  */
 class DeviceScript(
     private val routeStart: Instant,
@@ -21,6 +22,9 @@ class DeviceScript(
     private val pauseAt: Duration? = null,
     private val pauseFor: Duration = Duration.ZERO,
     private val statusEvery: Duration = 30.seconds,
+    /** The motion every status reports, except near [dozeGap]. Null sends none. */
+    private val motion: String? = DEFAULT_MOTION,
+    private val dozeGap: DozeGap? = null,
 ) : BatchHooks {
     private var nextStatusAt = routeStart
     private var paused = false
@@ -32,7 +36,8 @@ class DeviceScript(
         while (nextStatusAt <= at) nextStatusAt += statusEvery
         val minutes = (at - routeStart).toDouble(DurationUnit.MINUTES)
         val level = (batteryPercent - drainPerMinute * minutes).toInt().coerceIn(0, MAX_PERCENT)
-        return DeviceStatus(at, BatteryDto(level, isCharging = false))
+        val still = dozeGap?.isStillAt(at, routeStart) == true
+        return DeviceStatus(at, BatteryDto(level, isCharging = false), motion = if (still) STILL else motion)
     }
 
     /** How long to stay silent before [batch]: [pauseFor] once, at the first batch at or after [pauseAt]. */
@@ -44,6 +49,8 @@ class DeviceScript(
 
     companion object {
         const val DEFAULT_BATTERY = 80
+        const val DEFAULT_MOTION = "IN_VEHICLE"
+        private const val STILL = "STILL"
         private const val MAX_PERCENT = 100
 
         /** Parses `--pause-at <route seconds>:<real seconds>`, for example `120:70`. */

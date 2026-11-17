@@ -3,6 +3,7 @@ package veeci.practicing.rts.telemetry.application.port.out
 import veeci.practicing.rts.telemetry.domain.SessionHealthRecord
 import veeci.practicing.rts.tracking.application.api.SessionMark
 import java.util.UUID
+import kotlin.time.Instant
 
 /** Joins the caller's transaction. */
 interface SessionHealthRepository {
@@ -10,6 +11,12 @@ interface SessionHealthRepository {
     suspend fun save(record: SessionHealthRecord)
 
     suspend fun find(sessionId: UUID): SessionHealthRecord?
+
+    /** Every record of a session that started in [from, to). */
+    suspend fun startedBetween(
+        from: Instant,
+        to: Instant,
+    ): List<SessionHealthRecord>
 
     /** Where the health job stopped; null before its first run. */
     suspend fun watermark(): SessionMark?

@@ -13,6 +13,8 @@ import veeci.practicing.rts.telemetry.domain.DeviceKey
 import veeci.practicing.rts.telemetry.domain.HealthFix
 import veeci.practicing.rts.telemetry.domain.HealthInput
 import veeci.practicing.rts.telemetry.domain.HealthSample
+import veeci.practicing.rts.telemetry.domain.ProviderComparison
+import veeci.practicing.rts.telemetry.domain.ProviderGroup
 import veeci.practicing.rts.telemetry.domain.SessionHealthCalculator
 import veeci.practicing.rts.telemetry.domain.SessionHealthRecord
 import veeci.practicing.rts.telemetry.domain.TelemetryError
@@ -20,6 +22,7 @@ import veeci.practicing.rts.tracking.application.api.SessionTelemetry
 import veeci.practicing.rts.tracking.application.api.TelemetrySession
 import java.time.Clock
 import java.util.UUID
+import kotlin.time.Duration.Companion.days
 import kotlin.time.Instant
 import kotlin.time.toKotlinInstant
 
@@ -56,6 +59,17 @@ class SessionHealthService(
         return transactions.inTransaction { health.find(sessionId) } ?: notFound(sessionId)
     }
 
+    /** The provider report over sessions that started in [from, to). */
+    suspend fun providerReport(
+        from: Instant,
+        to: Instant,
+        actor: Actor,
+    ): List<ProviderGroup> {
+        requireAdmin(actor)
+        require(from < to && to - from <= MAX_REPORT_RANGE) { "from must be before to, at most $MAX_REPORT_RANGE apart" }
+        return ProviderComparison.of(transactions.inTransaction { health.startedBetween(from, to) })
+    }
+
     /** Computes the session now, even if it is still live, and replaces the stored health. The watermark stays. */
     suspend fun recompute(
         sessionId: UUID,
@@ -90,11 +104,20 @@ class SessionHealthService(
     }
 
     private fun requireAdmin(actor: Actor) {
-        if (actor.role != Role.ADMIN) throw DomainException(TelemetryError.SESSION_HEALTH_FORBIDDEN, "Session health is for admins only")
+        if (actor.role !=
+            Role.ADMIN
+        ) {
+            throw DomainException(TelemetryError.SESSION_HEALTH_FORBIDDEN, "Session health and reports are for admins only")
+        }
     }
 
     private fun notFound(sessionId: UUID): Nothing =
         throw DomainException(TelemetryError.SESSION_HEALTH_NOT_FOUND, "No health for session $sessionId")
 
     private fun now(): Instant = clock.instant().toKotlinInstant()
+
+    companion object {
+        /** The longest report range. A month of sessions is a few thousand rows, grouped in memory. */
+        val MAX_REPORT_RANGE = 31.days
+    }
 }
