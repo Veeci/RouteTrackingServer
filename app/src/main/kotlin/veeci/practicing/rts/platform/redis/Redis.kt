@@ -5,6 +5,7 @@ import io.lettuce.core.api.StatefulRedisConnection
 import io.lettuce.core.api.async.RedisAsyncCommands
 import io.lettuce.core.pubsub.RedisPubSubAdapter
 import io.lettuce.core.pubsub.StatefulRedisPubSubConnection
+import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
 import veeci.practicing.rts.platform.config.RedisConfig
 import veeci.practicing.rts.platform.observability.HealthIndicator
@@ -21,6 +22,7 @@ import java.util.concurrent.TimeUnit
  */
 class RedisConnections(
     val config: RedisConfig,
+    private val metrics: MeterRegistry? = null,
 ) : AutoCloseable {
     private val log = LoggerFactory.getLogger(RedisConnections::class.java)
     private val client = RedisClient.create(checkNotNull(config.url) { "redis.url is required" })
@@ -65,6 +67,14 @@ class RedisConnections(
     fun unsubscribe(channel: String): CompletionStage<Void> {
         handlers.remove(channel)
         return pubSubConnection.async().unsubscribe(channel)
+    }
+
+    /**
+     * Counts a publish that did not reach Redis, as `rts_redis_publish_failed_total{channel}`: without it, guests
+     * miss live updates and nothing shows an error anywhere.
+     */
+    fun publishFailed(channel: String) {
+        metrics?.counter("rts.redis.publish.failed", "channel", channel)?.increment()
     }
 
     /** True when Redis answers PING within [timeoutMs]. Blocks, so callers run it on the IO pool. */

@@ -47,8 +47,9 @@ class RedisDriverLink(
     ): Boolean {
         if (local.send(driver, message)) return true
         val text = ProtocolJson.encodeToString(ServerMessage.serializer(), message)
-        val instances = quietly { redis.commands.publish(channel(driver), text).await() } ?: 0L
-        return instances > 0
+        val instances = quietly { redis.commands.publish(channel(driver), text).await() }
+        if (instances == null) redis.publishFailed("driver")
+        return (instances ?: 0L) > 0
     }
 
     private fun deliver(

@@ -121,7 +121,7 @@ erDiagram
 | Table | Owner | One row is | Written when | Migration |
 |---|---|---|---|---|
 | `users` | identity | One person and the role they act in | Phase 3: by the dev token endpoint only (dev and test) | V4 |
-| `tracking_sessions` | tracking | One tracking run of one phone | On `hello`; updated on every reconnect and every stored batch | V3, V5 (`driver_id`), V15 (device columns) |
+| `tracking_sessions` | tracking | One tracking run of one phone | On `hello`; updated on every reconnect and every stored batch; `purged_at` set by the retention job | V3, V5 (`driver_id`), V15 (device columns), V18 (`purged_at`) |
 | `device_status_samples` | tracking | One battery and motion reading of a session's phone | On every `device_status` message | V15 |
 | `trip_progress_state` | trip | The live progress of one active trip: smoothed speed, last fix, place on the route | On every batch of the trip's driver, in the relay's transaction; removed when the trip ends | V17 |
 | `session_health` | telemetry | The computed health of one tracking session | By the health job once the session is idle, or by an admin; computing again replaces it | V16 |
@@ -287,6 +287,7 @@ when the application has a bug.
 | A trip's moments in time order, for the track's timeline (`TripMomentRepository.findAll`) | `trip_moments_trip_at` (V8); `id` breaks ties among the few rows of one trip |
 | The active trip of a driver (`TripRepository.findActiveForDriver`) | `one_active_trip_per_driver` (it is unique and contains only active trips) |
 | A stored idempotent response (`Idempotency.execute`) | Primary key of `idempotency_keys` |
+| Sessions to purge, oldest first (`RetentionRepository.expiredSessions`) | `tracking_sessions_unpurged (last_seen_at, id) WHERE purged_at IS NULL` (V18) |
 | Idle sessions after the health job's watermark, page by page (`SessionTelemetry.idleSessions`) | `tracking_sessions_last_seen (last_seen_at, id)` (V16) |
 | A session's fixes for its health (`SessionTelemetry.fixes`) | `fixes_session_time` |
 | Session health by start time, for the provider report (`SessionHealthRepository.startedBetween`) | `session_health_started (started_at)` (V16) |

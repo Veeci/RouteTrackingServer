@@ -2,6 +2,7 @@ package veeci.practicing.rts.platform.config
 
 import com.sksamuel.hoplite.Secret
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
@@ -21,6 +22,7 @@ data class AppConfig(
     val routing: RoutingConfig = RoutingConfig(),
     val telemetry: TelemetryConfig = TelemetryConfig(),
     val redis: RedisConfig = RedisConfig(),
+    val retention: RetentionConfig = RetentionConfig(),
 )
 
 data class AppInfo(
@@ -107,6 +109,18 @@ data class RedisConfig(
     /** A blank URL counts as none, so compose can pass `REDIS_URL=` when Redis is off. */
     val enabled: Boolean get() = !url.isNullOrBlank()
 }
+
+/**
+ * How long raw location data is kept (phase 10): GPS fixes and device status samples. Trips, summaries, moments,
+ * routes and session health stay. Location minimisation: what is not needed after a while is not kept.
+ */
+data class RetentionConfig(
+    val rawLocation: Duration = 90.days,
+    /** How often the retention job looks for sessions to purge. */
+    val checkEvery: Duration = 2.minutes,
+    /** At most this many sessions per run, in one transaction, so no run holds locks for long. */
+    val sessionsPerRun: Int = 20,
+)
 
 /** Session health (phase 9). */
 data class TelemetryConfig(

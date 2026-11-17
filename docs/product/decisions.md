@@ -151,7 +151,7 @@ is closed, and sign-up and login for real users.
 | 72 | How gaps are compared across groups | Per tracked hour, so long sessions are not penalised for their length | Built P9 (9c) |
 | 73 | Who may download the report | Admins only, as JSON or CSV | Built P9 (9c) |
 
-## Phase 10 (10a and 10b built, decided 2026-11-17)
+## Phase 10 (10a to 10c built, decided 2026-11-17)
 
 | # | Problem | What will happen | Source |
 |---|---|---|---|
@@ -159,6 +159,9 @@ is closed, and sign-up and login for real users.
 | 75 | Two guests start watching at the same moment on two instances | Both may count as first, so the driver's device gets the same precision command twice and applies it once | Built P10 (10a) |
 | 76 | Events of one trip on several instances | One instance handles events at a time, oldest first, so a trip's events stay in order | Built P10 (10a) |
 | 77 | A guest reconnects after a deploy | They get the trip's latest update again, then new ones. The app treats a `trip_event` with the same kind and time as the one it already showed | Built P10 (10b) |
+| 78 | How long raw GPS points and battery readings are kept | 90 days after the session's last message. Trips, summaries, moments, routes and session health are kept | Built P10 (10c) |
+| 79 | The track of a trip older than 90 days | The timeline and the summary stay. The points are gone: the track says `pointsExpired`, and exports and summary recompute answer 410 TRACK_EXPIRED | Built P10 (10c) |
+| 80 | Where alerts go | A Discord channel, through a webhook URL kept out of git. Without one, alerts show in Prometheus only | Built P10 (10c) |
 
 ## Open questions, most important first
 

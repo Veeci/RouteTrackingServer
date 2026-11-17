@@ -1,6 +1,7 @@
 package veeci.practicing.rts.platform.events
 
 import io.kotest.matchers.shouldBe
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -173,6 +174,23 @@ class OutboxRelayIT {
             delivered.sum() shouldBe 100
             order.toList() shouldBe (1..100).toList()
             mostAtOnce.get() shouldBe 1
+        }
+
+    @Test
+    fun `TC-10-OBS-01 the backlog gauges show what waits, and the relay counts what it delivered`() =
+        runTest {
+            val metrics = SimpleMeterRegistry()
+            val backlog = OutboxMetrics(transactions, metrics)
+            append(1, 2, 3)
+
+            backlog.refresh()
+            metrics.get("rts.outbox.pending").gauge().value() shouldBe 3.0
+            (metrics.get("rts.outbox.oldest.age.seconds").gauge().value() >= 0.0) shouldBe true
+
+            OutboxRelay(transactions, listOf(Recorder()), config, metrics).deliverPending() shouldBe 3
+            backlog.refresh()
+            metrics.get("rts.outbox.pending").gauge().value() shouldBe 0.0
+            metrics.get("rts.relay.delivered").counter().count() shouldBe 3.0
         }
 
     /** Like the relay loop: delivers until the outbox is empty, whoever else delivers at the same time. */

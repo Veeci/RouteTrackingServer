@@ -5,6 +5,7 @@ import org.koin.dsl.bind
 import org.koin.dsl.binds
 import org.koin.dsl.module
 import veeci.practicing.rts.platform.config.EventsConfig
+import veeci.practicing.rts.platform.config.RetentionConfig
 import veeci.practicing.rts.platform.events.OutboxEventHandler
 import veeci.practicing.rts.platform.jobs.BackgroundWorker
 import veeci.practicing.rts.platform.jobs.ScheduledJob
@@ -50,7 +51,10 @@ import veeci.practicing.rts.trip.domain.TripRules
  * The trip context's object graph. TripService is also bound as TripQuery, the read API for other contexts;
  * the two listeners are found by the outbox relay.
  */
-fun tripModule(events: EventsConfig): Module =
+fun tripModule(
+    events: EventsConfig,
+    retention: RetentionConfig = RetentionConfig(),
+): Module =
     module {
         single<TripRepository> { ExposedTripRepository() }
         single<TripEventOutbox> { ExposedTripEventOutbox(get()) }
@@ -83,10 +87,10 @@ fun tripModule(events: EventsConfig): Module =
 
         // Phase 8a: a summary of every completed trip.
         single<TripSummaryRepository> { ExposedTripSummaryRepository() }
-        single { TripSummaryService(get(), get(), get(), get(), get(), get(), get()) }
+        single { TripSummaryService(get(), get(), get(), get(), get(), get(), get(), retention.rawLocation) }
         single { TripSummaryListener(get()) } bind OutboxEventHandler::class
         single { TripHistoryService(get(), get(), get()) }
 
         // Phase 8c: the track and timeline of ended trips.
-        single { TripTrackService(get(), get(), get(), get(), get()) }
+        single { TripTrackService(get(), get(), get(), get(), get(), get(), retention.rawLocation) }
     }

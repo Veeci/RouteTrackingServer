@@ -100,7 +100,7 @@ Secrets: platform secret store → env vars (`DB_PASSWORD`, `JWT_SECRET`, `REDIS
 - [x] T10.3 Contract tests for each port run against the Redis adapter too.
 - [x] T10.4 Multi-instance E2E harness: two app instances + Postgres + Redis in Testcontainers (or compose).
 - [ ] T10.5 `prod` environment: app, managed Postgres with backups, secrets, promotion job with approval, rolling strategy.
-- [ ] T10.6 Dashboards, alerts, runbook; retention job.
+- [x] T10.6 Dashboards, alerts, runbook; retention job.
 - [ ] T10.7 Capacity test and report (`docs/ops/capacity.md`).
 
 ## Test plan
@@ -172,6 +172,27 @@ Secrets: platform secret store → env vars (`DB_PASSWORD`, `JWT_SECRET`, `REDIS
   instance, as a load balancer would.
 - A guest who reconnects gets the latest update again. That is the state, not a new event: `protocol.md` now says
   clients treat `trip_event` as idempotent by `(event, at)`.
+
+## As built (10c)
+
+- `RetentionJob` (lock 10_002) runs every 2 minutes and purges at most 20 sessions per run, in one transaction.
+  It works by session: sessions not purged yet and last seen over 90 days ago, through the partial index
+  `tracking_sessions_unpurged` (V18). It deletes their `fixes` and `device_status_samples` along the primary key
+  and sets `tracking_sessions.purged_at`. `fix_batches`, sessions, trips, summaries, moments, routes and session
+  health stay. Deleting by fix time instead would scan `fixes`, which has no index on its time alone.
+- A trip that ended over 90 days ago: its track has `pointsExpired: true` and no points, even before the job reached
+  it, so a half-deleted track is never shown. Its exports and an admin summary recompute answer 410
+  `TRACK_EXPIRED`, a new error category `GONE`. The plan said 409 for the recompute; 410 says the same thing for
+  all three.
+- New metrics: `rts_outbox_pending` and `rts_outbox_oldest_age_seconds` (every instance, one query every 15 s),
+  `rts_relay_delivered_total`, `rts_redis_publish_failed_total{channel}`, `rts_retention_deleted_total{table}`.
+- `deploy/monitoring/`: Prometheus (finds every app container by DNS), six alert rules, Alertmanager to a Discord
+  webhook from `DISCORD_WEBHOOK_URL` (none set: notify nobody), and a provisioned Grafana dashboard. Compose profile
+  `monitoring`. The readiness alert became `InstanceDown` (`up == 0`): Prometheus has no readiness metric, and the
+  load balancer already acts on readiness.
+- The configs are checked as YAML and JSON only. The PromQL was not run through `promtool`, and the stack has not
+  been started yet: that happens on the staging laptop in 10d.
+- `docs/ops/runbook.md`: one section per alert, plus deploy, rollback, restore, JWT rotation, draining and retention.
 
 ## Definition of Done
 

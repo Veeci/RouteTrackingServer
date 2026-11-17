@@ -1,0 +1,55 @@
+# Alert rules (phase 10c). Each alert names the runbook section to open: docs/ops/runbook.md.
+groups:
+  - name: rts
+    rules:
+      - alert: AckLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(rts_ack_latency_seconds_bucket[5m]))) > 0.5
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: "Fix batches wait {{ $value | humanizeDuration }} for their ack (p95)"
+          runbook: "docs/ops/runbook.md#ack-latency-is-high"
+
+      - alert: OutboxLagging
+        expr: max(rts_outbox_oldest_age_seconds) > 30
+        for: 1m
+        labels: { severity: page }
+        annotations:
+          summary: "The oldest undelivered event is {{ $value }} s old: guests see the driver late"
+          runbook: "docs/ops/runbook.md#the-outbox-is-lagging"
+
+      - alert: ServerErrors
+        expr: >
+          sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m]))
+            / sum(rate(http_server_requests_seconds_count[5m])) > 0.01
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of requests fail with 5xx"
+          runbook: "docs/ops/runbook.md#server-errors"
+
+      - alert: InstanceDown
+        # Prometheus cannot reach the instance. A ready check that fails while /metrics answers is the load
+        # balancer's to act on; this catches a crashed or hung process.
+        expr: up{job="rts"} == 0
+        for: 1m
+        labels: { severity: page }
+        annotations:
+          summary: "Instance {{ $labels.instance }} does not answer"
+          runbook: "docs/ops/runbook.md#an-instance-is-down"
+
+      - alert: DatabasePoolNearlyFull
+        expr: max(hikaricp_connections_active / hikaricp_connections_max) > 0.8
+        for: 5m
+        labels: { severity: warn }
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of the database pool is in use"
+          runbook: "docs/ops/runbook.md#the-database-pool-is-nearly-full"
+
+      - alert: RedisPublishFailing
+        expr: sum(rate(rts_redis_publish_failed_total[5m])) > 0
+        for: 5m
+        labels: { severity: warn }
+        annotations:
+          summary: "Publishes to Redis fail: guests miss live updates"
+          runbook: "docs/ops/runbook.md#redis-is-down"

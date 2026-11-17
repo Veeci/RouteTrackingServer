@@ -3,6 +3,7 @@ package veeci.practicing.rts.trip.application
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
@@ -26,10 +27,14 @@ import veeci.practicing.rts.trip.domain.Trip
 import veeci.practicing.rts.trip.domain.TripError
 import veeci.practicing.rts.trip.domain.TripLeg
 import veeci.practicing.rts.trip.domain.event.TripStatus
+import java.time.Clock
+import java.time.ZoneOffset
 import java.util.UUID
+import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Instant
+import kotlin.time.toJavaInstant
 
 /** The completed sample moves one stage a minute: approach T0+1m..T0+2m, ride T0+3m..T0+4m. */
 class TripTrackServiceTest {
@@ -139,6 +144,30 @@ class TripTrackServiceTest {
 
             shouldThrow<DomainException> { service.export(trip.id, guest, TripLeg.RIDE) }.code shouldBe TripError.TRIP_NOT_ENDED
             track.calls shouldBe 0
+        }
+
+    @Test
+    fun `TC-10-RET-02 a trip that ended before the retention period has no points and says so, and its exports are gone`() =
+        runTest {
+            val trip = stored(TripStatus.COMPLETED)
+            track.add(driver.userId, T0 + 3.5.minutes) // still stored: the job has not reached it yet
+            val later =
+                TripTrackService(
+                    trips,
+                    InMemoryTripMomentRepository(),
+                    InMemoryTripRouteRepository(),
+                    track,
+                    DirectTransactionRunner,
+                    Clock.fixed((T0 + 91.days).toJavaInstant(), ZoneOffset.UTC),
+                    retention = 90.days,
+                )
+
+            val result = later.track(trip.id, guest, TripLeg.RIDE)
+            result.pointsExpired shouldBe true
+            result.points.shouldBeEmpty()
+            result.timeline.shouldNotBeEmpty() // the stages stay
+            shouldThrow<DomainException> { later.export(trip.id, guest, TripLeg.RIDE) }.code shouldBe TripError.TRACK_EXPIRED
+            service.track(trip.id, guest, TripLeg.RIDE).pointsExpired shouldBe false // no retention: kept forever
         }
 
     /** One session per driver; it pages like the Exposed adapter: [from, to), after the cursor, at most limit. */

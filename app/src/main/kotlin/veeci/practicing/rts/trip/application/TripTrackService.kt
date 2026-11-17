@@ -25,6 +25,9 @@ import veeci.practicing.rts.trip.domain.TripId
 import veeci.practicing.rts.trip.domain.TripLeg
 import veeci.practicing.rts.trip.domain.TripTimeline
 import veeci.practicing.rts.trip.domain.window
+import java.time.Clock
+import kotlin.time.Duration
+import kotlin.time.toKotlinInstant
 
 /** One leg of an ended trip and the whole trip's timeline, for a replay (phase 8c). */
 data class TripTrack(
@@ -34,6 +37,8 @@ data class TripTrack(
     val points: List<TrackPoint>,
     /** Every stage, moment and route version of the trip, whatever [leg] is. */
     val timeline: List<TimelineEntry>,
+    /** The trip ended longer ago than the retention period, so [points] is empty for good (phase 10). */
+    val pointsExpired: Boolean = false,
 )
 
 /** One leg of an ended trip for a file export (phase 8d): everything but the points is read already. */
@@ -55,6 +60,9 @@ class TripTrackService(
     private val routes: TripRouteRepository,
     private val track: DriverTrack,
     private val transactions: TransactionRunner,
+    private val clock: Clock = Clock.systemUTC(),
+    /** How long GPS points are kept (phase 10). A trip that ended before that has no points any more. */
+    private val retention: Duration = Duration.INFINITE,
 ) {
     /**
      * The track of [leg] for [actor]: the guest, the assigned driver or an admin. Anyone else gets TRIP_NOT_FOUND,
@@ -76,13 +84,17 @@ class TripTrackService(
             val trip = readable(tripId, actor, leg)
             val driver = trip.driverId
             val window = trip.window(leg)
-            // Already inside a transaction: every page joins it.
-            val points = if (driver == null || window == null) emptyList() else pages(driver, window) { it() }.toList().flatten()
+            val expired = trip.trackExpired()
+            // Already inside a transaction: every page joins it. An expired track is not read at all: the retention
+            // job may have deleted part of it, and a half track would look like a GPS problem.
+            val points =
+                if (driver == null || window == null || expired) emptyList() else pages(driver, window) { it() }.toList().flatten()
             TripTrack(
                 trip.id,
                 leg,
                 DouglasPeucker.simplify(points, simplifyM) { GeoPoint(it.lat, it.lng) },
                 TripTimeline.of(trip, moments.findAll(trip.id), routes.findAll(trip.id)),
+                pointsExpired = expired,
             )
         }
     }
@@ -101,6 +113,12 @@ class TripTrackService(
         val (trip, timeline) =
             transactions.inTransaction {
                 val trip = readable(tripId, actor, leg)
+                if (trip.trackExpired()) {
+                    throw DomainException(
+                        TripError.TRACK_EXPIRED,
+                        "The GPS points of trip ${trip.id.value} are deleted",
+                    )
+                }
                 trip to TripTimeline.of(trip, moments.findAll(trip.id), routes.findAll(trip.id))
             }
         val driver = trip.driverId
@@ -130,6 +148,9 @@ class TripTrackService(
             throw DomainException(TripError.TRIP_ACTION_FORBIDDEN, "Only the driver and admins see the approach")
         }
     }
+
+    /** The trip ended before the retention period: an old trip without stage times counts from its last change. */
+    private fun Trip.trackExpired(): Boolean = (stages.endedAt ?: updatedAt) < clock.instant().toKotlinInstant() - retention
 
     /** The trip's own people and admins. Unlike [Trip.isVisibleTo], a driver does not see someone else's open trip. */
     private fun Trip.isPartyOrAdmin(actor: Actor): Boolean =

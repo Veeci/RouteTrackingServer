@@ -1,5 +1,6 @@
 package veeci.practicing.rts.platform.events
 
+import io.micrometer.core.instrument.MeterRegistry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -46,7 +47,11 @@ class OutboxRelay(
     private val transactions: TransactionRunner,
     handlers: List<OutboxEventHandler>,
     private val config: EventsConfig,
+    metrics: MeterRegistry? = null,
 ) {
+    /** rts_relay_delivered_total: events per second, the relay's ceiling before the capacity test (phase 10). */
+    private val delivered = metrics?.counter("rts.relay.delivered")
+
     private val log = LoggerFactory.getLogger(OutboxRelay::class.java)
     private val handlers = handlers.groupBy { it.eventType }
     private val failures = ConcurrentHashMap<Long, Int>()
@@ -104,7 +109,12 @@ class OutboxRelay(
                     handlers[row[OutboxTable.eventType]].orEmpty().forEach { it.handle(row[OutboxTable.payload]) }
                     markPublished(row[OutboxTable.id])
                     true
-                }.also { if (it) eventId?.let(failures::remove) }
+                }.also {
+                    if (it) {
+                        eventId?.let(failures::remove)
+                        delivered?.increment()
+                    }
+                }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

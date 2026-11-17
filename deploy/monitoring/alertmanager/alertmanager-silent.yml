@@ -1,0 +1,5 @@
+# No DISCORD_WEBHOOK_URL: alerts still show in Prometheus and Alertmanager, but notify nobody.
+route:
+  receiver: nobody
+receivers:
+  - name: nobody

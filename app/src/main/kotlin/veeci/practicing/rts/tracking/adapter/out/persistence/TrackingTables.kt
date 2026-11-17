@@ -25,6 +25,7 @@ internal object TrackingSessionsTable : Table("tracking_sessions") {
     val deviceAndroidSdk = integer("device_android_sdk").nullable()
     val deviceRom = text("device_rom").nullable()
     val deviceHasGms = bool("device_has_gms").nullable()
+    val purgedAt = timestamp("purged_at").nullable() // migration V18
     override val primaryKey = PrimaryKey(id)
 }
 
