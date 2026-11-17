@@ -136,7 +136,7 @@ is closed, and sign-up and login for real users.
 | 62 | Where a timeline entry sits on the GeoJSON map | At the driver's last fix at or before its time, inside the leg including its end. With no such fix, the point has no geometry, never a guessed position | Built P8 (8d) |
 | 63 | What the exports hold | One leg each, with the same access rules as the track. GPX holds the points and their times only; GeoJSON adds the timeline as points | Built P8 (8d) |
 
-## Phase 9 (9a built, decided 2026-11-16)
+## Phase 9 (9a and 9b built, decided 2026-11-16)
 
 | # | Problem | What will happen | Source |
 |---|---|---|---|
@@ -144,6 +144,9 @@ is closed, and sign-up and login for real users.
 | 65 | A reconnect whose hello has no device block | The stored device stays. Only a hello with a block replaces it | Built P9 (9a) |
 | 66 | The same device status sent twice | Stored once, keyed by session and reading time. The event is still announced again, as before phase 9 | Built P9 (9a) |
 | 67 | When a session's health is computed | 10 minutes after its last message, by a job every 5 minutes, and again if the session resumes. There is no "session closed" signal | Plan (corrected) |
+| 68 | Who sees a session's health | Admins only. A driver gets 403, even for their own session | Built P9 (9b) |
+| 69 | Which fix interval a gap is measured against | The SET_CONSTRAINT the device had applied when the gap started, counted from its ack. It holds across sessions until the next one. Without one, 5 s | Built P9 (9b) |
+| 70 | How battery drain is reported | Percent per hour while not charging, positive when the battery runs down. A stretch under 10 minutes or with one sample is left out | Built P9 (9b) |
 
 ## Open questions, most important first
 

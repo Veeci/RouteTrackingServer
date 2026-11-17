@@ -470,6 +470,38 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/admin/sessions/{id}/health:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      tags: [admin]
+      operationId: getSessionHealth
+      summary: How one tracking session behaved (ADMIN)
+      description: |
+        The stored health of a session: fix cadence, accuracy, gaps, battery drain and provider mix (phase 9). The
+        server computes it 10 to 15 minutes after the session's last message, and again if the session resumes.
+        404 SESSION_HEALTH_NOT_FOUND until then.
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { $ref: '#/components/responses/SessionHealth' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    post:
+      tags: [admin]
+      operationId: recomputeSessionHealth
+      summary: Compute a session's health now (ADMIN)
+      description: Computes and stores the health from what the session sent so far, even while it is live. 404 SESSION_HEALTH_NOT_FOUND for an unknown session.
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { $ref: '#/components/responses/SessionHealth' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
   /health/live:
     get:
       tags: [operations]
@@ -535,6 +567,12 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    SessionId:
+      name: id
+      in: path
+      required: true
+      description: The tracking session id the SDK sent in hello.
+      schema: { type: string, format: uuid }
     DriverId:
       name: driverId
       in: path
@@ -569,6 +607,11 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/TripSummary' }
+    SessionHealth:
+      description: The session's health.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/SessionHealth' }
     Unauthorized:
       description: No access token, or an invalid or expired one (UNAUTHORIZED).
       headers:
@@ -578,12 +621,12 @@ components:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
     Forbidden:
-      description: The caller may not do this (TRIP_ACTION_FORBIDDEN, COMMAND_FORBIDDEN), e.g. a guest accepting a trip.
+      description: The caller may not do this (TRIP_ACTION_FORBIDDEN, COMMAND_FORBIDDEN, SESSION_HEALTH_FORBIDDEN), e.g. a guest accepting a trip.
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
     NotFound:
-      description: TRIP_NOT_FOUND, no such trip or one the caller may not see. SUMMARY_NOT_READY, the trip has no summary yet.
+      description: TRIP_NOT_FOUND, no such trip or one the caller may not see. SUMMARY_NOT_READY, the trip has no summary yet. SESSION_HEALTH_NOT_FOUND, no such session or no health computed yet.
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
@@ -661,6 +704,59 @@ components:
         route:
           $ref: '#/components/schemas/TripRoute'
           description: The road route from pickup to destination. Sent by POST /trips and GET /trips/{id} only.
+    SessionHealth:
+      type: object
+      required: [sessionId, startedAt, sessionLastSeenAt, computedAt, fixCount, rejectedCount, rejectionsByReason, gaps, providerMix]
+      additionalProperties: false
+      properties:
+        sessionId: { type: string, format: uuid }
+        driverId: { type: string, format: uuid }
+        startedAt: { type: string, format: date-time }
+        sessionLastSeenAt:
+          type: string
+          format: date-time
+          description: The session's last message when the health was computed.
+        computedAt: { type: string, format: date-time }
+        device:
+          type: object
+          description: The phone, from the device block of hello. Absent when no hello carried one.
+          additionalProperties: false
+          properties:
+            manufacturer: { type: string }
+            model: { type: string }
+            androidSdk: { type: integer }
+            rom: { type: string }
+            hasGms: { type: boolean }
+        fixCount: { type: integer, minimum: 0, description: Accepted fixes. }
+        rejectedCount: { type: integer, minimum: 0 }
+        acceptedRatio: { type: number, minimum: 0, maximum: 1, description: Accepted over accepted plus rejected. Absent without fixes. }
+        rejectionsByReason:
+          type: object
+          additionalProperties: { type: integer }
+        intervalP50S: { type: number, description: Median time between accepted fixes, by linear interpolation. }
+        intervalP95S: { type: number }
+        accuracyP50M: { type: number }
+        accuracyP95M: { type: number }
+        gaps:
+          type: array
+          description: Intervals longer than 3 times the expected interval and longer than 30 s.
+          items:
+            type: object
+            required: [start, durationS, expectedIntervalS, likelyDoze]
+            additionalProperties: false
+            properties:
+              start: { type: string, format: date-time }
+              durationS: { type: number }
+              expectedIntervalS: { type: number, description: From the SET_CONSTRAINT in effect at the start, else the default. }
+              likelyDoze: { type: boolean, description: 5 minutes or more, and still and not charging on both sides. }
+        batteryDrainPctPerHour:
+          type: number
+          description: Battery percent lost per hour while not charging; positive means the battery runs down.
+        providerMix:
+          type: object
+          description: Each provider's share of the accepted fixes.
+          additionalProperties: { type: number }
+        primaryProvider: { type: string, description: The provider with the largest share. }
     TripSummary:
       type: object
       required: [tripId, ride, offRouteCount, rerouteCount, rejected, approximate, computedAt]

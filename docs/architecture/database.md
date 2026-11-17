@@ -123,6 +123,8 @@ erDiagram
 | `users` | identity | One person and the role they act in | Phase 3: by the dev token endpoint only (dev and test) | V4 |
 | `tracking_sessions` | tracking | One tracking run of one phone | On `hello`; updated on every reconnect and every stored batch | V3, V5 (`driver_id`), V15 (device columns) |
 | `device_status_samples` | tracking | One battery and motion reading of a session's phone | On every `device_status` message | V15 |
+| `session_health` | telemetry | The computed health of one tracking session | By the health job once the session is idle, or by an admin; computing again replaces it | V16 |
+| `session_health_watermark` | telemetry | Where the health job stopped (one row at most) | With every run of the job that computed a session | V16 |
 | `fix_batches` | tracking | One numbered upload (`seq`) of a session | Once per new `seq` | V3 |
 | `fixes` | tracking | One GPS point that passed the fix pipeline | Together with its batch | V3 |
 | `trips` | trip | One ride from a pickup to a destination | On booking; updated on every change of stage | V6 |
@@ -156,6 +158,18 @@ Every `device_status` message of a session (phase 9): battery level, charging, t
 motion, at the time the device read them. Session health reads them to compute battery drain and to flag gaps
 that look like Doze. The primary key `(session_id, at)` makes a resent sample harmless, like `fix_batches`. The
 row is written in the same transaction as the session's `last_seen_at` and the `DeviceStatusReported` outbox row.
+
+### `session_health` and `session_health_watermark`
+
+The health of one tracking session (phase 9): fix cadence, accuracy, gaps, battery drain and provider mix. The
+metrics are one JSON document in `metrics`. The columns beside it (`primary_provider`, the device columns,
+`started_at`) are what the provider report groups and filters by. Telemetry reads the session's data through
+tracking's and device control's APIs, so there is no foreign key to `tracking_sessions`.
+
+`session_health_watermark` holds the `(last_seen_at, session_id)` of the last session the job computed. The job
+reads the idle sessions after it, computes them and moves it, in one transaction. It is its own row and not the
+maximum over `session_health`, because an admin may compute a live session, and that must not make the job skip
+the idle sessions before it.
 
 ### `fix_batches`
 
@@ -265,6 +279,9 @@ when the application has a bug.
 | A trip's moments in time order, for the track's timeline (`TripMomentRepository.findAll`) | `trip_moments_trip_at` (V8); `id` breaks ties among the few rows of one trip |
 | The active trip of a driver (`TripRepository.findActiveForDriver`) | `one_active_trip_per_driver` (it is unique and contains only active trips) |
 | A stored idempotent response (`Idempotency.execute`) | Primary key of `idempotency_keys` |
+| Idle sessions after the health job's watermark, page by page (`SessionTelemetry.idleSessions`) | `tracking_sessions_last_seen (last_seen_at, id)` (V16) |
+| A session's fixes for its health (`SessionTelemetry.fixes`) | `fixes_session_time` |
+| A driver's applied constraints in a window (`AppliedConstraints.history`) | `device_commands_driver (driver_id, status, created_at)`, then a sort of that driver's few APPLIED rows |
 
 There is no index on `tracking_sessions.device_id`, because no query needs it yet. An index is added
 together with the first query that needs it, because every index slows down writes and uses space.

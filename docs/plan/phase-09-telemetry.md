@@ -83,9 +83,9 @@ The plan above was written before phases 4 to 8. These corrections replace the p
 ## Tasks
 
 - [x] T9.1 Protocol: `device` in `hello`, persistence of device info and status samples (V15).
-- [ ] T9.2 Percentile helper, linear regression helper (pure, in `shared/stats`).
-- [ ] T9.3 `SessionHealthCalculator` including gap and Doze heuristics.
-- [ ] T9.4 `ComputeSessionHealth` on close + admin recompute; `session_health` repository.
+- [x] T9.2 Percentile helper, linear regression helper (pure, in `shared/stats`).
+- [x] T9.3 `SessionHealthCalculator` including gap and Doze heuristics.
+- [x] T9.4 `ComputeSessionHealth` on close + admin recompute; `session_health` repository.
 - [ ] T9.5 `ProviderComparisonReport` + JSON/CSV endpoints.
 - [ ] T9.6 Simulator: `--provider AOSP_GPS --doze-gap 6m` to generate comparable sessions.
 - [ ] T9.7 Document how to run a field comparison (same route, two phones/stacks) in `docs/data/field-test.md`.
@@ -134,6 +134,28 @@ The plan above was written before phases 4 to 8. These corrections replace the p
 - `DeviceStatusSampleRepository.forSession` returns samples oldest first. Session health (9b) reads it.
 - TC-9-DB-01 covers the samples in the persistence contract, so the in-memory and Postgres versions pass the
   same test. The session health half of TC-9-DB-01 comes with 9b.
+
+## As built (9b)
+
+- `shared/stats` has `percentile` (linear interpolation, PERCENTILE.INC) and `slope` (least squares). Both
+  return null when there is nothing to compute.
+- `SessionHealthCalculator` in `telemetry/domain` is pure. Its input is plain lists: fixes, rejection counts,
+  samples and constraint changes. TC-9-HLT-01 to 08 use literal timestamps.
+- `batteryDrainPctPerHour` is positive when the battery runs down. A run counts with 2 or more samples over 10
+  minutes or more.
+- Telemetry reads tracking through `SessionTelemetry` (new, per session, with each fix's provider) and device
+  control through `AppliedConstraints`. A constraint counts from its ack (`updated_at` of the APPLIED row) and
+  holds across sessions until the next one. `minIntervalMs = 0` means the default of 5 s.
+- `SessionHealthJob` runs every 5 minutes. It computes at most 100 sessions last seen 10 minutes ago or more,
+  after the watermark in `session_health_watermark`, in one transaction. A resumed session moves past the
+  watermark and is computed again. The watermark has its own table: with `max(session_last_seen_at)`, an admin's
+  recompute of a live session would make the job skip every idle session before it.
+- On the first run after deploy the job works through every stored session, 100 per run.
+- `GET` and `POST /api/v1/admin/sessions/{id}/health` are for admins only (403 SESSION_HEALTH_FORBIDDEN). A
+  missing session or health is 404 SESSION_HEALTH_NOT_FOUND. `POST` computes now, even a live session, and
+  leaves the watermark alone.
+- TC-9-DB-01 (health half) and the job's paging and resume are in `SessionHealthJobIT`. TC-9-RPT-04 covers the
+  health endpoints in `SessionHealthApiIT`. The report endpoints come with 9c.
 
 ## Definition of Done
 
