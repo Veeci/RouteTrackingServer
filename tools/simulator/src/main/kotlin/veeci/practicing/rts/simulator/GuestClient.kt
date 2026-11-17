@@ -6,6 +6,9 @@ import io.ktor.client.request.bearerAuth
 import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import veeci.practicing.rts.protocol.ErrorMessage
@@ -50,5 +53,41 @@ class GuestClient(
             reason = closeReason.await()
         }
         return reason
+    }
+
+    /**
+     * Like [watch], but reconnects with [Backoff] when the socket drops or the server goes away (close 1001, a
+     * deploy), until the server closes it normally because the trip ended. Returns that close reason, or null after
+     * 5 failed connections in a row. [urls] picks the address of each attempt, from the attempt number;
+     * behind a load balancer it is always the same.
+     */
+    @Suppress("TooGenericExceptionCaught") // any failure means: try again
+    suspend fun watchUntilEnded(
+        tripId: String,
+        onMessage: (GuestServerMessage) -> Unit,
+        backoff: Backoff = Backoff(),
+        urls: (attempt: Int) -> String = { url },
+        onConnectionFailed: (Exception) -> Unit = {},
+    ): CloseReason? {
+        var failures = 0
+        var attempt = 0
+        while (failures < MAX_FAILURES) {
+            val reason =
+                try {
+                    GuestClient(http, urls(attempt++), token).watch(tripId, onMessage)
+                } catch (e: Exception) {
+                    currentCoroutineContext().ensureActive()
+                    onConnectionFailed(e)
+                    null
+                }
+            if (reason?.code == CloseReason.Codes.NORMAL.code) return reason
+            failures++
+            delay(backoff.next())
+        }
+        return null
+    }
+
+    private companion object {
+        const val MAX_FAILURES = 5
     }
 }

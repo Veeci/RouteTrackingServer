@@ -5,6 +5,7 @@ import io.ktor.client.HttpClientConfig
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.defaultRequest
 import io.ktor.server.application.Application
+import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.connector
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
@@ -67,3 +68,74 @@ class SocketTestApp internal constructor(
 }
 
 private const val STOP_TIMEOUT_MS = 2_000L
+
+/**
+ * Two instances of the app on Netty, like two servers behind a load balancer (phase 10): each has its own Koin
+ * graph, and both share one Redis and one fresh database, which no other test writes to. Without the fresh
+ * database, the other tests' outbox events would reach these instances' relays. [env] is added to both.
+ */
+fun twoInstances(
+    env: Map<String, String> = emptyMap(),
+    block: suspend TwoInstances.() -> Unit,
+): Unit =
+    runBlocking {
+        val shared = TestDatabase.freshDatabaseEnv() + TestRedis.env() + env
+        val instances = TwoInstances(start(shared), start(shared), shared)
+        try {
+            instances.block()
+        } finally {
+            instances.stopAll()
+        }
+    }
+
+/** What a [twoInstances] test sees: [a] and [b], and the database they share. */
+class TwoInstances internal constructor(
+    private val first: Instance,
+    private val second: Instance,
+    /** DB_URL, DB_USER and DB_PASSWORD of the shared database, for checks with plain SQL. */
+    val dbEnv: Map<String, String>,
+) {
+    val a: SocketTestApp get() = first.app
+    val b: SocketTestApp get() = second.app
+
+    /** `ws://localhost:<port>` of [a] and [b], for clients that connect to an absolute URL. */
+    val wsA: String get() = first.wsUrl
+    val wsB: String get() = second.wsUrl
+
+    /** Stops [a] at once, as a crash or a deploy would: its sockets get close 1001 and it delivers no more events. */
+    suspend fun stopA() = first.stop()
+
+    internal suspend fun stopAll() {
+        first.stop()
+        second.stop()
+    }
+}
+
+internal class Instance(
+    private val server: EmbeddedServer<*, *>,
+    val app: SocketTestApp,
+    val wsUrl: String,
+) {
+    private var stopped = false
+
+    suspend fun stop() {
+        if (stopped) return
+        stopped = true
+        app.closeClients()
+        server.stopSuspend(gracePeriodMillis = 0, timeoutMillis = STOP_TIMEOUT_MS)
+    }
+}
+
+private suspend fun start(env: Map<String, String>): Instance {
+    val server =
+        embeddedServer(Netty, configure = { connector { port = 0 } }) {
+            module(TestConfig.load(env), listOf(TestRouting.module()))
+        }.startSuspend()
+    server.application.awaitRoadGraph()
+    val port =
+        server.engine
+            .resolvedConnectors()
+            .first()
+            .port
+    return Instance(server, SocketTestApp(server.application, "http://localhost:$port"), "ws://localhost:$port")
+}

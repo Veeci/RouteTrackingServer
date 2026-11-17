@@ -98,7 +98,7 @@ Secrets: platform secret store → env vars (`DB_PASSWORD`, `JWT_SECRET`, `REDIS
 - [x] T10.1 Redis in compose + Testcontainers; `platform/redis` client (Lettuce) with health indicator.
 - [x] T10.2 Redis adapters: live bus, presence, progress state, device command routing; config switch.
 - [x] T10.3 Contract tests for each port run against the Redis adapter too.
-- [ ] T10.4 Multi-instance E2E harness: two app instances + Postgres + Redis in Testcontainers (or compose).
+- [x] T10.4 Multi-instance E2E harness: two app instances + Postgres + Redis in Testcontainers (or compose).
 - [ ] T10.5 `prod` environment: app, managed Postgres with backups, secrets, promotion job with approval, rolling strategy.
 - [ ] T10.6 Dashboards, alerts, runbook; retention job.
 - [ ] T10.7 Capacity test and report (`docs/ops/capacity.md`).
@@ -153,6 +153,25 @@ Secrets: platform secret store → env vars (`DB_PASSWORD`, `JWT_SECRET`, `REDIS
 - Starting an instance with `REDIS_URL` set needs Redis to answer, because Lettuce connects at startup. A running
   instance survives a Redis outage and reconnects by itself.
 - `deploy/docker-compose.yml` has a `redis` service in the `scale` profile and a port range for `--scale app=2`.
+
+## As built (10b)
+
+- `twoInstances { }` in testFixtures starts two Netty servers in one JVM, each with its own Koin graph, on one
+  Redis and one fresh database. The fresh database matters: with the shared one, these instances' relays would
+  deliver the other tests' outbox events.
+- `MultiInstanceE2ETest` (e2eTest, about 11 s) drives them with the simulator's clients and checks the database:
+  - TC-10-MI-01: driver on A, guest on B, positions, progress and stage events reach the guest.
+  - TC-10-MI-02: a command issued through A's admin API reaches the raw driver socket on B once, and is APPLIED.
+  - TC-10-MI-03: with a 2 s stale time and both instances checking every 200 ms, one DRIVER_STALE moment is stored.
+  - TC-10-MI-04: A stops after 5 batches. The guest reconnects to B by itself (`watchUntilEnded`), the driver resends
+    to B, every seq is stored, no moment is stored twice, and the guest's watch ends with 1000 on COMPLETED.
+- "Kill A" stops it with no grace period. A real SIGKILL cannot happen inside one JVM, so the manual deploy test in
+  10d covers it.
+- The simulator's `Backoff` uses full jitter, 1 s doubling up to 30 s, in `DriverClient.sendAll` and the new
+  `GuestClient.watchUntilEnded`. `DriverClient.url` is now a `var`, so a test can move the client to the other
+  instance, as a load balancer would.
+- A guest who reconnects gets the latest update again. That is the state, not a new event: `protocol.md` now says
+  clients treat `trip_event` as idempotent by `(event, at)`.
 
 ## Definition of Done
 
