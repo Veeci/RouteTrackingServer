@@ -32,4 +32,7 @@ enum class TripError(
 
     /** The trip ended longer ago than the retention period: its GPS points are deleted (phase 10). */
     TRACK_EXPIRED(ErrorCategory.GONE),
+
+    /** Staff cancelling a trip must say why (phase 11d). The reason goes to the audit log only. */
+    REASON_REQUIRED(ErrorCategory.INVALID),
 }

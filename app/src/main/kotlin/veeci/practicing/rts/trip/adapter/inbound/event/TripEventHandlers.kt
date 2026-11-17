@@ -5,6 +5,7 @@ import veeci.practicing.rts.platform.events.EventJson
 import veeci.practicing.rts.platform.events.OutboxEventHandler
 import veeci.practicing.rts.tracking.domain.event.DeviceStatusReportedV1
 import veeci.practicing.rts.tracking.domain.event.FixesAcceptedV1
+import veeci.practicing.rts.trip.adapter.out.driver.DriverCancelPush
 import veeci.practicing.rts.trip.adapter.out.driver.DriverRoutePush
 import veeci.practicing.rts.trip.application.TripEventService
 import veeci.practicing.rts.trip.application.TripProgressService
@@ -67,6 +68,17 @@ class DriverRouteListener(
 
     override suspend fun handle(payload: JsonElement) {
         push.push(EventJson.decodeFromJsonElement(TripRouteChangedV1.serializer(), payload))
+    }
+}
+
+/** A trip was cancelled: tell its driver, with who cancelled it (phase 11d). */
+class DriverCancelListener(
+    private val push: DriverCancelPush,
+) : OutboxEventHandler {
+    override val eventType = TripStatusChangedV1.TYPE
+
+    override suspend fun handle(payload: JsonElement) {
+        push.push(EventJson.decodeFromJsonElement(TripStatusChangedV1.serializer(), payload).toEvent())
     }
 }
 

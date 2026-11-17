@@ -43,6 +43,8 @@ channels:
         $ref: '#/components/messages/command'
       route_updated:
         $ref: '#/components/messages/route_updated'
+      trip_event:
+        $ref: '#/components/messages/trip_event'
       welcome:
         $ref: '#/components/messages/welcome'
       ack:
@@ -151,6 +153,17 @@ operations:
       starts, after a re-route, and again right after every `welcome` while the driver has an active trip.
     messages:
       - $ref: '#/channels/driver/messages/route_updated'
+  sendDriverTripCancelled:
+    action: send
+    channel:
+      $ref: '#/channels/driver'
+    summary: |
+      Phase 11d. The trip the driver is assigned to was cancelled, by the guest, the driver or an operator:
+      `trip_event` with `event: status_changed`, `status: CANCELLED` and `cancelledBy`. No other `trip_event` comes on
+      this channel. It is sent once, to the sockets open at that moment, and not again after a reconnect: the
+      `trip_ended` command and `GET /api/v1/trips/{id}` tell a driver who was offline. The server expects no reply.
+    messages:
+      - $ref: '#/channels/driver/messages/trip_event'
   receiveCommandAck:
     action: receive
     channel:
@@ -304,7 +317,7 @@ components:
     trip_event:
       name: trip_event
       title: Trip event
-      summary: The trip moved to another stage.
+      summary: Something happened on the trip. Sent to the guest; the driver gets it only when their trip is cancelled.
       payload:
         $ref: '#/components/schemas/TripEvent'
     route_updated:
@@ -567,6 +580,13 @@ components:
           type: string
           format: date-time
           description: '`driver_stale` only: when the server last heard from the driver''s phone.'
+        cancelledBy:
+          type: string
+          enum: [GUEST, DRIVER, OPERATOR]
+          description: >-
+            Phase 11d, `status_changed` to CANCELLED only: whose action cancelled the trip. OPERATOR means staff, who
+            may also stop a ride in progress. The staff's reason is never sent. Absent from older servers, and absent
+            when the guest's socket reads an older update after the trip ended.
 
     Hello:
       type: object

@@ -308,7 +308,17 @@ class GoldenFilesTest {
                     GuestServerMessage.serializer(),
                     file = "trip_event_off_route",
                 ),
+            ) + cancelledSamples()
+
+        /** Phase 11d: a cancel names who did it, and the driver's socket carries the same frame. */
+        private fun cancelledSamples(): List<Sample<*>> {
+            val cancelled =
+                TripEvent(TRIP, TripEvent.STATUS_CHANGED, "CANCELLED", Instant.parse("2026-09-30T02:40:00Z"), cancelledBy = "OPERATOR")
+            return listOf(
+                Sample("trip_event", cancelled, GuestServerMessage.serializer(), file = "trip_event_cancelled"),
+                Sample("trip_event", cancelled, ServerMessage.serializer(), file = "trip_event_cancelled"),
             )
+        }
 
         /** The admin fleet socket (phase 11c): a marker with every field and one with only the required ones. */
         private fun fleetSamples(): List<Sample<*>> {

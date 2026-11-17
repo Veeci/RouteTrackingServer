@@ -224,7 +224,7 @@ paths:
       tags: [trips]
       operationId: cancelTrip
       summary: Cancel the trip
-      description: "The guest or the assigned driver, before the ride starts. Send If-Match with the last ETag to refuse the change if the trip changed meanwhile (412)."
+      description: "The guest or the assigned driver, before the ride starts. Send If-Match with the last ETag to refuse the change if the trip changed meanwhile (412). Staff get 403 here: they cancel with POST /api/v1/admin/trips/{id}/cancel and a reason."
       security: [{ bearerAuth: [] }]
       parameters:
         - $ref: '#/components/parameters/TripId'
@@ -476,6 +476,71 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '410': { $ref: '#/components/responses/Gone' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/admin/trips:
+    get:
+      tags: [admin]
+      operationId: listAllTrips
+      summary: Every trip, filtered and paged (OPERATOR, ADMIN)
+      description: |
+        Every trip in every stage, newest first: by `createdAt`, then by id, both descending. The filters combine. Paged
+        by keyset, so a trip created while a client walks the pages never pushes another one onto two pages.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: status
+          in: query
+          description: Repeat it to ask for several stages (`status=ACCEPTED&status=ARRIVED`). Absent means every stage.
+          style: form
+          explode: true
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/TripStatus' }
+        - { name: driverId, in: query, schema: { type: string, format: uuid }, description: 'Trips this driver accepted.' }
+        - { name: guestId, in: query, schema: { type: string, format: uuid }, description: 'Trips this guest booked.' }
+        - { name: from, in: query, schema: { type: string, format: date-time }, description: 'Created at or after this time.' }
+        - { name: to, in: query, schema: { type: string, format: date-time }, description: 'Created before this time. Must be after `from`.' }
+        - { name: cursor, in: query, schema: { type: string }, description: 'nextCursor of the previous page.' }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        '200':
+          description: One page of trips.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TripPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/admin/trips/{id}/cancel:
+    post:
+      tags: [admin]
+      operationId: cancelTripAsOperator
+      summary: Cancel a trip as an operator (OPERATOR, ADMIN)
+      description: |
+        Cancels a trip that has not ended, also a ride in progress, which the guest and the driver cannot cancel. The
+        guest's socket and the driver's socket get `trip_event` CANCELLED with `cancelledBy: OPERATOR`. The reason is
+        required and goes only to the audit log, as TRIP_CANCELLED, in the same transaction as the cancel. Clients never
+        see it. A trip that has ended answers 409 ILLEGAL_TRANSITION.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StaffCancelRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/Trip' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422':
+          description: REASON_REQUIRED, the reason is missing or blank.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /api/v1/admin/sessions/{id}/health:
     parameters:
@@ -1353,6 +1418,12 @@ components:
       type: string
       enum: [GUEST, DRIVER, OPERATOR, ADMIN]
       description: OPERATOR (phase 11) reads every trip; ADMIN may also change drivers and devices. Staff tokens last 15 minutes.
+    StaffCancelRequest:
+      type: object
+      required: [reason]
+      additionalProperties: false
+      properties:
+        reason: { type: string, description: 'Required. Kept in the audit log; the guest and the driver never see it.' }
     AccountChangeRequest:
       type: object
       additionalProperties: false

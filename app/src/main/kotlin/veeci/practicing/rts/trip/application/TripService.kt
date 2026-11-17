@@ -126,6 +126,7 @@ class TripService(
         actor: Actor,
     ): TripSnapshot =
         transactions.inTransaction {
+            refuseStaffCancel(command.action, actor)
             // A driver who lost the race for an open trip may no longer see it; they still get "already taken"
             // (ILLEGAL_TRANSITION from the aggregate) instead of "not found".
             val trip =
@@ -155,6 +156,16 @@ class TripService(
             }
             trip.snapshot(version = trip.version + 1)
         }
+
+    // Staff cancel through TripAdminService, which needs a reason and writes the audit row (phase 11d).
+    private fun refuseStaffCancel(
+        action: TripAction,
+        actor: Actor,
+    ) {
+        if (action == TripAction.CANCEL && actor.role.isStaff) {
+            throw DomainException(TripError.TRIP_ACTION_FORBIDDEN, "Staff cancel with POST /api/v1/admin/trips/{id}/cancel and a reason")
+        }
+    }
 
     private suspend fun load(
         id: TripId,

@@ -50,7 +50,8 @@ fun socketApp(
 /** What a [socketApp] test sees: the running application and clients that talk to it. */
 class SocketTestApp internal constructor(
     val application: Application,
-    private val baseUrl: String,
+    /** `http://localhost:<port>`, for clients that build their own URLs (the simulator's fleet). */
+    val baseUrl: String,
 ) {
     private val clients = mutableListOf<HttpClient>()
 

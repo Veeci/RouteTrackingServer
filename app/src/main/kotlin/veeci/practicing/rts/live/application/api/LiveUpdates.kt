@@ -34,6 +34,8 @@ data class TripStatusUpdate(
     override val tripId: UUID,
     val status: TripStatus,
     val at: Instant,
+    /** With [status] CANCELLED: GUEST, DRIVER or OPERATOR (phase 11d). */
+    val cancelledBy: String? = null,
 ) : LiveUpdate
 
 /** The driver follows a new route from now on (phase 7b: a re-route). */

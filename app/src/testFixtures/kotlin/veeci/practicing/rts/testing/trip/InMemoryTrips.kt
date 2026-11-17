@@ -8,6 +8,7 @@ import veeci.practicing.rts.shared.geo.GeoPoint
 import veeci.practicing.rts.trip.application.port.out.RuleStateStore
 import veeci.practicing.rts.trip.application.port.out.TripCursor
 import veeci.practicing.rts.trip.application.port.out.TripEventOutbox
+import veeci.practicing.rts.trip.application.port.out.TripFilter
 import veeci.practicing.rts.trip.application.port.out.TripMomentRepository
 import veeci.practicing.rts.trip.application.port.out.TripParty
 import veeci.practicing.rts.trip.application.port.out.TripRepository
@@ -94,6 +95,27 @@ class InMemoryTripRepository : TripRepository {
             rows.values
                 .filter { (if (party == TripParty.GUEST) it.guestId else it.driverId) == user }
                 .sortedWith(compareByDescending<Row> { it.createdAt }.thenByDescending { it.id.sortKey() })
+                .filter {
+                    before == null || it.createdAt < before.createdAt ||
+                        (it.createdAt == before.createdAt && it.id.sortKey() < before.id.sortKey())
+                }.take(limit)
+                .map { it.toTrip() }
+        }
+
+    override suspend fun findMatching(
+        filter: TripFilter,
+        before: TripCursor?,
+        limit: Int,
+    ): List<Trip> =
+        mutex.withLock {
+            rows.values
+                .filter { row ->
+                    (filter.statuses.isEmpty() || row.status in filter.statuses) &&
+                        (filter.driverId == null || row.driverId == filter.driverId) &&
+                        (filter.guestId == null || row.guestId == filter.guestId) &&
+                        (filter.from == null || row.createdAt >= filter.from) &&
+                        (filter.to == null || row.createdAt < filter.to)
+                }.sortedWith(compareByDescending<Row> { it.createdAt }.thenByDescending { it.id.sortKey() })
                 .filter {
                     before == null || it.createdAt < before.createdAt ||
                         (it.createdAt == before.createdAt && it.id.sortKey() < before.id.sortKey())

@@ -21,6 +21,6 @@ class TripStatusListener(
     override suspend fun handle(payload: JsonElement) {
         val event = EventJson.decodeFromJsonElement(TripStatusChangedV1.serializer(), payload).toEvent()
         metrics.counter("rts.trip.events", "type", "status_changed").increment()
-        live.publish(TripStatusUpdate(event.tripId, event.to, event.at))
+        live.publish(TripStatusUpdate(event.tripId, event.to, event.at, event.cancelledBy?.name))
     }
 }

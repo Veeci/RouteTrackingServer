@@ -62,6 +62,7 @@ import veeci.practicing.rts.telemetry.adapter.inbound.web.sessionHealthRoutes
 import veeci.practicing.rts.telemetry.telemetryModule
 import veeci.practicing.rts.tracking.adapter.inbound.ws.driverSocket
 import veeci.practicing.rts.tracking.trackingModule
+import veeci.practicing.rts.trip.adapter.inbound.web.adminTripRoutes
 import veeci.practicing.rts.trip.adapter.inbound.web.adminTripSummaryRoutes
 import veeci.practicing.rts.trip.adapter.inbound.web.tripHistoryRoutes
 import veeci.practicing.rts.trip.adapter.inbound.web.tripRoutes
@@ -142,6 +143,7 @@ fun Application.module(
         adminArea(config.admin) {
             authenticate(AUTH_JWT) {
                 adminTripSummaryRoutes(get())
+                adminTripRoutes(get())
                 adminCommandRoutes(get())
                 sessionHealthRoutes(get())
                 providerReportRoutes(get())

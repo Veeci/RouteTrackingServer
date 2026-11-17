@@ -162,6 +162,18 @@ client → command_ack  { commandId, result: applied | rejected, reason? }
 - No reply to `command_ack`. An unknown `commandId` gets `error{COMMAND_NOT_FOUND}`; a malformed one or another
   `result` gets `error{INVALID_MESSAGE}`. The session stays open.
 
+### Trip cancelled (phase 11d)
+
+```
+server → trip_event  { tripId, event: status_changed, status: CANCELLED, at, cancelledBy: GUEST | DRIVER | OPERATOR }
+```
+
+- The trip the driver is assigned to was cancelled. It is the guest's `trip_event` frame, and the only `trip_event`
+  the driver socket carries. The app can tell the driver who stopped the trip, and stop navigating.
+- It goes once to the sockets open at that moment, on any instance, and is not sent again after a reconnect. A
+  driver who was offline learns it from the `trip_ended` command (phase 5) or `GET /api/v1/trips/{id}`.
+- No reply.
+
 ### Routes (phase 7)
 
 ```
@@ -182,7 +194,7 @@ client → subscribe        { tripId }
 server → subscribed       { trip: { tripId, status, pickup, destination, driverId?, updatedAt, route? } }
 server → driver_position  { tripId, lat, lng, bearingDeg?, speedMps?, recordedAt }
 server → trip_progress    { tripId, target: PICKUP | DESTINATION, remainingM, etaS, basis: STRAIGHT_LINE | ROUTE, routeVersion? }
-server → trip_event       { tripId, event: status_changed | driver_arriving | driver_low_battery | driver_stale | driver_back | off_route, status, at, remainingM?, levelPercent?, lastSeenAt? }
+server → trip_event       { tripId, event: status_changed | driver_arriving | driver_low_battery | driver_stale | driver_back | off_route, status, at, remainingM?, levelPercent?, lastSeenAt?, cancelledBy? }
 server → route_updated    { tripId, kind: TRIP | APPROACH, routeVersion, polyline, distanceM, durationS, reason: initial | status_changed | off_route }
 ```
 
@@ -228,6 +240,9 @@ server → route_updated    { tripId, kind: TRIP | APPROACH, routeVersion, polyl
 - When the arrival rules see the driver at the pickup, the server moves the trip to ARRIVED itself, and the guest
   gets the usual `status_changed` with `status: ARRIVED`.
 - After a final stage (COMPLETED, CANCELLED) the server sends that `trip_event` and closes the socket with 1000.
+- `trip_event` with `status: CANCELLED` carries `cancelledBy` (phase 11d): `GUEST`, `DRIVER` or `OPERATOR`. OPERATOR
+  is staff, who may also stop a ride in progress. The staff's reason stays in the audit log and never reaches a
+  client. The field is absent from older servers, and when a reconnecting guest reads an update older than the cancel.
 - A guest who reconnects (phase 10) gets the trip's latest update again, which may be a `trip_event` it already
   showed. Treat `trip_event` as idempotent by `(event, at)`: the same pair is the same event.
 - Reconnect after close 1001 (a deploy) or a dropped connection with "full jitter": wait a random time between 0

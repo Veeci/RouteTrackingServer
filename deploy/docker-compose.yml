@@ -41,6 +41,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in deploy/.env}
       # Empty: one instance, no Redis. Set with the scale profile to share live updates between instances.
       REDIS_URL: ${REDIS_URL:-}
+      # Requests a minute per client address (base.conf: 300). The fleet load run (docs/testing/load-11.md) needs more.
+      HTTP_RATELIMITPERMINUTE: ${HTTP_RATELIMITPERMINUTE:-300}
       # Tracing is off unless the observability profile's settings are provided (see .env.example).
       # Extra JVM flags for the start script (empty by default; the JVM would announce an empty JAVA_TOOL_OPTIONS).
       APP_OPTS: ${OTEL_JAVA_TOOL_OPTIONS:-}

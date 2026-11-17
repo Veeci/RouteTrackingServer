@@ -61,8 +61,9 @@ internal object LiveUpdateWire {
             val tripId: String,
             val status: TripStatus,
             val at: Instant,
+            val cancelledBy: String? = null,
         ) : Wire {
-            override fun toUpdate() = TripStatusUpdate(UUID.fromString(tripId), status, at)
+            override fun toUpdate() = TripStatusUpdate(UUID.fromString(tripId), status, at, cancelledBy)
         }
 
         @Serializable
@@ -112,7 +113,7 @@ internal object LiveUpdateWire {
                     }
 
                     is TripStatusUpdate -> {
-                        Status(update.tripId.toString(), update.status, update.at)
+                        Status(update.tripId.toString(), update.status, update.at, update.cancelledBy)
                     }
 
                     is RouteUpdate -> {
