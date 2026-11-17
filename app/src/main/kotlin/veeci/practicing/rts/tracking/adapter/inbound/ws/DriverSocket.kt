@@ -12,6 +12,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
+import veeci.practicing.rts.identity.application.api.DriverAccounts
 import veeci.practicing.rts.platform.security.actor
 import veeci.practicing.rts.platform.ws.WsSession
 import veeci.practicing.rts.platform.ws.WsSessionRunner
@@ -55,6 +56,7 @@ class DriverSocket(
     private val handshakeTimeout: Duration,
     metrics: MeterRegistry,
     private val drivers: ConnectedDrivers,
+    private val accounts: DriverAccounts,
 ) {
     private val log = LoggerFactory.getLogger(DriverSocket::class.java)
 
@@ -153,6 +155,11 @@ class DriverSocket(
 
             command == null -> {
                 sendError(WsErrorCodes.INVALID_MESSAGE, "sessionId must be a UUID and deviceId 1 to 128 characters.")
+                null
+            }
+
+            accounts.isDisabled(actor.userId) -> {
+                close(CloseReason(WsCloseCodes.FORBIDDEN_ROLE, "Driver disabled"))
                 null
             }
 

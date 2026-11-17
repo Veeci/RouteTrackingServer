@@ -25,7 +25,7 @@ fun deviceControlModule(config: CommandsConfig): Module =
     module {
         single<DeviceCommandRepository> { ExposedDeviceCommandRepository() }
         single<CommandEventOutbox> { ExposedCommandEventOutbox(get()) }
-        single { CommandService(get(), get(), get(), get(), config.expireAfter) }
+        single { CommandService(get(), get(), get(), get(), config.expireAfter, get()) }
         single { CommandExpiryJob(get(), config.expiryCheckEvery) } bind ScheduledJob::class
         // Built at startup: it registers with the driver sockets before any driver connects.
         single(createdAtStart = true) { CommandDelivery(get(), get()).also { it.start() } }

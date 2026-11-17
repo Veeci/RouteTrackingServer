@@ -11,6 +11,7 @@ import veeci.practicing.rts.devicecontrol.domain.CommandPayload
 import veeci.practicing.rts.devicecontrol.domain.TrackingAccuracy
 import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.shared.geo.GeoPoint
+import veeci.practicing.rts.testing.audit.InMemoryAuditLog
 import veeci.practicing.rts.testing.devicecontrol.InMemoryCommandEventOutbox
 import veeci.practicing.rts.testing.devicecontrol.InMemoryDeviceCommandRepository
 import veeci.practicing.rts.testing.tracking.DirectTransactionRunner
@@ -43,7 +44,8 @@ class CommandPoliciesTest {
 
     private val clock = MovingClock()
     private val repository = InMemoryDeviceCommandRepository()
-    private val service = CommandService(repository, InMemoryCommandEventOutbox(), DirectTransactionRunner, clock, 10.minutes)
+    private val service =
+        CommandService(repository, InMemoryCommandEventOutbox(), DirectTransactionRunner, clock, 10.minutes, InMemoryAuditLog())
     private val policies = CommandPolicies(service, repository, DirectTransactionRunner, clock)
     private val driver = UserId(UUID.randomUUID())
     private val pickup = GeoPoint(10.7725, 106.698)

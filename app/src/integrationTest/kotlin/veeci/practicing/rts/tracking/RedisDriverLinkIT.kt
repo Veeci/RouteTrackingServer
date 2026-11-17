@@ -39,9 +39,15 @@ class RedisDriverLinkIT {
             presence.forEach { it(driver, true) }
         }
 
-        suspend fun disconnect(driver: UserId) {
+        val closed = ConcurrentLinkedQueue<UserId>()
+
+        suspend fun leave(driver: UserId) {
             here -= driver
             presence.forEach { it(driver, false) }
+        }
+
+        override suspend fun disconnect(driver: UserId) {
+            if (driver in here) closed += driver
         }
 
         override suspend fun send(
@@ -91,9 +97,22 @@ class RedisDriverLinkIT {
             val a = instance(FakeSockets())
             instance(socketsB)
             socketsB.connect(driver)
-            socketsB.disconnect(driver)
+            socketsB.leave(driver)
 
             a.send(driver, command) shouldBe false
+        }
+
+    @Test
+    fun `TC-11-API-02 disabling a driver on A closes their socket on B`() =
+        runBlocking<Unit> {
+            val socketsB = FakeSockets()
+            val a = instance(FakeSockets())
+            instance(socketsB)
+            socketsB.connect(driver)
+
+            a.disconnect(driver)
+
+            eventually { socketsB.closed.toList() shouldBe listOf(driver) }
         }
 
     @Test

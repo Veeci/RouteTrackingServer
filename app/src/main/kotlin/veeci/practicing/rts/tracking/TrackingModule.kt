@@ -81,6 +81,6 @@ fun trackingModule(
         }
         single {
             val limits = LimitsDto(config.maxFixesPerBatch, ws.maxFrameBytes, ws.messagesPerSecond)
-            DriverSocket(get(), get(), get(), limits, config.handshakeTimeout, get(), get())
+            DriverSocket(get(), get(), get(), limits, config.handshakeTimeout, get(), get(), get())
         }
     }

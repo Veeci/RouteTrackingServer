@@ -52,10 +52,20 @@ class RedisDriverLink(
         return (instances ?: 0L) > 0
     }
 
+    /** Closes the driver's sockets here, and asks every other instance to do the same. */
+    override suspend fun disconnect(driver: UserId) {
+        local.disconnect(driver)
+        if (quietly { redis.commands.publish(channel(driver), DISCONNECT).await() } == null) redis.publishFailed("driver")
+    }
+
     private fun deliver(
         driver: UserId,
         text: String,
     ) {
+        if (text == DISCONNECT) {
+            scope.launch { local.disconnect(driver) }
+            return
+        }
         val message = ProtocolJson.decodeFromString(ServerMessage.serializer(), text)
         scope.launch { local.send(driver, message) }
     }
@@ -72,6 +82,9 @@ class RedisDriverLink(
         }
 
     private companion object {
+        /** Not JSON (no message starts with a NUL), so it cannot be mistaken for a server message. */
+        const val DISCONNECT = "\u0000disconnect"
+
         fun channel(driver: UserId) = "driver:${driver.value}"
     }
 }

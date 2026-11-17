@@ -108,7 +108,7 @@ class Trip private constructor(
      */
     fun isVisibleTo(actor: Actor): Boolean =
         when (actor.role) {
-            Role.ADMIN -> true
+            Role.ADMIN, Role.OPERATOR -> true
             Role.GUEST -> actor.userId == guestId
             Role.DRIVER -> status == REQUESTED || actor.userId == driverId
         }

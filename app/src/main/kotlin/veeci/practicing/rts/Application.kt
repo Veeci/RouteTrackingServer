@@ -22,9 +22,11 @@ import org.slf4j.LoggerFactory
 import veeci.practicing.rts.devicecontrol.adapter.inbound.web.adminCommandRoutes
 import veeci.practicing.rts.devicecontrol.deviceControlModule
 import veeci.practicing.rts.identity.adapter.inbound.web.devTokenRoutes
+import veeci.practicing.rts.identity.adapter.inbound.web.driverAdminRoutes
 import veeci.practicing.rts.identity.identityModule
 import veeci.practicing.rts.live.adapter.inbound.ws.guestSocket
 import veeci.practicing.rts.live.liveModule
+import veeci.practicing.rts.platform.audit.auditRoutes
 import veeci.practicing.rts.platform.config.AppConfig
 import veeci.practicing.rts.platform.config.AppConfigLoader
 import veeci.practicing.rts.platform.config.AppEnv
@@ -127,6 +129,8 @@ fun Application.module(
             adminCommandRoutes(get())
             sessionHealthRoutes(get())
             providerReportRoutes(get())
+            auditRoutes(get(), get())
+            driverAdminRoutes(get())
         }
         if (config.app.env != AppEnv.PROD) echoEndpoint(get())
         // Interactive API docs generated from the contract; local development only.

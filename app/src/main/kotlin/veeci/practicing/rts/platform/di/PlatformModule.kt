@@ -8,6 +8,8 @@ import org.koin.core.module.Module
 import org.koin.dsl.bind
 import org.koin.dsl.module
 import org.koin.dsl.onClose
+import veeci.practicing.rts.platform.audit.AuditLog
+import veeci.practicing.rts.platform.audit.ExposedAuditLog
 import veeci.practicing.rts.platform.config.AppConfig
 import veeci.practicing.rts.platform.db.DatabaseHealthIndicator
 import veeci.practicing.rts.platform.db.ExposedTransactionRunner
@@ -51,6 +53,7 @@ fun platformModule(
 
         single<TransactionRunner> { ExposedTransactionRunner(get()) }
         single { OutboxWriter() }
+        single<AuditLog> { ExposedAuditLog(get()) }
         // Every context's OutboxEventHandler definitions, found with getAll().
         single { OutboxRelay(get(), getAll(), config.events, get()) }
         single { OutboxMetrics(get(), get()) } bind BackgroundWorker::class

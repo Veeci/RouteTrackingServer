@@ -155,7 +155,7 @@ class TripTrackService(
     /** The trip's own people and admins. Unlike [Trip.isVisibleTo], a driver does not see someone else's open trip. */
     private fun Trip.isPartyOrAdmin(actor: Actor): Boolean =
         when (actor.role) {
-            Role.ADMIN -> true
+            Role.ADMIN, Role.OPERATOR -> true
             Role.GUEST -> actor.userId == guestId
             Role.DRIVER -> actor.userId == driverId
         }

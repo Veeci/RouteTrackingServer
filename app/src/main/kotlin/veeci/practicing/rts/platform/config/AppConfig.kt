@@ -71,6 +71,8 @@ data class JwtConfig(
     val audience: String,
     /** How long an issued token is valid. */
     val tokenTtl: Duration,
+    /** How long a token of staff (ADMIN, OPERATOR) is valid: shorter, because it can do more (phase 11). */
+    val staffTokenTtl: Duration = 15.minutes,
     /** Clock difference between servers that is tolerated when `exp` and `iat` are checked. */
     val leeway: Duration,
 )

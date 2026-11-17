@@ -120,7 +120,8 @@ erDiagram
 
 | Table | Owner | One row is | Written when | Migration |
 |---|---|---|---|---|
-| `users` | identity | One person and the role they act in | Phase 3: by the dev token endpoint only (dev and test) | V4 |
+| `users` | identity | One person and the role they act in | Phase 3: by the dev token endpoint only (dev and test); `disabled_at` by an admin | V4, V19 (`OPERATOR`, `disabled_at`) |
+| `audit_log` | platform | One admin action: who, what, to what, why | In the same transaction as the action; never changed or deleted (a trigger refuses it) | V19 |
 | `tracking_sessions` | tracking | One tracking run of one phone | On `hello`; updated on every reconnect and every stored batch; `purged_at` set by the retention job | V3, V5 (`driver_id`), V15 (device columns), V18 (`purged_at`) |
 | `device_status_samples` | tracking | One battery and motion reading of a session's phone | On every `device_status` message | V15 |
 | `trip_progress_state` | trip | The live progress of one active trip: smoothed speed, last fix, place on the route | On every batch of the trip's driver, in the relay's transaction; removed when the trip ends | V17 |

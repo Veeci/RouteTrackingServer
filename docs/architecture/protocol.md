@@ -255,7 +255,7 @@ the `Error` schema of the AsyncAPI document.
 | 1011 | Internal error | Reconnect with backoff |
 | 4400 | Unsupported protocol version | Stop, report |
 | 4401 | Handshake timeout / missing hello | Reconnect |
-| 4403 | The token's role may not use this endpoint (`WsCloseCodes.FORBIDDEN_ROLE`) | Stop |
+| 4403 | The token's role may not use this endpoint, or the driver was disabled by an admin (phase 11, reason `Driver disabled`) (`WsCloseCodes.FORBIDDEN_ROLE`) | Stop |
 
 ## Keepalive
 

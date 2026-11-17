@@ -1,5 +1,7 @@
 package veeci.practicing.rts.trip.application
 
+import veeci.practicing.rts.platform.audit.AuditEntry
+import veeci.practicing.rts.platform.audit.AuditLog
 import veeci.practicing.rts.platform.db.TransactionRunner
 import veeci.practicing.rts.shared.Actor
 import veeci.practicing.rts.shared.DomainException
@@ -44,6 +46,7 @@ class TripSummaryService(
     private val clock: Clock,
     /** How long GPS points are kept (phase 10): a trip that ended before that cannot be summarized again. */
     private val retention: Duration = Duration.INFINITE,
+    private val audit: AuditLog,
 ) {
     /**
      * Computes the trip's summary and stores it, replacing an earlier one, so a second delivery of the completion
@@ -92,7 +95,10 @@ class TripSummaryService(
         if (actor.role != Role.ADMIN) throw DomainException(TripError.TRIP_ACTION_FORBIDDEN, "Only an admin may compute a summary again")
         val trip = transactions.inTransaction { visibleTrip(tripId, actor) }
         checkPointsKept(trip)
-        return summarize(trip.id) ?: throw DomainException(TripError.TRIP_NOT_ENDED, "Only a completed trip has a summary")
+        return transactions.inTransaction {
+            audit.record(AuditEntry(actor, "TRIP_SUMMARY_RECOMPUTED", "TRIP", tripId.value.toString()))
+            summarize(trip.id)
+        } ?: throw DomainException(TripError.TRIP_NOT_ENDED, "Only a completed trip has a summary")
     }
 
     /** The points are gone after the retention period: a new summary would replace the real one with zeros. */
