@@ -26,7 +26,7 @@ tags:
       trips and their own; another user's trip answers 404, the same as a trip that does not exist.
       Stages: REQUESTED → ACCEPTED → ARRIVED → IN_PROGRESS → COMPLETED, or CANCELLED before IN_PROGRESS.
   - name: admin
-    description: Operator endpoints; every route needs an ADMIN token. Device commands (phase 5).
+    description: Back-office endpoints for OPERATOR and ADMIN tokens; each route says which. Device commands (phase 5), the fleet view (phase 11).
   - name: routing
     description: |
       Road routes inside the city the server has a map for (phase 6). Points are snapped to the nearest road within
@@ -608,6 +608,114 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/admin/drivers:
+    get:
+      tags: [admin]
+      operationId: listFleetDrivers
+      summary: The fleet's drivers, filtered and paged (OPERATOR, ADMIN)
+      description: |
+        Every driver of the fleet read model (phase 11), newest seen first, drivers never seen last, then by driver
+        id. The filters combine. `online` is judged at `at`: heard from within the last 60 seconds. Paged by keyset,
+        so a driver who moves between pages is never listed twice on one walk through the pages.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: online, in: query, schema: { type: boolean } }
+        - { name: onTrip, in: query, schema: { type: boolean }, description: 'Has a current trip.' }
+        - { name: q, in: query, schema: { type: string, minLength: 1, maxLength: 100 }, description: 'Part of the display name in any case, or a whole driver id.' }
+        - name: bbox
+          in: query
+          description: 'minLng,minLat,maxLng,maxLat. Edges count as inside. It may not cross the antimeridian. Drivers with no position are outside.'
+          schema: { type: string, examples: ['105.80,21.00,105.90,21.06'] }
+        - { name: cursor, in: query, schema: { type: string }, description: 'nextCursor of the previous page.' }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        '200':
+          description: One page of drivers.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FleetPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/admin/drivers/{driverId}:
+    get:
+      tags: [admin]
+      operationId: getFleetDriver
+      summary: One driver in detail (OPERATOR, ADMIN)
+      description: |
+        The driver's row of the fleet read model, with their account, their 10 most recent sessions and trips, and
+        the health of their latest session that has one computed.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/DriverId'
+      responses:
+        '200':
+          description: The driver.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DriverDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/admin/drivers.csv:
+    get:
+      tags: [admin]
+      operationId: exportFleetDriversCsv
+      summary: Every driver as CSV (ADMIN)
+      description: |
+        The whole driver list in list order, streamed, as RFC 4180 CSV with a header row. Decimals use `.`, an
+        unknown value is an empty cell, and a text cell that starts with `=`, `+`, `-` or `@` gets a leading `'`.
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: The drivers as a CSV download.
+          headers:
+            Content-Disposition:
+              schema: { type: string, examples: ['attachment; filename=drivers.csv'] }
+          content:
+            text/csv:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/admin/overview:
+    get:
+      tags: [admin]
+      operationId: getFleetOverview
+      summary: The fleet's headline numbers (OPERATOR, ADMIN)
+      description: Counted at most once every 10 seconds on each server instance; `computedAt` says when.
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: The numbers.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FleetOverview' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/admin/fleet/rebuild:
+    post:
+      tags: [admin]
+      operationId: rebuildFleet
+      summary: Rebuild the fleet read model from the source data (ADMIN)
+      description: |
+        Empties the read model and fills it again from driver accounts, stored fixes, device status and trips, with
+        the same rules as the event handlers. Event delivery waits while it runs. Recorded in the audit log as
+        FLEET_REBUILT. Positions older than the retention period (90 days) are gone from the source and stay empty.
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: The read model was rebuilt.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FleetRebuild' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
   /api/v1/admin/audit:
     get:
       tags: [admin]
@@ -765,12 +873,12 @@ components:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
     Forbidden:
-      description: The caller may not do this (TRIP_ACTION_FORBIDDEN, COMMAND_FORBIDDEN, SESSION_HEALTH_FORBIDDEN, ACCOUNT_ACTION_FORBIDDEN, AUDIT_FORBIDDEN), e.g. a guest accepting a trip.
+      description: The caller may not do this (TRIP_ACTION_FORBIDDEN, COMMAND_FORBIDDEN, SESSION_HEALTH_FORBIDDEN, ACCOUNT_ACTION_FORBIDDEN, AUDIT_FORBIDDEN, FLEET_FORBIDDEN), e.g. a guest accepting a trip.
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
     NotFound:
-      description: TRIP_NOT_FOUND, no such trip or one the caller may not see. SUMMARY_NOT_READY, the trip has no summary yet. SESSION_HEALTH_NOT_FOUND, no such session or no health computed yet. DRIVER_NOT_FOUND, no such driver account.
+      description: TRIP_NOT_FOUND, no such trip or one the caller may not see. SUMMARY_NOT_READY, the trip has no summary yet. SESSION_HEALTH_NOT_FOUND, no such session or no health computed yet. DRIVER_NOT_FOUND, no such driver account (or, for the fleet, no such driver in the read model either).
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
@@ -1236,6 +1344,122 @@ components:
         disabled: { type: boolean }
         disabledAt: { type: string, format: date-time }
         disabledReason: { type: string }
+    FleetPage:
+      type: object
+      required: [items, at]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/FleetDriver' }
+        nextCursor: { type: string, description: Absent on the last page. }
+        at: { type: string, format: date-time, description: The time online was judged against. }
+    FleetDriver:
+      type: object
+      required: [driverId, enabled, online]
+      additionalProperties: false
+      properties:
+        driverId: { type: string, format: uuid }
+        displayName: { type: string, description: Absent until the account is known. }
+        enabled: { type: boolean }
+        online: { type: boolean, description: Heard from within the last 60 seconds. }
+        lastSeenAt: { type: string, format: date-time, description: The newer of the position and device times. }
+        position:
+          type: object
+          required: [lat, lng, at]
+          additionalProperties: false
+          properties:
+            lat: { type: number, format: double }
+            lng: { type: number, format: double }
+            speedMps: { type: number, format: double }
+            bearingDeg: { type: number, format: double }
+            at: { type: string, format: date-time, description: The fix's recorded time. }
+        device:
+          type: object
+          required: [batteryPct, isCharging, at]
+          additionalProperties: false
+          properties:
+            batteryPct: { type: integer }
+            isCharging: { type: boolean }
+            motion: { type: string }
+            at: { type: string, format: date-time }
+        trip:
+          type: object
+          description: The stage of the driver's newest trip.
+          required: [status, at]
+          additionalProperties: false
+          properties:
+            currentTripId: { type: string, format: uuid, description: Absent once the trip has ended. }
+            status: { $ref: '#/components/schemas/TripStatus' }
+            at: { type: string, format: date-time }
+    DriverDetail:
+      type: object
+      required: [driver, recentSessions, recentTrips, at]
+      additionalProperties: false
+      properties:
+        driver: { $ref: '#/components/schemas/FleetDriver' }
+        disabledAt: { type: string, format: date-time }
+        disabledReason: { type: string }
+        recentSessions:
+          type: array
+          description: The 10 most recently seen sessions.
+          items:
+            type: object
+            required: [sessionId, startedAt, lastSeenAt]
+            additionalProperties: false
+            properties:
+              sessionId: { type: string, format: uuid }
+              startedAt: { type: string, format: date-time }
+              lastSeenAt: { type: string, format: date-time }
+              manufacturer: { type: string }
+              model: { type: string }
+              androidSdk: { type: integer }
+        recentTrips:
+          type: array
+          description: The 10 newest trips.
+          items:
+            type: object
+            required: [id, guestId, status, createdAt, updatedAt]
+            additionalProperties: false
+            properties:
+              id: { type: string, format: uuid }
+              guestId: { type: string, format: uuid }
+              status: { $ref: '#/components/schemas/TripStatus' }
+              createdAt: { type: string, format: date-time }
+              updatedAt: { type: string, format: date-time }
+        health:
+          type: object
+          description: The latest computed session health; absent when none is computed yet.
+          required: [sessionId, startedAt, computedAt, fixCount, gapCount]
+          additionalProperties: false
+          properties:
+            sessionId: { type: string, format: uuid }
+            startedAt: { type: string, format: date-time }
+            computedAt: { type: string, format: date-time }
+            fixCount: { type: integer }
+            acceptedRatio: { type: number, format: double }
+            intervalP50S: { type: number, format: double }
+            accuracyP50M: { type: number, format: double }
+            gapCount: { type: integer }
+            batteryDrainPctPerHour: { type: number, format: double }
+            primaryProvider: { type: string }
+        at: { type: string, format: date-time }
+    FleetOverview:
+      type: object
+      required: [onlineDrivers, driversOnTrip, activeTrips, disabledDrivers, computedAt]
+      additionalProperties: false
+      properties:
+        onlineDrivers: { type: integer }
+        driversOnTrip: { type: integer }
+        activeTrips: { type: integer, description: 'Accepted, arrived or in progress.' }
+        disabledDrivers: { type: integer }
+        computedAt: { type: string, format: date-time }
+    FleetRebuild:
+      type: object
+      required: [drivers]
+      additionalProperties: false
+      properties:
+        drivers: { type: integer, description: Drivers in the rebuilt read model. }
     AuditPage:
       type: object
       required: [items]

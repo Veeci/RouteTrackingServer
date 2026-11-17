@@ -130,6 +130,7 @@ erDiagram
 | `fix_batches` | tracking | One numbered upload (`seq`) of a session | Once per new `seq` | V3 |
 | `fixes` | tracking | One GPS point that passed the fix pipeline | Together with its batch | V3 |
 | `trips` | trip | One ride from a pickup to a destination | On booking; updated on every change of stage | V6 |
+| `fleet_drivers` | fleet | One driver as the admin dashboard sees them: name, enabled, newest position, battery, current trip | By the fleet's event handlers in the relay's transaction, only when the data is newer; emptied and filled again by an admin rebuild | V20 |
 | `outbox` | platform | One event that waits for delivery | In the same transaction as the change that caused the event | V2 |
 | `idempotency_keys` | platform | The response to one request that carried an `Idempotency-Key` | In the same transaction as the change the request made | V7 |
 
@@ -138,7 +139,9 @@ never its tables (rule TC-0-ARCH-03 in `ArchitectureTest`).
 
 ### `users`
 
-Who a user is and which role they act in: GUEST, DRIVER or ADMIN. The access token carries the user id
+Who a user is and which role they act in: GUEST, DRIVER, OPERATOR or ADMIN. Every change to a DRIVER account (created
+or renamed by the dev token endpoint, disabled or enabled by an admin) writes a `DriverAccountChanged` event in the
+same transaction (phase 11b). The access token carries the user id
 and the role, so a normal request never reads this table. In phase 3 only the dev token endpoint writes
 it; production will copy users from an external identity provider.
 
@@ -206,6 +209,24 @@ creation time, so new rows go to the end of the primary key index.
 Since V13, `accepted_at`, `arrived_at`, `started_at` and `ended_at` record when the trip reached each stage. Trip
 sets them in the same update as `status`. Trips stored before V13 have nulls. `trip_summaries` (V13) holds one
 JSON summary per completed trip, keyed by `trip_id`, so computing it again replaces it.
+
+### `fleet_drivers`
+
+A read model (phase 11b): one row per driver, put together from other contexts' events so the admin dashboard can
+ask "online drivers in this map area, with battery and current trip" without joining their tables. Tracking's
+`FixesAccepted` sets the position (the batch's last fix), `DeviceStatusReported` the battery and motion, trip's
+`TripStatusChanged` the current trip, and identity's `DriverAccountChanged` the name and `enabled`. A row may exist
+without a name: a driver with a token but no account row.
+
+Every change follows "newer data wins": a position applies only if its `recorded_at` is after `position_at`, a
+status only if after `status_at`, a trip stage only if after `trip_status_at`. A repeated or late event writes
+nothing, not even `updated_at`. There is no event id. `last_seen_at` is the newer of `position_at` and `status_at`,
+the phone's own times, so a rebuild from `fixes` and `device_status_samples` gives the same value. "Online" is not
+stored: it is `last_seen_at` within the stale time (60 s), judged when read.
+
+`speed_mps` and `bearing_deg` are `real`, as in `fixes`. The event carries a `double`, the rebuild reads a `real`,
+and both round to the same 4-byte value here. `updated_at` is the server time of the last write; the live fleet
+socket (11c) will read the rows changed since its last tick.
 
 ### `idempotency_keys`
 
@@ -288,6 +309,13 @@ when the application has a bug.
 | A trip's moments in time order, for the track's timeline (`TripMomentRepository.findAll`) | `trip_moments_trip_at` (V8); `id` breaks ties among the few rows of one trip |
 | The active trip of a driver (`TripRepository.findActiveForDriver`) | `one_active_trip_per_driver` (it is unique and contains only active trips) |
 | A stored idempotent response (`Idempotency.execute`) | Primary key of `idempotency_keys` |
+| The fleet driver list, newest seen first, page by page (`FleetRepository.page`) | `fleet_drivers_last_seen (last_seen_at DESC NULLS LAST, driver_id)` (V20) |
+| Drivers in a map area (`FleetRepository.page` with a bbox) | `fleet_drivers_position (lat, lng)` (V20) |
+| Rows changed since the last fleet tick (11c) | `fleet_drivers_updated (updated_at)` (V20) |
+| A driver's latest session health (`SessionHealthRepository.latestForDriver`) | `session_health_driver (driver_id, started_at DESC)` (V20) |
+| A driver's recent sessions (`DriverActivity.recentSessions`) | `tracking_sessions_driver_last_seen (driver_id, last_seen_at)` (V9), read backwards |
+| Every driver's newest fix and status, for the fleet rebuild (`DriverActivity.latestPositions`, `latestStatuses`) | None: one pass over `fixes` and `device_status_samples` with `DISTINCT ON`. A rare admin action |
+| Every driver's newest trip, for the fleet rebuild (`TripRepository.findLatestPerDriver`) | None: one pass over `trips` with `DISTINCT ON` |
 | Sessions to purge, oldest first (`RetentionRepository.expiredSessions`) | `tracking_sessions_unpurged (last_seen_at, id) WHERE purged_at IS NULL` (V18) |
 | Idle sessions after the health job's watermark, page by page (`SessionTelemetry.idleSessions`) | `tracking_sessions_last_seen (last_seen_at, id)` (V16) |
 | A session's fixes for its health (`SessionTelemetry.fixes`) | `fixes_session_time` |
@@ -298,6 +326,11 @@ There is no index on `tracking_sessions.device_id`, because no query needs it ye
 together with the first query that needs it, because every index slows down writes and uses space.
 `outbox_unpublished` is a partial index: it contains only undelivered rows, so it stays small.
 `trips_driver_history` is partial for the same reason: a trip nobody accepted has no driver.
+
+`fleet_drivers_last_seen` says `NULLS LAST` because the list puts never-seen drivers last. A `DESC` index puts
+nulls first by default, and Postgres reads an index in order only when its null order matches the `ORDER BY`. The
+fleet list's cursor condition is an OR with an `IS NULL` branch, so Postgres reads the index from its start and
+filters. That is fine for one fleet of about 10 000 rows; a much larger fleet would split the query at the nulls.
 
 A history page asks for `created_at <= x AND (created_at < x OR (created_at = x AND id < y))`. The first term
 repeats part of the OR on purpose. Postgres cannot use an OR as an index range, so without that term the scan would

@@ -17,6 +17,7 @@ import org.jetbrains.exposed.v1.datetime.timestamp
 import org.jetbrains.exposed.v1.exceptions.ExposedSQLException
 import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
+import org.jetbrains.exposed.v1.jdbc.transactions.TransactionManager
 import org.jetbrains.exposed.v1.jdbc.update
 import veeci.practicing.rts.shared.DomainException
 import veeci.practicing.rts.shared.UserId
@@ -29,6 +30,7 @@ import veeci.practicing.rts.trip.domain.Trip
 import veeci.practicing.rts.trip.domain.TripError
 import veeci.practicing.rts.trip.domain.TripId
 import veeci.practicing.rts.trip.domain.event.TripStatus
+import java.util.UUID
 
 /** The `trips` table (migrations V6 and V13). */
 internal object TripsTable : Table("trips") {
@@ -113,6 +115,20 @@ class ExposedTripRepository : TripRepository {
             .where { TripsTable.status inList ACTIVE }
             .map { it.toTrip() }
 
+    // DISTINCT ON keeps each driver's first row in the ORDER BY: their newest trip, in one pass.
+    override suspend fun findLatestPerDriver(): List<Trip> {
+        val ids =
+            TransactionManager
+                .current()
+                .exec(
+                    "SELECT DISTINCT ON (driver_id) id FROM trips WHERE driver_id IS NOT NULL ORDER BY driver_id, updated_at DESC, id DESC",
+                ) { rows -> buildList { while (rows.next()) add(rows.getObject(1, UUID::class.java)) } }
+                .orEmpty()
+        return ids.chunked(ID_CHUNK).flatMap { chunk ->
+            TripsTable.selectAll().where { TripsTable.id inList chunk }.map { it.toTrip() }
+        }
+    }
+
     override suspend fun findActiveForDriver(driver: UserId): Trip? =
         TripsTable
             .selectAll()
@@ -167,6 +183,9 @@ class ExposedTripRepository : TripRepository {
     private companion object {
         val ACTIVE = TripStatus.entries.filter { it.isActive }.map { it.name }
         const val UNIQUE_VIOLATION = "23505"
+
+        /** Ids per `IN (...)` list: well under the 32 767 bind parameters a Postgres statement may have. */
+        const val ID_CHUNK = 1_000
         const val ONE_ACTIVE_TRIP_INDEX = "one_active_trip_per_driver"
     }
 }

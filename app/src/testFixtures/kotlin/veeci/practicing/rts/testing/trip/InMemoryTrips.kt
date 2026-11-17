@@ -75,6 +75,15 @@ class InMemoryTripRepository : TripRepository {
                 .map { it.toTrip() }
         }
 
+    override suspend fun findLatestPerDriver(): List<Trip> =
+        mutex.withLock {
+            rows.values
+                .filter { it.driverId != null }
+                .groupBy { it.driverId }
+                .values
+                .map { trips -> trips.maxWith(compareBy({ it.updatedAt }, { it.id.sortKey() })).toTrip() }
+        }
+
     override suspend fun findHistory(
         user: UserId,
         party: TripParty,

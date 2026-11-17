@@ -12,6 +12,9 @@ interface SessionHealthRepository {
 
     suspend fun find(sessionId: UUID): SessionHealthRecord?
 
+    /** The record of the driver's most recently started session that has one. */
+    suspend fun latestForDriver(driverId: UUID): SessionHealthRecord?
+
     /** Every record of a session that started in [from, to). */
     suspend fun startedBetween(
         from: Instant,

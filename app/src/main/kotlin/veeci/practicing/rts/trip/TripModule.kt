@@ -35,6 +35,7 @@ import veeci.practicing.rts.trip.application.TripRouteService
 import veeci.practicing.rts.trip.application.TripService
 import veeci.practicing.rts.trip.application.TripSummaryService
 import veeci.practicing.rts.trip.application.TripTrackService
+import veeci.practicing.rts.trip.application.api.DriverTrips
 import veeci.practicing.rts.trip.application.api.TripQuery
 import veeci.practicing.rts.trip.application.port.out.ProgressPublisher
 import veeci.practicing.rts.trip.application.port.out.ProgressStateStore
@@ -89,7 +90,7 @@ fun tripModule(
         single<TripSummaryRepository> { ExposedTripSummaryRepository() }
         single { TripSummaryService(get(), get(), get(), get(), get(), get(), get(), retention.rawLocation, get()) }
         single { TripSummaryListener(get()) } bind OutboxEventHandler::class
-        single { TripHistoryService(get(), get(), get()) }
+        single { TripHistoryService(get(), get(), get()) } bind DriverTrips::class
 
         // Phase 8c: the track and timeline of ended trips.
         single { TripTrackService(get(), get(), get(), get(), get(), get(), retention.rawLocation) }

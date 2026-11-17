@@ -140,11 +140,11 @@ The plan was written before phases 4 to 10. These replace the parts they name:
 
 ## Tasks
 
-- [ ] T11.1 PostGIS image everywhere; `V11__fleet.sql`; Exposed column type for `geography`.
-- [ ] T11.2 `fleet` context: projection handlers (idempotent, coalesced), `FleetQuery`, rebuild command.
+- [x] T11.1 ~~PostGIS image everywhere; `V11__fleet.sql`; Exposed column type for `geography`.~~ Replaced by the corrections: `V20__fleet_drivers.sql` with plain `lat`, `lng`.
+- [x] T11.2 `fleet` context: projection handlers (idempotent by newer-wins, not coalesced), the driver query, rebuild command.
 - [ ] T11.3 `FleetPositionCache` + fleet socket with snapshot, conflated deltas, clustering fallback.
 - [ ] T11.4 Roles `OPERATOR`, operator actor in trip aggregate; driver enable/disable in `identity`.
-- [ ] T11.5 Admin REST endpoints + OpenAPI; CSV export.
+- [ ] T11.5 Admin REST endpoints + OpenAPI; CSV export. Driver list, detail, overview, CSV and rebuild done in 11b; the trip list is 11d.
 - [x] T11.6 Audit log (table, writer used inside services, query endpoint, DB grants).
 - [ ] T11.7 CORS, WebSocket tickets, admin token expiry, security headers.
 - [ ] T11.8 CI job generating and publishing the TypeScript client.
@@ -209,6 +209,46 @@ The plan was written before phases 4 to 10. These replace the parts they name:
   enabled.
 - `AuthorizationMatrixIT` has an OPERATOR column, expected to answer like ADMIN on every trip route, and runs with a
   higher rate limit because 7 callers × every route exceed 300 requests a minute.
+
+## As built (11b)
+
+- A `fleet` context with one table, `fleet_drivers` (V20): name, enabled, newest position, battery, motion and current
+  trip per driver, with indexes on `(lat, lng)`, `(last_seen_at DESC NULLS LAST, driver_id)` and `updated_at`. No
+  PostGIS. V20 also indexes `session_health` by driver, for the driver detail.
+- Four outbox handlers keep it, inside the relay's transaction: `FixesAccepted` (the batch's last fix),
+  `DeviceStatusReported`, `TripStatusChanged`, and a new identity event `DriverAccountChanged` (driver id, name,
+  enabled, time). Identity writes that event in the same transaction as every DRIVER account change: the dev token
+  endpoint, disable and enable. Events without a driver (old sessions, a trip nobody accepted) are skipped.
+- Idempotency is "newer data wins", in `FleetDriver` (domain, no database): a position, status or trip stage
+  applies only if its time is after the stored one. A repeated or late event writes nothing, not even `updated_at`.
+  The end of a trip clears the current trip only if it is that trip. The account carries no time and the last one
+  wins: the relay delivers events in order.
+- `last_seen_at` is the newer of the fix's recorded time and the status time, the phone's own clock, not the
+  server's receive time. That keeps a rebuild equal to the events. Online is `last_seen_at` within
+  `events.staleAfter` (60 s), computed on read. `speed_mps` and `bearing_deg` are `real` like `fixes`, so both paths
+  round to the same value.
+- Other contexts are read only through their public APIs. New methods: identity `DriverAccounts.driver` and
+  `drivers`; tracking `DriverActivity` (recent sessions, newest fix and status per driver); trip `DriverTrips`
+  (recent trips of a driver, newest trip per driver, active trip count); telemetry `DriverHealth.latestFor`.
+- Routes (contract in `rts-v1.yaml`):
+  - `GET /api/v1/admin/drivers` (OPERATOR, ADMIN) filters by `online`, `onTrip`, `q` (part of the name, `%` and `_`
+    taken literally, or a whole driver id) and `bbox` (edges inside, not across the antimeridian). Keyset paging by
+    `(last_seen_at DESC NULLS LAST, driver_id)`, 50 a page, 100 at most.
+  - `GET /api/v1/admin/drivers/{driverId}` (OPERATOR, ADMIN): the row with its online flag, the account's disable
+    reason, the 10 latest sessions and trips, and the latest computed session health. A driver with an account but
+    no row yet still answers; 404 when neither exists.
+  - `GET /api/v1/admin/overview` (OPERATOR, ADMIN): online drivers, drivers on a trip, active trips (from the trip
+    context), disabled drivers, and `computedAt`. Cached 10 s on each instance; one caller counts, the others wait.
+  - `GET /api/v1/admin/drivers.csv` (ADMIN): every driver, streamed 500 rows per transaction, with the CSV rules of
+    the provider report. The role is checked before the first byte, so a refusal is still a 403.
+  - `POST /api/v1/admin/fleet/rebuild` (ADMIN), audited as `FLEET_REBUILT` with the driver count. One transaction:
+    it empties the table first, then reads the sources and writes the rows. Emptying first takes the table lock, so
+    an event handler waits and applies its change on top. Reading first would let an event delivered in between be
+    written and then wiped.
+- Tests: `FleetDriverTest` and `FleetWebTest` (unit); `FleetProjectionIT` (TC-11-PRJ-01, 02, 04),
+  `FleetRebuildIT` (TC-11-PRJ-05, drivers acting through the real services), `FleetApiIT` (TC-11-GEO-01, API-01,
+  API-04, API-05, detail, audited rebuild), `FleetAuthorizationIT` (TC-11-SEC-01 for the five routes × five
+  callers, with a completeness check). TC-11-PRJ-03 and GEO-02 no longer apply: there is no coalescing and no GiST.
 
 ## Definition of Done
 

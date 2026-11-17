@@ -21,6 +21,8 @@ import org.koin.logger.slf4jLogger
 import org.slf4j.LoggerFactory
 import veeci.practicing.rts.devicecontrol.adapter.inbound.web.adminCommandRoutes
 import veeci.practicing.rts.devicecontrol.deviceControlModule
+import veeci.practicing.rts.fleet.adapter.inbound.web.fleetRoutes
+import veeci.practicing.rts.fleet.fleetModule
 import veeci.practicing.rts.identity.adapter.inbound.web.devTokenRoutes
 import veeci.practicing.rts.identity.adapter.inbound.web.driverAdminRoutes
 import veeci.practicing.rts.identity.identityModule
@@ -131,6 +133,7 @@ fun Application.module(
             providerReportRoutes(get())
             auditRoutes(get(), get())
             driverAdminRoutes(get())
+            fleetRoutes(get(), get())
         }
         if (config.app.env != AppEnv.PROD) echoEndpoint(get())
         // Interactive API docs generated from the contract; local development only.
@@ -153,5 +156,6 @@ fun appModule(
             liveModule(redis = config.redis.enabled),
             routingModule(config.routing),
             telemetryModule(config.telemetry),
+            fleetModule(config.events),
         )
     }
