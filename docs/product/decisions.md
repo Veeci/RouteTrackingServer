@@ -163,7 +163,7 @@ is closed, and sign-up and login for real users.
 | 79 | The track of a trip older than 90 days | The timeline and the summary stay. The points are gone: the track says `pointsExpired`, and exports and summary recompute answer 410 TRACK_EXPIRED | Built P10 (10c) |
 | 80 | Where alerts go | A Discord channel, through a webhook URL kept out of git. Without one, alerts show in Prometheus only | Built P10 (10c) |
 
-## Phase 11 (11a and 11b built, decided 2026-11-17)
+## Phase 11 (11a, 11b and 11c built, decided 2026-11-17)
 
 | # | Problem | What will happen | Source |
 |---|---|---|---|
@@ -177,6 +177,10 @@ is closed, and sign-up and login for real users.
 | 88 | Who sees the fleet | OPERATOR and ADMIN see the driver list, a driver's detail and the overview. Only ADMIN downloads the CSV or rebuilds the view | Built P11 (11b) |
 | 89 | The fleet view is ever wrong | An admin rebuilds it from the stored data, and the audit log keeps who did. A driver whose last fix is older than 90 days shows no position after a rebuild (row 78) | Built P11 (11b) |
 | 90 | How staff find a driver | By part of the name, in any case, or by the whole driver id. A map area may not cross the antimeridian | Built P11 (11b) |
+| 91 | How fresh the live map is | Every 2 seconds each map gets the drivers that moved, came online, went offline or left the area. Between two updates only the newest position counts | Built P11 (11c) |
+| 92 | A map area with very many drivers | Above 5 000 drivers the map shows counts per grid cell instead, refreshed every 2 seconds, and switches back to drivers once the area holds fewer | Built P11 (11c) |
+| 93 | Which websites may call the admin API | Only the dashboard origins the server is configured with. No cookies: the dashboard sends its token itself, so another website cannot act as a logged-in operator | Built P11 (11c) |
+| 94 | How the dashboard opens the live map | With a ticket that works once and lasts 30 seconds, so the operator's token never appears in a URL or a log | Built P11 (11c) |
 
 ## Open questions, most important first
 

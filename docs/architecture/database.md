@@ -131,6 +131,7 @@ erDiagram
 | `fixes` | tracking | One GPS point that passed the fix pipeline | Together with its batch | V3 |
 | `trips` | trip | One ride from a pickup to a destination | On booking; updated on every change of stage | V6 |
 | `fleet_drivers` | fleet | One driver as the admin dashboard sees them: name, enabled, newest position, battery, current trip | By the fleet's event handlers in the relay's transaction, only when the data is newer; emptied and filled again by an admin rebuild | V20 |
+| `ws_tickets` | platform | One unredeemed ticket for the admin fleet socket, by its SHA-256 | On `POST /api/v1/admin/ws-tickets`. Deleted when redeemed, or by the retention job once expired | V21 |
 | `outbox` | platform | One event that waits for delivery | In the same transaction as the change that caused the event | V2 |
 | `idempotency_keys` | platform | The response to one request that carried an `Idempotency-Key` | In the same transaction as the change the request made | V7 |
 
@@ -225,8 +226,16 @@ the phone's own times, so a rebuild from `fixes` and `device_status_samples` giv
 stored: it is `last_seen_at` within the stale time (60 s), judged when read.
 
 `speed_mps` and `bearing_deg` are `real`, as in `fixes`. The event carries a `double`, the rebuild reads a `real`,
-and both round to the same 4-byte value here. `updated_at` is the server time of the last write; the live fleet
-socket (11c) will read the rows changed since its last tick.
+and both round to the same 4-byte value here. `updated_at` is the server time of the last write. The live fleet
+socket (11c) reads, every tick, the rows written since its subscribers' last message minus 5 s. The 5 s cover a
+transaction that commits after the time it wrote into `updated_at`, and clock differences between instances.
+
+### `ws_tickets`
+
+Single-use tickets for the admin fleet socket (phase 11c), because a browser cannot set an Authorization header on a
+WebSocket. Only the SHA-256 of a ticket is stored, so a leaked row or backup holds nothing a client could connect
+with. Redeeming is one `DELETE ... RETURNING`: the read and the delete are one statement, so a ticket works once even
+when two instances try it at the same moment. A ticket lives 30 s. The retention job deletes the ones nobody used.
 
 ### `idempotency_keys`
 
@@ -311,7 +320,10 @@ when the application has a bug.
 | A stored idempotent response (`Idempotency.execute`) | Primary key of `idempotency_keys` |
 | The fleet driver list, newest seen first, page by page (`FleetRepository.page`) | `fleet_drivers_last_seen (last_seen_at DESC NULLS LAST, driver_id)` (V20) |
 | Drivers in a map area (`FleetRepository.page` with a bbox) | `fleet_drivers_position (lat, lng)` (V20) |
-| Rows changed since the last fleet tick (11c) | `fleet_drivers_updated (updated_at)` (V20) |
+| Rows changed since the last fleet tick, and drivers who just went offline (`FleetRepository.changedSince`) | `fleet_drivers_updated (updated_at)` and `fleet_drivers_last_seen` (V20), combined by a BitmapOr |
+| Driver counts per map cell (`FleetRepository.cells`) | `fleet_drivers_position (lat, lng)` (V20) for the area, then a hash aggregate |
+| Redeem a fleet socket ticket (`WsTickets.redeem`) | Primary key of `ws_tickets` |
+| Expired tickets (`WsTickets.purgeExpired`) | `ws_tickets_expires (expires_at)` (V21) |
 | A driver's latest session health (`SessionHealthRepository.latestForDriver`) | `session_health_driver (driver_id, started_at DESC)` (V20) |
 | A driver's recent sessions (`DriverActivity.recentSessions`) | `tracking_sessions_driver_last_seen (driver_id, last_seen_at)` (V9), read backwards |
 | Every driver's newest fix and status, for the fleet rebuild (`DriverActivity.latestPositions`, `latestStatuses`) | None: one pass over `fixes` and `device_status_samples` with `DISTINCT ON`. A rare admin action |

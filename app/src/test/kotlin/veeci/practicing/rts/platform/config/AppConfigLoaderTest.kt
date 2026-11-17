@@ -62,6 +62,15 @@ class AppConfigLoaderTest {
     }
 
     @Test
+    fun `ADMIN_ORIGINS is a comma separated list, and empty by default`() {
+        val origins = "https://admin.example.com,http://localhost:5173"
+        val config = AppConfigLoader.load(platformEnv + mapOf("APP_ENV" to "prod", "ADMIN_ORIGINS" to origins))
+
+        config.admin.origins shouldBe listOf("https://admin.example.com", "http://localhost:5173")
+        AppConfigLoader.load(platformEnv + ("APP_ENV" to "prod")).admin.origins shouldBe emptyList()
+    }
+
+    @Test
     fun `the password never appears when the config is printed`() {
         val config = AppConfigLoader.load(platformEnv + ("APP_ENV" to "prod"))
 

@@ -10,6 +10,10 @@ info:
       `Problem.traceId` repeats it so a bug report can be matched to the server logs.
     - Every route is rate limited per client IP; over the limit answers 429 with `Retry-After`.
     - Real-time traffic uses WebSockets, specified separately (AsyncAPI, phase 2).
+    - Every response carries `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`. Responses under
+      `/api/v1/admin` also carry `Cache-Control: no-store`.
+    - Only `/api/v1/admin` answers browsers on other origins (CORS), and only the origins the server is configured
+      with (`ADMIN_ORIGINS`). Credentials are off: send the token in the Authorization header.
 
     This file is the contract: it is written before the code, and API tests fail when a response does not match it.
 servers:
@@ -716,6 +720,26 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/admin/ws-tickets:
+    post:
+      tags: [admin]
+      operationId: issueWsTicket
+      summary: A single-use ticket for the fleet socket (OPERATOR, ADMIN)
+      description: |
+        A browser cannot set an Authorization header on a WebSocket. It asks for a ticket here, with its access token,
+        and opens `/ws/v1/admin/fleet?ticket=...` within 30 seconds (AsyncAPI channel `adminFleet`). The ticket works
+        once, on any server instance, and the socket runs as the user who asked for it. The access token never
+        appears in a URL. The server stores only the ticket's SHA-256.
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: The ticket.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WsTicket' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
   /api/v1/admin/audit:
     get:
       tags: [admin]
@@ -873,7 +897,7 @@ components:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
     Forbidden:
-      description: The caller may not do this (TRIP_ACTION_FORBIDDEN, COMMAND_FORBIDDEN, SESSION_HEALTH_FORBIDDEN, ACCOUNT_ACTION_FORBIDDEN, AUDIT_FORBIDDEN, FLEET_FORBIDDEN), e.g. a guest accepting a trip.
+      description: The caller may not do this (TRIP_ACTION_FORBIDDEN, COMMAND_FORBIDDEN, SESSION_HEALTH_FORBIDDEN, ACCOUNT_ACTION_FORBIDDEN, AUDIT_FORBIDDEN, FLEET_FORBIDDEN, TICKET_FORBIDDEN), e.g. a guest accepting a trip.
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
@@ -1460,6 +1484,17 @@ components:
       additionalProperties: false
       properties:
         drivers: { type: integer, description: Drivers in the rebuilt read model. }
+    WsTicket:
+      type: object
+      required: [ticket, expiresAt]
+      additionalProperties: false
+      properties:
+        ticket:
+          description: Put it in the socket URL as `?ticket=`. It works once.
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
     AuditPage:
       type: object
       required: [items]

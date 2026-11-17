@@ -1,0 +1,23 @@
+{
+  "type": "fleet_snapshot",
+  "drivers": [
+    {
+      "driverId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "lat": 21.0285,
+      "lng": 105.8542,
+      "bearingDeg": 87.0,
+      "online": true,
+      "tripStatus": "IN_PROGRESS",
+      "batteryPct": 64,
+      "lastSeenAt": "2026-09-30T02:15:04.120Z"
+    },
+    {
+      "driverId": "0f8fad5b-d9cb-469f-a165-70867728950e",
+      "lat": 21.0301,
+      "lng": 105.8411,
+      "online": false,
+      "lastSeenAt": "2026-09-30T02:10:00Z"
+    }
+  ],
+  "at": "2026-09-30T02:15:05Z"
+}

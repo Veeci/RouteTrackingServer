@@ -4,6 +4,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.junit.jupiter.api.Test
 import org.koin.test.verify.verify
 import veeci.practicing.rts.platform.config.EventsConfig
+import veeci.practicing.rts.platform.config.FleetConfig
 import veeci.practicing.rts.platform.config.JwtConfig
 import veeci.practicing.rts.platform.config.RetentionConfig
 import veeci.practicing.rts.platform.config.TelemetryConfig
@@ -26,6 +27,7 @@ class WiringTest {
                     EventsConfig::class,
                     TelemetryConfig::class,
                     RetentionConfig::class,
+                    FleetConfig::class,
                     PipelineConfig::class,
                     LimitsDto::class,
                     Duration::class,

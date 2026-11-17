@@ -28,6 +28,7 @@ dependencies {
     implementation(ktorLibs.server.callId)
     implementation(ktorLibs.server.callLogging)
     implementation(ktorLibs.server.contentNegotiation)
+    implementation(ktorLibs.server.cors)
     implementation(ktorLibs.server.metrics.micrometer)
     implementation(ktorLibs.server.core)
     implementation(ktorLibs.server.netty)

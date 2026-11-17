@@ -18,8 +18,9 @@ import veeci.practicing.rts.testing.TestTokens
 import veeci.practicing.rts.testing.testApp
 
 /**
- * TC-11-SEC-01 for the fleet routes (phase 11b): every route × {anonymous, guest, driver, operator, admin}. Like the
- * trip matrix, a fleet route the app serves without a row here fails the completeness test.
+ * TC-11-SEC-01 for the fleet routes (phase 11b) and the fleet socket's tickets (11c): every route × {anonymous, guest,
+ * driver, operator, admin}. Like the trip matrix, a fleet route the app serves without a row here fails the completeness
+ * test.
  */
 @Testcontainers(disabledWithoutDocker = true)
 class FleetAuthorizationIT {
@@ -40,6 +41,7 @@ class FleetAuthorizationIT {
             Row("GET /api/v1/admin/overview", 401, 403, 403, 200, 200),
             Row("GET /api/v1/admin/drivers.csv", 401, 403, 403, 403, 200),
             Row("POST /api/v1/admin/fleet/rebuild", 401, 403, 403, 403, 200),
+            Row("POST /api/v1/admin/ws-tickets", 401, 403, 403, 200, 200),
         )
 
     @TestFactory
@@ -89,13 +91,14 @@ class FleetAuthorizationIT {
     }
 
     /**
-     * The routes of this slice: the driver list, one driver, the CSV, the overview and the fleet actions. A driver's
+     * The routes of the fleet slices: the driver list, one driver, the CSV, the overview, the fleet actions and the tickets. A driver's
      * own sub-resources (commands, disable, enable) belong to device control and identity, with tests of their own.
      */
     private fun String.isFleetRoute(): Boolean =
         (startsWith("GET /api/v1/admin/drivers") && !contains("{driverId}/")) ||
             startsWith("GET /api/v1/admin/overview") ||
-            contains("/api/v1/admin/fleet")
+            contains("/api/v1/admin/fleet") ||
+            contains("/api/v1/admin/ws-tickets")
 
     /** `GET /api/v1/admin/drivers/{driverId}` for a route that ends in an HTTP method selector; null for other nodes. */
     private fun RoutingNode.signature(): String? {

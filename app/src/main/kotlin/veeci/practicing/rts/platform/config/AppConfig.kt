@@ -23,6 +23,8 @@ data class AppConfig(
     val telemetry: TelemetryConfig = TelemetryConfig(),
     val redis: RedisConfig = RedisConfig(),
     val retention: RetentionConfig = RetentionConfig(),
+    val admin: AdminConfig = AdminConfig(),
+    val fleet: FleetConfig = FleetConfig(),
 )
 
 data class AppInfo(
@@ -122,6 +124,25 @@ data class RetentionConfig(
     val checkEvery: Duration = 2.minutes,
     /** At most this many sessions per run, in one transaction, so no run holds locks for long. */
     val sessionsPerRun: Int = 20,
+)
+
+/** The admin dashboard, a browser app on another origin (phase 11c). */
+data class AdminConfig(
+    /**
+     * Origins allowed to call `/api/v1/admin` from a browser, for example `https://admin.example.com`. Set them with
+     * `ADMIN_ORIGINS`, comma separated. Empty turns CORS off: browsers then refuse cross-origin calls.
+     */
+    val origins: List<String> = emptyList(),
+)
+
+/** The live fleet socket (phase 11c). */
+data class FleetConfig(
+    /** How often each instance reads the changed drivers and sends every subscriber its delta. */
+    val tick: Duration = 2.seconds,
+    /** More drivers than this in a subscriber's area: it gets cluster counts instead of markers. */
+    val maxMarkers: Int = 5_000,
+    /** A socket that takes longer than this to accept one message is closed with 1013. */
+    val sendTimeout: Duration = 5.seconds,
 )
 
 /** Session health (phase 9). */

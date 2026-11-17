@@ -22,6 +22,7 @@ import org.slf4j.LoggerFactory
 import veeci.practicing.rts.devicecontrol.adapter.inbound.web.adminCommandRoutes
 import veeci.practicing.rts.devicecontrol.deviceControlModule
 import veeci.practicing.rts.fleet.adapter.inbound.web.fleetRoutes
+import veeci.practicing.rts.fleet.adapter.inbound.ws.fleetSocket
 import veeci.practicing.rts.fleet.fleetModule
 import veeci.practicing.rts.identity.adapter.inbound.web.devTokenRoutes
 import veeci.practicing.rts.identity.adapter.inbound.web.driverAdminRoutes
@@ -35,8 +36,10 @@ import veeci.practicing.rts.platform.config.AppEnv
 import veeci.practicing.rts.platform.db.Migrations
 import veeci.practicing.rts.platform.di.platformModule
 import veeci.practicing.rts.platform.events.OutboxRelay
+import veeci.practicing.rts.platform.http.adminArea
 import veeci.practicing.rts.platform.http.configureErrorHandling
 import veeci.practicing.rts.platform.http.configureRequestGuards
+import veeci.practicing.rts.platform.http.configureSecurityHeaders
 import veeci.practicing.rts.platform.http.configureSerialization
 import veeci.practicing.rts.platform.jobs.BackgroundWorker
 import veeci.practicing.rts.platform.jobs.JobScheduler
@@ -46,7 +49,9 @@ import veeci.practicing.rts.platform.observability.configureMetrics
 import veeci.practicing.rts.platform.observability.configureRequestLogging
 import veeci.practicing.rts.platform.observability.healthRoutes
 import veeci.practicing.rts.platform.security.AUTH_JWT
+import veeci.practicing.rts.platform.security.AUTH_TICKET
 import veeci.practicing.rts.platform.security.configureAuthentication
+import veeci.practicing.rts.platform.security.wsTicketRoutes
 import veeci.practicing.rts.platform.ws.configureWebSockets
 import veeci.practicing.rts.platform.ws.echoEndpoint
 import veeci.practicing.rts.routing.adapter.inbound.web.routeRoutes
@@ -57,6 +62,7 @@ import veeci.practicing.rts.telemetry.adapter.inbound.web.sessionHealthRoutes
 import veeci.practicing.rts.telemetry.telemetryModule
 import veeci.practicing.rts.tracking.adapter.inbound.ws.driverSocket
 import veeci.practicing.rts.tracking.trackingModule
+import veeci.practicing.rts.trip.adapter.inbound.web.adminTripSummaryRoutes
 import veeci.practicing.rts.trip.adapter.inbound.web.tripHistoryRoutes
 import veeci.practicing.rts.trip.adapter.inbound.web.tripRoutes
 import veeci.practicing.rts.trip.adapter.inbound.web.tripSummaryRoutes
@@ -113,7 +119,8 @@ fun Application.module(
     configureSerialization()
     configureRequestGuards(config.http)
     configureErrorHandling()
-    configureAuthentication(get())
+    configureSecurityHeaders()
+    configureAuthentication(get(), get())
     configureWebSockets(config.ws)
 
     routing {
@@ -128,12 +135,21 @@ fun Application.module(
             tripHistoryRoutes(get())
             tripTrackRoutes(get())
             routeRoutes(get())
-            adminCommandRoutes(get())
-            sessionHealthRoutes(get())
-            providerReportRoutes(get())
-            auditRoutes(get(), get())
-            driverAdminRoutes(get())
-            fleetRoutes(get(), get())
+        }
+        // The fleet socket takes a ticket, never a token: a browser opens it (phase 11c).
+        authenticate(AUTH_TICKET) { fleetSocket(get()) }
+        // Every /api/v1/admin route, the only ones a browser on another origin may call.
+        adminArea(config.admin) {
+            authenticate(AUTH_JWT) {
+                adminTripSummaryRoutes(get())
+                adminCommandRoutes(get())
+                sessionHealthRoutes(get())
+                providerReportRoutes(get())
+                auditRoutes(get(), get())
+                driverAdminRoutes(get())
+                fleetRoutes(get(), get())
+                wsTicketRoutes(get())
+            }
         }
         if (config.app.env != AppEnv.PROD) echoEndpoint(get())
         // Interactive API docs generated from the contract; local development only.
@@ -156,6 +172,6 @@ fun appModule(
             liveModule(redis = config.redis.enabled),
             routingModule(config.routing),
             telemetryModule(config.telemetry),
-            fleetModule(config.events),
+            fleetModule(config.events, config.fleet),
         )
     }

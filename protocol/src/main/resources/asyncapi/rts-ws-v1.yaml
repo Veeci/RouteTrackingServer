@@ -74,6 +74,33 @@ channels:
       error:
         $ref: '#/components/messages/error'
 
+  adminFleet:
+    address: /ws/v1/admin/fleet
+    title: Staff watch the fleet on a map
+    description: |
+      Phase 11c. A browser cannot set headers on a WebSocket, so this socket authenticates with `?ticket=` only: a
+      single-use ticket from `POST /api/v1/admin/ws-tickets`, valid 30 s. A missing, used or expired ticket is refused
+      with HTTP 401 before the upgrade. An access token in a header or in `?token=` is not accepted here. A ticket of
+      any role but OPERATOR or ADMIN gets close 4403.
+
+      The client sends `fleet_subscribe` with a map area. The server answers `fleet_snapshot` and then sends a
+      `fleet_delta` every tick (2 s), empty when nothing changed. Positions are "latest wins": a delta carries a
+      driver's marker as it is at the tick, not every fix since the last one. When the area holds more than 5 000
+      matching drivers, the server sends `fleet_cluster` every tick instead, and no deltas. Another `fleet_subscribe`
+      replaces the area and starts again with a snapshot. A socket that does not take a message within 5 s is closed
+      with 1013. Reconnect with a new ticket.
+    messages:
+      fleet_subscribe:
+        $ref: '#/components/messages/fleet_subscribe'
+      fleet_snapshot:
+        $ref: '#/components/messages/fleet_snapshot'
+      fleet_delta:
+        $ref: '#/components/messages/fleet_delta'
+      fleet_cluster:
+        $ref: '#/components/messages/fleet_cluster'
+      error:
+        $ref: '#/components/messages/error'
+
 operations:
   receiveHello:
     action: receive
@@ -169,6 +196,36 @@ operations:
     messages:
       - $ref: '#/channels/guest/messages/error'
 
+  receiveFleetSubscribe:
+    action: receive
+    channel:
+      $ref: '#/channels/adminFleet'
+    summary: Watch the drivers in a map area. It replaces the area watched before.
+    messages:
+      - $ref: '#/channels/adminFleet/messages/fleet_subscribe'
+    reply:
+      channel:
+        $ref: '#/channels/adminFleet'
+      messages:
+        - $ref: '#/channels/adminFleet/messages/fleet_snapshot'
+        - $ref: '#/channels/adminFleet/messages/fleet_cluster'
+  sendFleetUpdates:
+    action: send
+    channel:
+      $ref: '#/channels/adminFleet'
+    summary: Every tick, the changes in the area, or its cluster counts when it holds too many drivers.
+    messages:
+      - $ref: '#/channels/adminFleet/messages/fleet_delta'
+      - $ref: '#/channels/adminFleet/messages/fleet_cluster'
+      - $ref: '#/channels/adminFleet/messages/fleet_snapshot'
+  sendFleetError:
+    action: send
+    channel:
+      $ref: '#/channels/adminFleet'
+    summary: Report a problem with one client message, such as an invalid bbox. The session stays open.
+    messages:
+      - $ref: '#/channels/adminFleet/messages/error'
+
 components:
   messages:
     hello:
@@ -256,6 +313,31 @@ components:
       summary: The driver follows a new route from now on; draw it instead of the old one. Sent to the guest and the driver.
       payload:
         $ref: '#/components/schemas/RouteUpdated'
+
+    fleet_subscribe:
+      name: fleet_subscribe
+      title: Fleet subscribe
+      summary: Watch the drivers inside a map area.
+      payload:
+        $ref: '#/components/schemas/FleetSubscribe'
+    fleet_snapshot:
+      name: fleet_snapshot
+      title: Fleet snapshot
+      summary: Every matching driver in the area now.
+      payload:
+        $ref: '#/components/schemas/FleetSnapshot'
+    fleet_delta:
+      name: fleet_delta
+      title: Fleet delta
+      summary: The markers that changed since the last message, and the drivers that left.
+      payload:
+        $ref: '#/components/schemas/FleetDelta'
+    fleet_cluster:
+      name: fleet_cluster
+      title: Fleet cluster
+      summary: Driver counts per grid cell, for an area with too many drivers to send one by one.
+      payload:
+        $ref: '#/components/schemas/FleetCluster'
 
   schemas:
     Subscribe:
@@ -834,3 +916,149 @@ components:
         correlatesTo:
           type: integer
           description: The seq of the client message that this error is about, if it has one.
+
+    FleetSubscribe:
+      type: object
+      additionalProperties: false
+      required: [type, bbox]
+      properties:
+        type:
+          const: fleet_subscribe
+        bbox:
+          type: array
+          description: '[minLng, minLat, maxLng, maxLat]. Edges are inside. The minimum comes first. An area across the antimeridian is not supported.'
+          minItems: 4
+          maxItems: 4
+          items:
+            type: number
+        filters:
+          $ref: '#/components/schemas/FleetFilters'
+
+    FleetFilters:
+      type: object
+      additionalProperties: false
+      description: An absent or null field does not filter.
+      properties:
+        online:
+          type: [boolean, 'null']
+          description: true for only drivers heard from within the stale time (60 s), false for only the others.
+        onTrip:
+          type: [boolean, 'null']
+          description: true for only drivers on a trip, false for only the others.
+
+    FleetSnapshot:
+      type: object
+      additionalProperties: false
+      required: [type, drivers, at]
+      properties:
+        type:
+          const: fleet_snapshot
+        drivers:
+          type: array
+          items:
+            $ref: '#/components/schemas/DriverMarker'
+        at:
+          type: string
+          format: date-time
+          description: The server time that `online` was judged against.
+
+    FleetDelta:
+      type: object
+      additionalProperties: false
+      required: [type, upserts, removes, at]
+      properties:
+        type:
+          const: fleet_delta
+        upserts:
+          type: array
+          description: Markers to add or replace.
+          items:
+            $ref: '#/components/schemas/DriverMarker'
+        removes:
+          type: array
+          description: Drivers to take off the map. They left the area or stopped matching the filters.
+          items:
+            type: string
+            format: uuid
+        at:
+          type: string
+          format: date-time
+
+    FleetCluster:
+      type: object
+      additionalProperties: false
+      required: [type, cells, cellDeg, total, at]
+      properties:
+        type:
+          const: fleet_cluster
+        cells:
+          type: array
+          description: Only cells with at least one driver.
+          items:
+            $ref: '#/components/schemas/FleetCell'
+        cellDeg:
+          type: number
+          exclusiveMinimum: 0
+          description: The side of one grid cell, in degrees of latitude and of longitude.
+        total:
+          type: integer
+          minimum: 0
+          description: Matching drivers in the area.
+        at:
+          type: string
+          format: date-time
+
+    FleetCell:
+      type: object
+      additionalProperties: false
+      required: [lat, lng, count]
+      properties:
+        lat:
+          type: number
+          minimum: -90
+          maximum: 90
+          description: The mean latitude of the drivers in the cell.
+        lng:
+          type: number
+          minimum: -180
+          maximum: 180
+          description: The mean longitude of the drivers in the cell.
+        count:
+          type: integer
+          minimum: 1
+
+    DriverMarker:
+      type: object
+      additionalProperties: false
+      required: [driverId, lat, lng, online, lastSeenAt]
+      properties:
+        driverId:
+          type: string
+          format: uuid
+        lat:
+          type: number
+          minimum: -90
+          maximum: 90
+        lng:
+          type: number
+          minimum: -180
+          maximum: 180
+        bearingDeg:
+          type: number
+          minimum: 0
+          exclusiveMaximum: 360
+          description: Degrees, 0 = north. Absent when the newest fix had no bearing.
+        online:
+          type: boolean
+          description: Heard from within the stale time (60 s).
+        tripStatus:
+          type: string
+          description: The stage of the driver's current trip. Absent when they are not on one.
+        batteryPct:
+          type: integer
+          minimum: 0
+          maximum: 100
+        lastSeenAt:
+          type: string
+          format: date-time
+          description: When the phone last told the server something, by the phone's clock.

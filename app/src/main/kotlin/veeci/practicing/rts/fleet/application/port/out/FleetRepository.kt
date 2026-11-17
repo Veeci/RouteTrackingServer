@@ -4,6 +4,7 @@ import veeci.practicing.rts.fleet.domain.FleetCounts
 import veeci.practicing.rts.fleet.domain.FleetCursor
 import veeci.practicing.rts.fleet.domain.FleetDriver
 import veeci.practicing.rts.fleet.domain.FleetFilter
+import veeci.practicing.rts.fleet.domain.MapCell
 import java.util.UUID
 import kotlin.time.Instant
 
@@ -32,6 +33,24 @@ interface FleetRepository {
     ): List<FleetDriver>
 
     suspend fun counts(onlineSince: Instant): FleetCounts
+
+    /**
+     * The live map's tick (11c): every row written after [since], and every row whose `last_seen_at` lies between
+     * [staleFrom] and [staleTo]. The second part finds the drivers who went offline: going offline is only time
+     * passing, it writes no row.
+     */
+    suspend fun changedSince(
+        since: Instant,
+        staleFrom: Instant,
+        staleTo: Instant,
+    ): List<FleetDriver>
+
+    /** Drivers matching [filter] counted per grid cell of [cellDeg] degrees, for a map area with too many markers. */
+    suspend fun cells(
+        filter: FleetFilter,
+        onlineSince: Instant,
+        cellDeg: Double,
+    ): List<MapCell>
 
     /**
      * Empties the table (TRUNCATE). It locks the table until the transaction ends: other writers wait, and readers too.
