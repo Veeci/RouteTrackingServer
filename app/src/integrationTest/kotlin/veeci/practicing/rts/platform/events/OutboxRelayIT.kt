@@ -22,6 +22,7 @@ import org.testcontainers.junit.jupiter.Testcontainers
 import veeci.practicing.rts.platform.config.EventsConfig
 import veeci.practicing.rts.platform.db.ExposedTransactionRunner
 import veeci.practicing.rts.platform.db.Migrations
+import veeci.practicing.rts.platform.db.RELAY_POOL
 import veeci.practicing.rts.platform.db.createDataSource
 import veeci.practicing.rts.testing.TestConfig
 import veeci.practicing.rts.testing.TestDatabase
@@ -32,7 +33,8 @@ import kotlin.time.Duration.Companion.milliseconds
 
 @Testcontainers(disabledWithoutDocker = true)
 class OutboxRelayIT {
-    private val dataSource = createDataSource(TestConfig.load(TestDatabase.freshDatabaseEnv()).db).also { Migrations.run(it) }
+    private val env = TestDatabase.freshDatabaseEnv()
+    private val dataSource = createDataSource(TestConfig.load(env).db).also { Migrations.run(it) }
     private val transactions = ExposedTransactionRunner(Database.connect(dataSource))
     private val config = EventsConfig(relayInterval = 10.milliseconds, relayBatchSize = 100)
 
@@ -61,10 +63,14 @@ class OutboxRelayIT {
         type: String = TYPE,
     ) = transactions.inTransaction { ns.forEach { n -> OutboxWriter().append(type, buildJsonObject { put("n", n) }) } }
 
-    private fun unpublished(): Long =
+    private fun unpublished(): Long = countOf("SELECT count(*) FROM outbox WHERE published_at IS NULL")
+
+    private fun written(): Long = countOf("SELECT count(*) FROM outbox WHERE event_type = '$WRITTEN'")
+
+    private fun countOf(sql: String): Long =
         dataSource.connection.use { c ->
             c.createStatement().use {
-                it.executeQuery("SELECT count(*) FROM outbox WHERE published_at IS NULL").use { r ->
+                it.executeQuery(sql).use { r ->
                     r.next()
                     r.getLong(1)
                 }
@@ -114,6 +120,60 @@ class OutboxRelayIT {
             recorder.handled.count { it == 1 } shouldBe 5
             recorder.handled.count { it == 2 } shouldBe 1
             unpublished() shouldBe 0
+        }
+
+    @Test
+    fun `one pass delivers at most one batch`() =
+        runTest {
+            val recorder = Recorder()
+            val relay = OutboxRelay(transactions, listOf(recorder), config.copy(relayBatchSize = 2))
+            append(1, 2, 3, 4, 5)
+
+            relay.deliverPending() shouldBe 2
+            relay.deliverPending() shouldBe 2
+            relay.deliverPending() shouldBe 1
+
+            recorder.handled.toList() shouldBe listOf(1, 2, 3, 4, 5)
+            unpublished() shouldBe 0
+        }
+
+    @Test
+    fun `a failing event rolls back its pass, and the events before it are delivered again without it`() =
+        runTest {
+            var failed = false
+            val recorder = Recorder(failWhen = { it == 2 && !failed.also { failed = true } }) // 2 fails once
+            val relay = OutboxRelay(transactions, listOf(recorder), config)
+            append(1, 2, 3)
+
+            relay.deliverPending() shouldBe 1 // the pass 1, 2 (fails) rolls back; then 1 alone
+            unpublished() shouldBe 2
+            relay.deliverPending() shouldBe 2
+
+            recorder.handled.toList() shouldBe listOf(1, 2, 1, 2, 3)
+            unpublished() shouldBe 0
+        }
+
+    @Test
+    fun `on the relay's own pool, a handler's writes through the main runner roll back with the pass`() =
+        runTest {
+            createDataSource(TestConfig.load(env).db, name = RELAY_POOL, size = 2).use { relayPool ->
+                val relayTransactions = ExposedTransactionRunner(Database.connect(relayPool), maxConnections = 2)
+                val writesThenFails =
+                    object : OutboxEventHandler {
+                        override val eventType = TYPE
+
+                        override suspend fun handle(payload: JsonElement) {
+                            transactions.inTransaction { OutboxWriter().append(WRITTEN, buildJsonObject { put("n", 0) }) }
+                            error("the handler fails after its write")
+                        }
+                    }
+                append(1)
+
+                OutboxRelay(relayTransactions, listOf(writesThenFails), config).deliverPending() shouldBe 0
+            }
+
+            written() shouldBe 0
+            unpublished() shouldBe 1
         }
 
     @Test
@@ -202,5 +262,6 @@ class OutboxRelayIT {
 
     private companion object {
         const val TYPE = "test.Numbered.v1"
+        const val WRITTEN = "test.Written.v1"
     }
 }

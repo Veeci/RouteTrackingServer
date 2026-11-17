@@ -59,8 +59,9 @@ moments come late, but nothing is lost: the events wait in the `outbox` table.
 
 `DatabasePoolNearlyFull`: over 80 % of the connections are in use for 5 minutes.
 
-1. Each instance has its own pool of `DB_MAXPOOLSIZE`. Two instances use twice as many Postgres connections:
-   check `max_connections` before scaling out.
+1. Each instance has two pools: `DB_MAXPOOLSIZE` (20) for requests and jobs, and `DB_RELAYPOOLSIZE` (2) for the outbox
+   relay alone. The alert watches only the first (`pool="rts-db"`). Each instance uses both sizes together in
+   Postgres connections, so check `max_connections` (default 100) before scaling out: 4 instances use 88.
 2. A transaction left open holds a connection: `SELECT pid, now() - xact_start, query FROM pg_stat_activity WHERE xact_start IS NOT NULL ORDER BY 2 DESC;`
 
 ### Redis is down

@@ -269,12 +269,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (instance) (hikaricp_connections_active)",
+          "expr": "sum by (instance) (hikaricp_connections_active{pool=\"rts-db\"})",
           "legendFormat": "active {{instance}}"
         },
         {
           "refId": "B",
-          "expr": "max(hikaricp_connections_max)",
+          "expr": "max(hikaricp_connections_max{pool=\"rts-db\"})",
           "legendFormat": "max"
         }
       ]
