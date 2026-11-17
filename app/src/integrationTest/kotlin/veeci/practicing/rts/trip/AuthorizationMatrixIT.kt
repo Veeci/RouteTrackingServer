@@ -20,6 +20,7 @@ import veeci.practicing.rts.testing.trip.TripApi
 import veeci.practicing.rts.trip.AuthorizationMatrixIT.Caller.ADMIN
 import veeci.practicing.rts.trip.AuthorizationMatrixIT.Caller.ANONYMOUS
 import veeci.practicing.rts.trip.AuthorizationMatrixIT.Caller.ASSIGNED_DRIVER
+import veeci.practicing.rts.trip.AuthorizationMatrixIT.Caller.OPERATOR
 import veeci.practicing.rts.trip.AuthorizationMatrixIT.Caller.OTHER_DRIVER
 import veeci.practicing.rts.trip.AuthorizationMatrixIT.Caller.OTHER_GUEST
 import veeci.practicing.rts.trip.AuthorizationMatrixIT.Caller.OWNER_GUEST
@@ -31,7 +32,7 @@ import veeci.practicing.rts.trip.AuthorizationMatrixIT.Caller.OWNER_GUEST
  */
 @Testcontainers(disabledWithoutDocker = true)
 class AuthorizationMatrixIT {
-    enum class Caller { ANONYMOUS, OWNER_GUEST, OTHER_GUEST, ASSIGNED_DRIVER, OTHER_DRIVER, ADMIN }
+    enum class Caller { ANONYMOUS, OWNER_GUEST, OTHER_GUEST, ASSIGNED_DRIVER, OTHER_DRIVER, ADMIN, OPERATOR }
 
     /** A route, the stage its trip is prepared in (the actions the assigned driver runs first), and the expected statuses. */
     private class Row(
@@ -44,7 +45,7 @@ class AuthorizationMatrixIT {
         route: String,
         setUp: List<String>,
         vararg statuses: Int,
-    ) = Row(route, setUp, Caller.entries.zip(statuses.toList()).toMap())
+    ) = Row(route, setUp, Caller.entries.zip(statuses.toList() + statuses.last()).toMap()) // OPERATOR: as ADMIN
 
     // Columns:                                          ANONYMOUS, OWNER_GUEST, OTHER_GUEST, ASSIGNED_DRIVER, OTHER_DRIVER, ADMIN
     private val matrix =
@@ -69,7 +70,8 @@ class AuthorizationMatrixIT {
     fun `TC-3-SEC-01 authorization matrix`(): List<DynamicTest> {
         val actual = mutableMapOf<Pair<String, Caller>, Int>()
         lateinit var routing: Routing
-        testApp(routes = { routing = this }) {
+        // 7 callers × every route: more requests than the per-IP limit allows in a minute.
+        testApp(env = mapOf("HTTP_RATELIMITPERMINUTE" to "10000"), routes = { routing = this }) {
             matrix.forEach { row -> row.expected.keys.forEach { caller -> actual[row.route to caller] = call(row, caller).status.value } }
         }
         val served =
@@ -105,6 +107,7 @@ class AuthorizationMatrixIT {
                 ASSIGNED_DRIVER -> assigned
                 OTHER_DRIVER -> TestTokens.driver()
                 ADMIN -> TestTokens.admin()
+                OPERATOR -> TestTokens.operator()
             }
         val (method, path) = row.route.split(" ")
         if (path.endsWith(SUMMARY)) awaitSummary(trip)

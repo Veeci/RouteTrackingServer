@@ -20,6 +20,9 @@ interface DriverLink {
         message: ServerMessage,
     ): Boolean
 
+    /** Closes every socket of [driver], on every instance, with 4403 (phase 11: the driver was disabled). */
+    suspend fun disconnect(driver: UserId)
+
     /** [listener] runs right after a driver's `welcome`, before the socket handles its next message. */
     fun onConnected(listener: suspend (UserId) -> Unit)
 

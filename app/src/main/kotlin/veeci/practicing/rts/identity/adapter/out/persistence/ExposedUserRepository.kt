@@ -6,8 +6,10 @@ import org.jetbrains.exposed.v1.core.java.javaUUID
 import org.jetbrains.exposed.v1.datetime.CurrentTimestamp
 import org.jetbrains.exposed.v1.datetime.timestamp
 import org.jetbrains.exposed.v1.jdbc.selectAll
+import org.jetbrains.exposed.v1.jdbc.update
 import org.jetbrains.exposed.v1.jdbc.upsert
 import veeci.practicing.rts.identity.application.port.out.UserRepository
+import veeci.practicing.rts.identity.domain.Disabled
 import veeci.practicing.rts.identity.domain.User
 import veeci.practicing.rts.shared.Role
 import veeci.practicing.rts.shared.UserId
@@ -18,6 +20,8 @@ internal object UsersTable : Table("users") {
     val displayName = text("display_name")
     val role = text("role")
     val createdAt = timestamp("created_at").defaultExpression(CurrentTimestamp)
+    val disabledAt = timestamp("disabled_at").nullable() // migration V19
+    val disabledReason = text("disabled_reason").nullable()
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -28,13 +32,27 @@ class ExposedUserRepository : UserRepository {
             .selectAll()
             .where { UsersTable.id eq id.value }
             .singleOrNull()
-            ?.let { User(UserId(it[UsersTable.id]), it[UsersTable.displayName], Role.valueOf(it[UsersTable.role])) }
+            ?.let { row ->
+                User(
+                    UserId(row[UsersTable.id]),
+                    row[UsersTable.displayName],
+                    Role.valueOf(row[UsersTable.role]),
+                    row[UsersTable.disabledAt]?.let { Disabled(it, row[UsersTable.disabledReason].orEmpty()) },
+                )
+            }
 
     override suspend fun save(user: User) {
-        UsersTable.upsert(onUpdateExclude = listOf(UsersTable.createdAt)) {
+        UsersTable.upsert(onUpdateExclude = listOf(UsersTable.createdAt, UsersTable.disabledAt, UsersTable.disabledReason)) {
             it[id] = user.id.value
             it[displayName] = user.displayName
             it[role] = user.role.name
+        }
+    }
+
+    override suspend fun saveStatus(user: User) {
+        UsersTable.update({ UsersTable.id eq user.id.value }) {
+            it[disabledAt] = user.disabled?.at
+            it[disabledReason] = user.disabled?.reason
         }
     }
 }

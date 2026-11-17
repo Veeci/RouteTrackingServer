@@ -8,6 +8,9 @@ import veeci.practicing.rts.devicecontrol.domain.CommandId
 import veeci.practicing.rts.devicecontrol.domain.CommandPayload
 import veeci.practicing.rts.devicecontrol.domain.CommandStatus
 import veeci.practicing.rts.devicecontrol.domain.DeviceCommand
+import veeci.practicing.rts.devicecontrol.domain.kind
+import veeci.practicing.rts.platform.audit.AuditEntry
+import veeci.practicing.rts.platform.audit.AuditLog
 import veeci.practicing.rts.platform.db.TransactionRunner
 import veeci.practicing.rts.shared.Actor
 import veeci.practicing.rts.shared.DomainException
@@ -33,6 +36,7 @@ class CommandService(
     private val clock: Clock,
     /** How long a command may wait for its ack before it expires. */
     private val expireAfter: Duration,
+    private val audit: AuditLog,
 ) {
     private val log = LoggerFactory.getLogger(CommandService::class.java)
 
@@ -43,7 +47,24 @@ class CommandService(
         actor: Actor,
     ): DeviceCommand {
         requireAdmin(actor)
-        return issueAsServer(driver, payload)
+        // The command and its audit row commit together; the server's own commands (issueAsServer) are not audited.
+        return transactions.inTransaction {
+            issueAsServer(driver, payload).also {
+                audit.record(
+                    AuditEntry(
+                        actor,
+                        "COMMAND_ISSUED",
+                        "DRIVER",
+                        driver.value.toString(),
+                        details =
+                            mapOf(
+                                "kind" to payload.kind(),
+                                "commandId" to it.id.value.toString(),
+                            ),
+                    ),
+                )
+            }
+        }
     }
 
     /**

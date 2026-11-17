@@ -15,6 +15,7 @@ import veeci.practicing.rts.shared.Actor
 import veeci.practicing.rts.shared.DomainException
 import veeci.practicing.rts.shared.Role
 import veeci.practicing.rts.shared.UserId
+import veeci.practicing.rts.testing.audit.InMemoryAuditLog
 import veeci.practicing.rts.testing.devicecontrol.InMemoryCommandEventOutbox
 import veeci.practicing.rts.testing.devicecontrol.InMemoryDeviceCommandRepository
 import veeci.practicing.rts.testing.tracking.DirectTransactionRunner
@@ -45,7 +46,8 @@ class CommandServiceTest {
     private val repository = InMemoryDeviceCommandRepository()
     private val outbox = InMemoryCommandEventOutbox()
     private val clock = MovingClock()
-    private val service = CommandService(repository, outbox, DirectTransactionRunner, clock, expireAfter = 10.minutes)
+    private val audit = InMemoryAuditLog()
+    private val service = CommandService(repository, outbox, DirectTransactionRunner, clock, expireAfter = 10.minutes, audit)
     private val driver = UserId(UUID.randomUUID())
     private val admin = Actor(UserId(UUID.randomUUID()), Role.ADMIN)
     private val high = CommandPayload.SetConstraint(TrackingAccuracy.HIGH, 1000, "guest_watching")
@@ -59,6 +61,11 @@ class CommandServiceTest {
             outbox.events.single().commandId shouldBe command.id.value
             outbox.events.single().kind shouldBe "SET_CONSTRAINT"
             service.deliverable(driver = driver).map { it.id } shouldBe listOf(command.id)
+            audit.entries.single().let {
+                it.action shouldBe "COMMAND_ISSUED" // TC-11-AUD-01: an admin's command leaves exactly one audit entry
+                it.targetId shouldBe driver.value.toString()
+                it.details shouldBe mapOf("kind" to "SET_CONSTRAINT", "commandId" to command.id.value.toString())
+            }
         }
 
     @Test

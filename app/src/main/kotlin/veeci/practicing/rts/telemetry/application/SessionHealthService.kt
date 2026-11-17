@@ -1,6 +1,8 @@
 package veeci.practicing.rts.telemetry.application
 
 import veeci.practicing.rts.devicecontrol.application.api.AppliedConstraints
+import veeci.practicing.rts.platform.audit.AuditEntry
+import veeci.practicing.rts.platform.audit.AuditLog
 import veeci.practicing.rts.platform.config.TelemetryConfig
 import veeci.practicing.rts.platform.db.TransactionRunner
 import veeci.practicing.rts.shared.Actor
@@ -37,6 +39,7 @@ class SessionHealthService(
     private val transactions: TransactionRunner,
     private val clock: Clock,
     private val config: TelemetryConfig,
+    private val audit: AuditLog,
 ) {
     /**
      * Computes the next sessions that went idle since the last run, at most [TelemetryConfig.batchSize], and moves
@@ -78,7 +81,10 @@ class SessionHealthService(
         requireAdmin(actor)
         return transactions.inTransaction {
             val session = sessions.session(sessionId) ?: notFound(sessionId)
-            compute(session).also { health.save(it) }
+            compute(session).also {
+                health.save(it)
+                audit.record(AuditEntry(actor, "SESSION_HEALTH_RECOMPUTED", "SESSION", sessionId.toString()))
+            }
         }
     }
 

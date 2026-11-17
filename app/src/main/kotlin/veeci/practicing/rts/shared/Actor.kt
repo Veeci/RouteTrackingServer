@@ -8,7 +8,20 @@ value class UserId(
     val value: UUID,
 )
 
-enum class Role { GUEST, DRIVER, ADMIN }
+/**
+ * What a user may do. OPERATOR (phase 11) runs the fleet day to day: reads every driver and trip and cancels trips.
+ * ADMIN may also change drivers and devices, and reads the audit log.
+ */
+enum class Role {
+    GUEST,
+    DRIVER,
+    OPERATOR,
+    ADMIN,
+    ;
+
+    /** Back-office staff: sees every trip and driver. */
+    val isStaff: Boolean get() = this == OPERATOR || this == ADMIN
+}
 
 /**
  * Who is calling: the authenticated user and their role. Inbound adapters build it from the access token

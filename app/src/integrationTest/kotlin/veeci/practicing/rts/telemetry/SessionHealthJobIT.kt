@@ -14,6 +14,7 @@ import veeci.practicing.rts.devicecontrol.domain.CommandId
 import veeci.practicing.rts.devicecontrol.domain.CommandPayload
 import veeci.practicing.rts.devicecontrol.domain.DeviceCommand
 import veeci.practicing.rts.devicecontrol.domain.TrackingAccuracy
+import veeci.practicing.rts.platform.audit.ExposedAuditLog
 import veeci.practicing.rts.platform.config.TelemetryConfig
 import veeci.practicing.rts.platform.db.ExposedTransactionRunner
 import veeci.practicing.rts.platform.db.Migrations
@@ -72,6 +73,7 @@ class SessionHealthJobIT {
             transactions,
             clock,
             TelemetryConfig(idleAfter = 10.minutes, batchSize = 2, defaultInterval = 5.seconds),
+            ExposedAuditLog(clock),
         )
 
     @AfterEach

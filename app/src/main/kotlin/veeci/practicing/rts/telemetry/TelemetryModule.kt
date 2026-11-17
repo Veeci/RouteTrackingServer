@@ -14,6 +14,6 @@ import veeci.practicing.rts.telemetry.application.port.out.SessionHealthReposito
 fun telemetryModule(config: TelemetryConfig): Module =
     module {
         single<SessionHealthRepository> { ExposedSessionHealthRepository() }
-        single { SessionHealthService(get(), get(), get(), get(), get(), config) }
+        single { SessionHealthService(get(), get(), get(), get(), get(), config, get()) }
         single { SessionHealthJob(get(), config.computeEvery) } bind ScheduledJob::class
     }

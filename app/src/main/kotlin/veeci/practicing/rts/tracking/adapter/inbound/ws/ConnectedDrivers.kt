@@ -1,9 +1,11 @@
 package veeci.practicing.rts.tracking.adapter.inbound.ws
 
+import io.ktor.websocket.CloseReason
 import kotlinx.coroutines.CancellationException
 import org.slf4j.LoggerFactory
 import veeci.practicing.rts.platform.ws.WsSession
 import veeci.practicing.rts.protocol.ServerMessage
+import veeci.practicing.rts.protocol.WsCloseCodes
 import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.tracking.application.api.LocalDriverLink
 import java.util.UUID
@@ -41,6 +43,19 @@ class ConnectedDrivers : LocalDriverLink {
                 false
             }
         } > 0
+
+    @Suppress("TooGenericExceptionCaught") // a socket that already closed must not stop the others
+    override suspend fun disconnect(driver: UserId) {
+        sessions[driver].orEmpty().toList().forEach { session ->
+            try {
+                session.close(CloseReason(WsCloseCodes.FORBIDDEN_ROLE, "Driver disabled"))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                log.info("A disabled driver's socket was already closing: {}", e.toString())
+            }
+        }
+    }
 
     override fun onConnected(listener: suspend (UserId) -> Unit) {
         connectListeners += listener

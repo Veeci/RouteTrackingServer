@@ -45,7 +45,7 @@ class TripHistoryService(
             when (actor.role) {
                 Role.GUEST -> TripParty.GUEST
                 Role.DRIVER -> TripParty.DRIVER
-                Role.ADMIN -> throw DomainException(TripError.TRIP_ACTION_FORBIDDEN, "An admin has no trip history")
+                Role.ADMIN, Role.OPERATOR -> throw DomainException(TripError.TRIP_ACTION_FORBIDDEN, "Staff have no trip history")
             }
         return transactions.inTransaction {
             val found = trips.findHistory(actor.userId, party, before, limit + 1) // one more tells whether a next page exists

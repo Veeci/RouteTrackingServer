@@ -163,6 +163,15 @@ is closed, and sign-up and login for real users.
 | 79 | The track of a trip older than 90 days | The timeline and the summary stay. The points are gone: the track says `pointsExpired`, and exports and summary recompute answer 410 TRACK_EXPIRED | Built P10 (10c) |
 | 80 | Where alerts go | A Discord channel, through a webhook URL kept out of git. Without one, alerts show in Prometheus only | Built P10 (10c) |
 
+## Phase 11 (11a built, decided 2026-11-17)
+
+| # | Problem | What will happen | Source |
+|---|---|---|---|
+| 81 | Who runs the fleet day to day | OPERATOR: sees every trip, driver and track. ADMIN also disables drivers, sends commands, recomputes, and reads the audit log | Built P11 (11a) |
+| 82 | How long a staff token lasts | 15 minutes, against 12 hours for guests and drivers, because it can do more | Built P11 (11a) |
+| 83 | A disabled driver | Their sockets close at once on every instance, and a new session is refused. Their tokens still work for REST until they expire. A reason is required and kept | Built P11 (11a) |
+| 84 | What the audit log keeps | Every admin action with who, when, the target, the reason and the request id. It is never changed or deleted | Built P11 (11a) |
+
 ## Open questions, most important first
 
 1. Login: who issues tokens in production, and how do guests and drivers sign up (row 27)?

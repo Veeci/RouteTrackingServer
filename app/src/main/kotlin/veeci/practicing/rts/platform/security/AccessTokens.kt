@@ -50,7 +50,8 @@ class AccessTokens(
 
     fun issue(actor: Actor): IssuedToken {
         val now = clock.instant()
-        val expiresAt = now.plus(config.tokenTtl.toJavaDuration())
+        val ttl = if (actor.role.isStaff) config.staffTokenTtl else config.tokenTtl
+        val expiresAt = now.plus(ttl.toJavaDuration())
         val token =
             JWT
                 .create()

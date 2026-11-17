@@ -553,6 +553,87 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/admin/drivers/{driverId}/disable:
+    post:
+      tags: [admin]
+      operationId: disableDriver
+      summary: Disable a driver (ADMIN)
+      description: The driver can no longer open a tracking session; their open sockets on every instance close with 4403. Recorded in the audit log with the reason.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/DriverId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AccountChangeRequest' }
+      responses:
+        '200':
+          description: The driver's account after the change.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DriverAccount' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: REASON_REQUIRED, a disable needs a reason.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/admin/drivers/{driverId}/enable:
+    post:
+      tags: [admin]
+      operationId: enableDriver
+      summary: Enable a driver again (ADMIN)
+      description: Lets the driver open tracking sessions again. Recorded in the audit log.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/DriverId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AccountChangeRequest' }
+      responses:
+        '200':
+          description: The driver's account after the change.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DriverAccount' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/admin/audit:
+    get:
+      tags: [admin]
+      operationId: listAuditLog
+      summary: The audit log (ADMIN)
+      description: Every admin action, newest first. Records cannot be changed or deleted.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: actorId, in: query, schema: { type: string, format: uuid } }
+        - { name: action, in: query, schema: { type: string }, description: 'For example DRIVER_DISABLED, COMMAND_ISSUED.' }
+        - { name: targetType, in: query, schema: { type: string }, description: 'DRIVER, TRIP or SESSION.' }
+        - { name: targetId, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: cursor, in: query, schema: { type: string }, description: 'nextCursor of the previous page.' }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        '200':
+          description: One page of records.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
   /health/live:
     get:
       tags: [operations]
@@ -684,12 +765,12 @@ components:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
     Forbidden:
-      description: The caller may not do this (TRIP_ACTION_FORBIDDEN, COMMAND_FORBIDDEN, SESSION_HEALTH_FORBIDDEN), e.g. a guest accepting a trip.
+      description: The caller may not do this (TRIP_ACTION_FORBIDDEN, COMMAND_FORBIDDEN, SESSION_HEALTH_FORBIDDEN, ACCOUNT_ACTION_FORBIDDEN, AUDIT_FORBIDDEN), e.g. a guest accepting a trip.
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
     NotFound:
-      description: TRIP_NOT_FOUND, no such trip or one the caller may not see. SUMMARY_NOT_READY, the trip has no summary yet. SESSION_HEALTH_NOT_FOUND, no such session or no health computed yet.
+      description: TRIP_NOT_FOUND, no such trip or one the caller may not see. SUMMARY_NOT_READY, the trip has no summary yet. SESSION_HEALTH_NOT_FOUND, no such session or no health computed yet. DRIVER_NOT_FOUND, no such driver account.
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
@@ -1138,7 +1219,47 @@ components:
           items: { $ref: '#/components/schemas/Command' }
     Role:
       type: string
-      enum: [GUEST, DRIVER, ADMIN]
+      enum: [GUEST, DRIVER, OPERATOR, ADMIN]
+      description: OPERATOR (phase 11) reads every trip; ADMIN may also change drivers and devices. Staff tokens last 15 minutes.
+    AccountChangeRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason: { type: string, description: Required to disable. Kept in the audit log. }
+    DriverAccount:
+      type: object
+      required: [driverId, displayName, disabled]
+      additionalProperties: false
+      properties:
+        driverId: { type: string, format: uuid }
+        displayName: { type: string }
+        disabled: { type: boolean }
+        disabledAt: { type: string, format: date-time }
+        disabledReason: { type: string }
+    AuditPage:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AuditRecord' }
+        nextCursor: { type: string, description: Absent on the last page. }
+    AuditRecord:
+      type: object
+      required: [id, at, actorId, actorRole, action, targetType, targetId, details]
+      additionalProperties: false
+      properties:
+        id: { type: integer, format: int64 }
+        at: { type: string, format: date-time }
+        actorId: { type: string, format: uuid }
+        actorRole: { $ref: '#/components/schemas/Role' }
+        action: { type: string }
+        targetType: { type: string }
+        targetId: { type: string }
+        reason: { type: string }
+        details: { type: object, additionalProperties: { type: string } }
+        requestId: { type: string, description: The request's id, also in its log lines. }
     DevTokenRequest:
       type: object
       required: [role]

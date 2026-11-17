@@ -87,7 +87,7 @@ fun tripModule(
 
         // Phase 8a: a summary of every completed trip.
         single<TripSummaryRepository> { ExposedTripSummaryRepository() }
-        single { TripSummaryService(get(), get(), get(), get(), get(), get(), get(), retention.rawLocation) }
+        single { TripSummaryService(get(), get(), get(), get(), get(), get(), get(), retention.rawLocation, get()) }
         single { TripSummaryListener(get()) } bind OutboxEventHandler::class
         single { TripHistoryService(get(), get(), get()) }
 

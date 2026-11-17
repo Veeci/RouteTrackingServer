@@ -120,6 +120,24 @@ a small WS client for the fleet channel, Playwright for E2E against staging. Pag
 Drivers (list, detail) · Trips (list, live view reusing the guest channel with operator rights) · Audit.
 Deployed as static files (Cloudflare Pages / Netlify) pointing at the staging API.
 
+## Corrections to this plan (approved 2026-11-17)
+
+The plan was written before phases 4 to 10. These replace the parts they name:
+
+- Migrations start at V19, not V11.
+- There is no `SessionClosed` event. "Online" is computed from `last_seen_at` against the stale time.
+- No PostGIS. Plain `lat`, `lng` columns, `BETWEEN` and a btree index answer a map area over at most about 10 000
+  drivers; clusters use `floor(lat / cell)`. PostGIS comes when a radius or polygon query needs it.
+- No in-memory `FleetPositionCache`. Since 10a the projection handlers run on whichever instance holds the relay
+  lock, so a cache would be full on one instance and empty on the others. The projection table is the source; each
+  instance's 2 s tick reads the rows changed since its last tick. Position writes are not coalesced.
+- WebSocket tickets live in Postgres and are redeemed with `DELETE … RETURNING`, single use on any instance.
+- Disabling a driver closes their sockets on every instance through `DriverLink.disconnect` (Redis, as commands).
+- `audit_log` is append-only by a trigger, not by grants: the app's user owns the table, and an owner can grant
+  itself any right back.
+- Slices: 11a roles, audit and driver disable; 11b fleet projection and driver API; 11c the live fleet socket,
+  tickets, CORS and headers; 11d operator cancel, trip list, TypeScript client, simulator fleet, load check.
+
 ## Tasks
 
 - [ ] T11.1 PostGIS image everywhere; `V11__fleet.sql`; Exposed column type for `geography`.
@@ -127,7 +145,7 @@ Deployed as static files (Cloudflare Pages / Netlify) pointing at the staging AP
 - [ ] T11.3 `FleetPositionCache` + fleet socket with snapshot, conflated deltas, clustering fallback.
 - [ ] T11.4 Roles `OPERATOR`, operator actor in trip aggregate; driver enable/disable in `identity`.
 - [ ] T11.5 Admin REST endpoints + OpenAPI; CSV export.
-- [ ] T11.6 Audit log (table, writer used inside services, query endpoint, DB grants).
+- [x] T11.6 Audit log (table, writer used inside services, query endpoint, DB grants).
 - [ ] T11.7 CORS, WebSocket tickets, admin token expiry, security headers.
 - [ ] T11.8 CI job generating and publishing the TypeScript client.
 - [ ] T11.9 Seed script: 500 simulated drivers across the city for dashboard development (`simulator fleet --drivers 500`).
@@ -173,6 +191,24 @@ Deployed as static files (Cloudflare Pages / Netlify) pointing at the staging AP
   so TC-11-GEO-01 expectations are exact.
 - **Projection vs rebuild (TC-11-PRJ-05):** run the simulator scenario, snapshot the table, truncate,
   rebuild, compare — the best single check that the event handlers are correct.
+
+## As built (11a)
+
+- `Role.OPERATOR` (V19 widens the check). `Role.isStaff` is OPERATOR or ADMIN. An operator sees every trip and its
+  track like an admin, has no trip history, and cannot use the ADMIN-only endpoints. Staff tokens last 15 minutes
+  (`jwt.staffTokenTtl`); others keep `jwt.tokenTtl`.
+- `audit_log` (V19) with indexes by target and by actor, newest first. A trigger refuses UPDATE, DELETE and
+  TRUNCATE for every role. `AuditLog.record` joins the caller's transaction and stores the request id from the MDC.
+  `GET /api/v1/admin/audit` (ADMIN) filters by actor, action, target and time, paged by id.
+- Audited actions: `COMMAND_ISSUED` (an admin's command, not the server's own), `TRIP_SUMMARY_RECOMPUTED`,
+  `SESSION_HEALTH_RECOMPUTED`, `DRIVER_DISABLED`, `DRIVER_ENABLED`.
+- `POST /api/v1/admin/drivers/{id}/disable` (a reason is required) and `/enable` (ADMIN). The account change and its
+  audit row commit together. After the commit, `DriverLink.disconnect` closes the driver's sockets with 4403 on
+  every instance: locally, and through Redis with a marker message on `driver:{id}`. `DriverSocket` refuses the
+  `hello` of a disabled driver through identity's public `DriverAccounts`. A user with no account row counts as
+  enabled.
+- `AuthorizationMatrixIT` has an OPERATOR column, expected to answer like ADMIN on every trip route, and runs with a
+  higher rate limit because 7 callers × every route exceed 300 requests a minute.
 
 ## Definition of Done
 

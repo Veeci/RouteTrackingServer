@@ -22,6 +22,8 @@ object TestTokens {
 
     fun admin(id: UserId = newUser()): String = of(Actor(id, Role.ADMIN))
 
+    fun operator(id: UserId = newUser()): String = of(Actor(id, Role.OPERATOR))
+
     fun of(actor: Actor): String = tokens.issue(actor).token
 
     /** A token that expired a day ago (far outside the 30 s leeway). */
