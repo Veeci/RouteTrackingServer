@@ -31,6 +31,9 @@ enum class ErrorCategory {
      * time budget). Not the caller's fault: the same request may work a little later.
      */
     UNAVAILABLE,
+
+    /** The thing existed but is gone for good, e.g. a trip's GPS points after the retention period (phase 10). */
+    GONE,
 }
 
 /**

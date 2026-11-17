@@ -95,6 +95,8 @@ data class TripTrackResponse(
     val leg: String,
     val points: List<TrackPointDto>,
     val timeline: List<TimelineEntryDto>,
+    /** True when the trip ended before the retention period: [points] is empty for good (phase 10). */
+    val pointsExpired: Boolean = false,
 ) {
     companion object {
         fun of(track: TripTrack) =
@@ -103,6 +105,7 @@ data class TripTrackResponse(
                 track.leg.name.lowercase(),
                 track.points.map { TrackPointDto(it.lat, it.lng, it.recordedAt, it.speedMps ?: it.derivedSpeedMps) },
                 track.timeline.map(TimelineEntryDto::of),
+                track.pointsExpired,
             )
     }
 }

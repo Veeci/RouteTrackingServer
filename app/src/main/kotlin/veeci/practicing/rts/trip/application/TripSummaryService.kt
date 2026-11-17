@@ -27,6 +27,8 @@ import veeci.practicing.rts.trip.domain.summary.LegSummary
 import veeci.practicing.rts.trip.domain.summary.TrackSample
 import veeci.practicing.rts.trip.domain.summary.TripSummary
 import java.time.Clock
+import kotlin.time.Duration
+import kotlin.time.toKotlinInstant
 
 /**
  * Summaries of completed trips (phase 8a). [summarize] runs when a trip completes, inside the outbox relay's
@@ -40,6 +42,8 @@ class TripSummaryService(
     private val track: DriverTrack,
     private val transactions: TransactionRunner,
     private val clock: Clock,
+    /** How long GPS points are kept (phase 10): a trip that ended before that cannot be summarized again. */
+    private val retention: Duration = Duration.INFINITE,
 ) {
     /**
      * Computes the trip's summary and stores it, replacing an earlier one, so a second delivery of the completion
@@ -87,7 +91,15 @@ class TripSummaryService(
     ): TripSummary {
         if (actor.role != Role.ADMIN) throw DomainException(TripError.TRIP_ACTION_FORBIDDEN, "Only an admin may compute a summary again")
         val trip = transactions.inTransaction { visibleTrip(tripId, actor) }
+        checkPointsKept(trip)
         return summarize(trip.id) ?: throw DomainException(TripError.TRIP_NOT_ENDED, "Only a completed trip has a summary")
+    }
+
+    /** The points are gone after the retention period: a new summary would replace the real one with zeros. */
+    private fun checkPointsKept(trip: Trip) {
+        if ((trip.stages.endedAt ?: trip.updatedAt) < clock.instant().toKotlinInstant() - retention) {
+            throw DomainException(TripError.TRACK_EXPIRED, "The GPS points of trip ${trip.id.value} are deleted")
+        }
     }
 
     private suspend fun visibleTrip(

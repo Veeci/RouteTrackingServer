@@ -13,6 +13,7 @@ object ErrorCatalog {
             ErrorCategory.FORBIDDEN -> HttpStatusCode.Forbidden
             ErrorCategory.STALE -> HttpStatusCode.PreconditionFailed
             ErrorCategory.UNAVAILABLE -> HttpStatusCode.ServiceUnavailable
+            ErrorCategory.GONE -> HttpStatusCode.Gone
         }
 
     /** A stable identifier for the error type. A URN, because there is no public docs page to link to yet. */

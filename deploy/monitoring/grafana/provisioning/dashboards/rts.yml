@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: rts
+    folder: Route Tracking
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards

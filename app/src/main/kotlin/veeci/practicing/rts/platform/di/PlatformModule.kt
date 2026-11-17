@@ -13,9 +13,11 @@ import veeci.practicing.rts.platform.db.DatabaseHealthIndicator
 import veeci.practicing.rts.platform.db.ExposedTransactionRunner
 import veeci.practicing.rts.platform.db.TransactionRunner
 import veeci.practicing.rts.platform.db.createDataSource
+import veeci.practicing.rts.platform.events.OutboxMetrics
 import veeci.practicing.rts.platform.events.OutboxRelay
 import veeci.practicing.rts.platform.events.OutboxWriter
 import veeci.practicing.rts.platform.http.Idempotency
+import veeci.practicing.rts.platform.jobs.BackgroundWorker
 import veeci.practicing.rts.platform.jobs.JobLock
 import veeci.practicing.rts.platform.jobs.JobScheduler
 import veeci.practicing.rts.platform.jobs.PostgresJobLock
@@ -50,7 +52,8 @@ fun platformModule(
         single<TransactionRunner> { ExposedTransactionRunner(get()) }
         single { OutboxWriter() }
         // Every context's OutboxEventHandler definitions, found with getAll().
-        single { OutboxRelay(get(), getAll(), config.events) }
+        single { OutboxRelay(get(), getAll(), config.events, get()) }
+        single { OutboxMetrics(get(), get()) } bind BackgroundWorker::class
         single<JobLock> { PostgresJobLock(get()) }
         single { JobScheduler(get()) }
         single { Idempotency(get(), get()) }
@@ -59,7 +62,7 @@ fun platformModule(
         single { DatabaseHealthIndicator(get()) } bind HealthIndicator::class
         // Redis only when configured (phase 10): one instance runs without it.
         if (config.redis.enabled) {
-            single(createdAtStart = true) { RedisConnections(config.redis) } onClose { it?.close() }
+            single(createdAtStart = true) { RedisConnections(config.redis, get()) } onClose { it?.close() }
             single { RedisHealthIndicator(get()) } bind HealthIndicator::class
         }
         single { HealthRegistry(getAll()) } onClose { it?.close() }

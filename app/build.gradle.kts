@@ -101,6 +101,7 @@ testing {
                 implementation(libs.exposed.core)
                 implementation(libs.exposed.jdbc)
                 implementation(libs.hikari)
+                implementation(libs.micrometer.prometheus) // metric assertions (phase 10)
             }
             targets.all { testTask.configure { shouldRunAfter(test) } }
         }

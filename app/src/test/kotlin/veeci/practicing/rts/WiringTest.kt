@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test
 import org.koin.test.verify.verify
 import veeci.practicing.rts.platform.config.EventsConfig
 import veeci.practicing.rts.platform.config.JwtConfig
+import veeci.practicing.rts.platform.config.RetentionConfig
 import veeci.practicing.rts.platform.config.TelemetryConfig
 import veeci.practicing.rts.platform.config.WsConfig
 import veeci.practicing.rts.protocol.LimitsDto
@@ -24,6 +25,7 @@ class WiringTest {
                     JwtConfig::class,
                     EventsConfig::class,
                     TelemetryConfig::class,
+                    RetentionConfig::class,
                     PipelineConfig::class,
                     LimitsDto::class,
                     Duration::class,

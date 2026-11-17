@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.future.await
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import veeci.practicing.rts.live.application.api.LiveUpdate
 import veeci.practicing.rts.live.application.port.out.LiveUpdateBus
@@ -57,14 +58,8 @@ class RedisLiveUpdateBus(
                     ttl,
                 ).toCompletableFuture()
                 .orTimeout(redis.config.publishTimeout.inWholeMilliseconds, TimeUnit.MILLISECONDS)
-                .whenComplete { _, error ->
-                    if (error !=
-                        null
-                    ) {
-                        log.warn("Live update of trip {} not published: {}", trip, error.toString())
-                    }
-                }
-        }.onFailure { log.warn("Live update of trip {} not published: {}", trip, it.toString()) }
+                .whenComplete { _, error -> if (error != null) redis.notPublished(log, trip, error) }
+        }.onFailure { redis.notPublished(log, trip, it) }
     }
 
     override fun subscribe(tripId: UUID): Flow<LiveUpdate> =
@@ -184,4 +179,14 @@ class RedisLiveUpdateBus(
             return seq
         """
     }
+}
+
+/** Counts and logs a live update that did not reach Redis. */
+private fun RedisConnections.notPublished(
+    log: Logger,
+    trip: UUID,
+    error: Throwable,
+) {
+    publishFailed("trip")
+    log.warn("Live update of trip {} not published: {}", trip, error.toString())
 }

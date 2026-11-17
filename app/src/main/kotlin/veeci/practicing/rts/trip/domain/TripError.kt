@@ -29,4 +29,7 @@ enum class TripError(
 
     /** The request needs a trip that has ended, and this one is still running. */
     TRIP_NOT_ENDED(ErrorCategory.CONFLICT),
+
+    /** The trip ended longer ago than the retention period: its GPS points are deleted (phase 10). */
+    TRACK_EXPIRED(ErrorCategory.GONE),
 }

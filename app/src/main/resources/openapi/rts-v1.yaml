@@ -311,6 +311,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '410': { $ref: '#/components/responses/Gone' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /api/v1/trips/{id}/export.geojson:
     get:
@@ -341,6 +342,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '410': { $ref: '#/components/responses/Gone' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /api/v1/me/trips:
     get:
@@ -469,6 +471,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '410': { $ref: '#/components/responses/Gone' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /api/v1/admin/sessions/{id}/health:
     parameters:
@@ -687,6 +690,11 @@ components:
           schema: { $ref: '#/components/schemas/Problem' }
     NotFound:
       description: TRIP_NOT_FOUND, no such trip or one the caller may not see. SUMMARY_NOT_READY, the trip has no summary yet. SESSION_HEALTH_NOT_FOUND, no such session or no health computed yet.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Gone:
+      description: TRACK_EXPIRED, the trip ended longer ago than the retention period (90 days) and its GPS points are deleted.
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
@@ -996,6 +1004,9 @@ components:
         timeline:
           type: array
           items: { $ref: '#/components/schemas/TimelineEntry' }
+        pointsExpired:
+          type: boolean
+          description: True when the trip ended longer ago than the retention period (90 days). points is then empty for good; the timeline stays.
     TrackFeatureCollection:
       type: object
       required: [type, features]
