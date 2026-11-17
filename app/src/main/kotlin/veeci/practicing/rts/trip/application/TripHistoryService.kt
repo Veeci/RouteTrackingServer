@@ -4,6 +4,8 @@ import veeci.practicing.rts.platform.db.TransactionRunner
 import veeci.practicing.rts.shared.Actor
 import veeci.practicing.rts.shared.DomainException
 import veeci.practicing.rts.shared.Role
+import veeci.practicing.rts.shared.UserId
+import veeci.practicing.rts.trip.application.api.DriverTrips
 import veeci.practicing.rts.trip.application.api.TripSnapshot
 import veeci.practicing.rts.trip.application.port.out.TripCursor
 import veeci.practicing.rts.trip.application.port.out.TripParty
@@ -11,6 +13,7 @@ import veeci.practicing.rts.trip.application.port.out.TripRepository
 import veeci.practicing.rts.trip.application.port.out.TripSummaryRepository
 import veeci.practicing.rts.trip.domain.StageTimes
 import veeci.practicing.rts.trip.domain.TripError
+import java.util.UUID
 
 /** One trip in a user's history. It never holds the track: that is one request per trip (phase 8c). */
 data class TripHistoryItem(
@@ -26,12 +29,12 @@ data class TripHistoryPage(
     val next: TripCursor?,
 )
 
-/** A user's own trips, newest first (phase 8b). */
+/** A user's own trips, newest first (phase 8b), and drivers' trips for the fleet view (phase 11). */
 class TripHistoryService(
     private val trips: TripRepository,
     private val summaries: TripSummaryRepository,
     private val transactions: TransactionRunner,
-) {
+) : DriverTrips {
     /**
      * The trips where [actor] is the guest (a guest) or the driver (a driver). An admin has no trips of their own
      * and gets TRIP_ACTION_FORBIDDEN: a list of every trip belongs to the admin dashboard (phase 11).
@@ -58,4 +61,18 @@ class TripHistoryService(
             )
         }
     }
+
+    override suspend fun recentForDriver(
+        driver: UUID,
+        limit: Int,
+    ): List<TripSnapshot> =
+        transactions.inTransaction { trips.findHistory(UserId(driver), TripParty.DRIVER, null, limit) }.map { it.snapshot() }
+
+    override suspend fun latestPerDriver(): List<TripSnapshot> =
+        transactions
+            .inTransaction {
+                trips.findLatestPerDriver()
+            }.map { it.snapshot() }
+
+    override suspend fun activeCount(): Int = transactions.inTransaction { trips.findActive() }.size
 }

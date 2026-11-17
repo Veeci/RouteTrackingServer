@@ -1,9 +1,12 @@
 package veeci.practicing.rts.identity.application
 
+import veeci.practicing.rts.identity.application.api.DriverAccount
 import veeci.practicing.rts.identity.application.api.DriverAccounts
+import veeci.practicing.rts.identity.application.port.out.IdentityEventOutbox
 import veeci.practicing.rts.identity.application.port.out.UserRepository
 import veeci.practicing.rts.identity.domain.Disabled
 import veeci.practicing.rts.identity.domain.User
+import veeci.practicing.rts.identity.domain.event.DriverAccountChanged
 import veeci.practicing.rts.platform.audit.AuditEntry
 import veeci.practicing.rts.platform.audit.AuditLog
 import veeci.practicing.rts.platform.db.TransactionRunner
@@ -40,6 +43,7 @@ class DriverAdminService(
     private val link: DriverLink,
     private val transactions: TransactionRunner,
     private val clock: Clock,
+    private val events: IdentityEventOutbox,
 ) : DriverAccounts {
     suspend fun disable(
         driver: UserId,
@@ -63,6 +67,14 @@ class DriverAdminService(
 
     override suspend fun isDisabled(driver: UserId): Boolean = transactions.inTransaction { users.find(driver) }?.disabled != null
 
+    override suspend fun driver(driver: UserId): DriverAccount? =
+        transactions.inTransaction { users.find(driver) }?.takeIf { it.role == Role.DRIVER }?.toAccount()
+
+    override suspend fun drivers(): List<DriverAccount> =
+        transactions.inTransaction { users.findByRole(Role.DRIVER) }.map { it.toAccount() }
+
+    private fun User.toAccount() = DriverAccount(id.value, displayName, disabled == null, disabled?.at, disabled?.reason)
+
     private suspend fun change(
         driver: UserId,
         actor: Actor,
@@ -78,6 +90,7 @@ class DriverAdminService(
             update(user).also {
                 users.saveStatus(it)
                 audit.record(AuditEntry(actor, action, "DRIVER", driver.value.toString(), reason))
+                events.add(DriverAccountChanged(driver.value, it.displayName, it.disabled == null, clock.instant().toKotlinInstant()))
             }
         }
     }

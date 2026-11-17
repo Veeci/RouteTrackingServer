@@ -13,6 +13,7 @@ import veeci.practicing.rts.tracking.adapter.inbound.job.RetentionJob
 import veeci.practicing.rts.tracking.adapter.inbound.ws.ConnectedDrivers
 import veeci.practicing.rts.tracking.adapter.inbound.ws.DriverSocket
 import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedDeviceStatusSampleRepository
+import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedDriverActivityRepository
 import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedFixBatchRepository
 import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedRetentionRepository
 import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedSessionTelemetryRepository
@@ -21,15 +22,18 @@ import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedTrackingEven
 import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedTrackingSessionRepository
 import veeci.practicing.rts.tracking.adapter.out.redis.RedisDriverLink
 import veeci.practicing.rts.tracking.application.LocationRetention
+import veeci.practicing.rts.tracking.application.TrackingActivity
 import veeci.practicing.rts.tracking.application.TrackingHistory
 import veeci.practicing.rts.tracking.application.TrackingPresence
 import veeci.practicing.rts.tracking.application.TrackingService
 import veeci.practicing.rts.tracking.application.TrackingTelemetry
+import veeci.practicing.rts.tracking.application.api.DriverActivity
 import veeci.practicing.rts.tracking.application.api.DriverLink
 import veeci.practicing.rts.tracking.application.api.DriverPresence
 import veeci.practicing.rts.tracking.application.api.DriverTrack
 import veeci.practicing.rts.tracking.application.api.SessionTelemetry
 import veeci.practicing.rts.tracking.application.port.out.DeviceStatusSampleRepository
+import veeci.practicing.rts.tracking.application.port.out.DriverActivityRepository
 import veeci.practicing.rts.tracking.application.port.out.FixBatchRepository
 import veeci.practicing.rts.tracking.application.port.out.RetentionRepository
 import veeci.practicing.rts.tracking.application.port.out.TrackingEventOutbox
@@ -71,6 +75,9 @@ fun trackingModule(
         single { RetentionJob(get(), get(), retention.checkEvery) } bind ScheduledJob::class
         // One session's raw telemetry, read by the telemetry context for session health (phase 9).
         single<SessionTelemetry> { TrackingTelemetry(get(), get(), ExposedSessionTelemetryRepository(), get()) }
+        // Recent sessions and each driver's latest position and status, read by the fleet context (phase 11).
+        single<DriverActivityRepository> { ExposedDriverActivityRepository() }
+        single<DriverActivity> { TrackingActivity(get(), get()) }
         // The driver sockets of this instance; device control sends commands through it (phase 5).
         // With Redis, a message for a driver on another instance goes through Redis (phase 10).
         if (redis) {

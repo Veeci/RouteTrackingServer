@@ -1,5 +1,6 @@
 package veeci.practicing.rts.identity.adapter.out.persistence
 
+import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.java.javaUUID
@@ -32,14 +33,21 @@ class ExposedUserRepository : UserRepository {
             .selectAll()
             .where { UsersTable.id eq id.value }
             .singleOrNull()
-            ?.let { row ->
-                User(
-                    UserId(row[UsersTable.id]),
-                    row[UsersTable.displayName],
-                    Role.valueOf(row[UsersTable.role]),
-                    row[UsersTable.disabledAt]?.let { Disabled(it, row[UsersTable.disabledReason].orEmpty()) },
-                )
-            }
+            ?.toUser()
+
+    override suspend fun findByRole(role: Role): List<User> =
+        UsersTable
+            .selectAll()
+            .where { UsersTable.role eq role.name }
+            .map { it.toUser() }
+
+    private fun ResultRow.toUser() =
+        User(
+            UserId(this[UsersTable.id]),
+            this[UsersTable.displayName],
+            Role.valueOf(this[UsersTable.role]),
+            this[UsersTable.disabledAt]?.let { Disabled(it, this[UsersTable.disabledReason].orEmpty()) },
+        )
 
     override suspend fun save(user: User) {
         UsersTable.upsert(onUpdateExclude = listOf(UsersTable.createdAt, UsersTable.disabledAt, UsersTable.disabledReason)) {

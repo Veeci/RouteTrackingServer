@@ -41,6 +41,9 @@ interface TripRepository {
     /** Every trip that has a driver and is not finished yet (ACCEPTED, ARRIVED, IN_PROGRESS). */
     suspend fun findActive(): List<Trip>
 
+    /** For every driver who ever had a trip, the trip that changed stage last (phase 11: the fleet rebuild). */
+    suspend fun findLatestPerDriver(): List<Trip>
+
     /** The trip that [driver] is assigned to and that is not finished yet, if any. */
     suspend fun findActiveForDriver(driver: UserId): Trip?
 

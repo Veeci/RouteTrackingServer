@@ -9,6 +9,8 @@ import veeci.practicing.rts.shared.Actor
 import veeci.practicing.rts.shared.DomainException
 import veeci.practicing.rts.shared.Role
 import veeci.practicing.rts.shared.UserId
+import veeci.practicing.rts.telemetry.application.api.DriverHealth
+import veeci.practicing.rts.telemetry.application.api.HealthOverview
 import veeci.practicing.rts.telemetry.application.port.out.SessionHealthRepository
 import veeci.practicing.rts.telemetry.domain.ConstraintChange
 import veeci.practicing.rts.telemetry.domain.DeviceKey
@@ -40,7 +42,7 @@ class SessionHealthService(
     private val clock: Clock,
     private val config: TelemetryConfig,
     private val audit: AuditLog,
-) {
+) : DriverHealth {
     /**
      * Computes the next sessions that went idle since the last run, at most [TelemetryConfig.batchSize], and moves
      * the watermark past them, all in one transaction: a failed run computes the same sessions again next time.
@@ -87,6 +89,22 @@ class SessionHealthService(
             }
         }
     }
+
+    override suspend fun latestFor(driver: UUID): HealthOverview? =
+        transactions.inTransaction { health.latestForDriver(driver) }?.let {
+            HealthOverview(
+                sessionId = it.sessionId,
+                startedAt = it.startedAt,
+                computedAt = it.computedAt,
+                fixCount = it.health.fixCount,
+                acceptedRatio = it.health.acceptedRatio,
+                intervalP50S = it.health.intervalP50S,
+                accuracyP50M = it.health.accuracyP50M,
+                gapCount = it.health.gaps.size,
+                batteryDrainPctPerHour = it.health.batteryDrainPctPerHour,
+                primaryProvider = it.health.primaryProvider,
+            )
+        }
 
     private suspend fun compute(session: TelemetrySession): SessionHealthRecord {
         val applied = session.driverId?.let { constraints.history(UserId(it), session.startedAt, session.lastSeenAt) }.orEmpty()

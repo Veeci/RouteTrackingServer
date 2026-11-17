@@ -163,7 +163,7 @@ is closed, and sign-up and login for real users.
 | 79 | The track of a trip older than 90 days | The timeline and the summary stay. The points are gone: the track says `pointsExpired`, and exports and summary recompute answer 410 TRACK_EXPIRED | Built P10 (10c) |
 | 80 | Where alerts go | A Discord channel, through a webhook URL kept out of git. Without one, alerts show in Prometheus only | Built P10 (10c) |
 
-## Phase 11 (11a built, decided 2026-11-17)
+## Phase 11 (11a and 11b built, decided 2026-11-17)
 
 | # | Problem | What will happen | Source |
 |---|---|---|---|
@@ -171,6 +171,12 @@ is closed, and sign-up and login for real users.
 | 82 | How long a staff token lasts | 15 minutes, against 12 hours for guests and drivers, because it can do more | Built P11 (11a) |
 | 83 | A disabled driver | Their sockets close at once on every instance, and a new session is refused. Their tokens still work for REST until they expire. A reason is required and kept | Built P11 (11a) |
 | 84 | What the audit log keeps | Every admin action with who, when, the target, the reason and the request id. It is never changed or deleted | Built P11 (11a) |
+| 85 | When a driver counts as online on the fleet view | Their phone sent a fix or a device status in the last 60 seconds, the stale time guests see too. The phone's own times count, so a phone that uploads old buffered fixes shows as offline until a fresh one arrives | Built P11 (11b) |
+| 86 | Where a driver is on the map | At their newest accepted fix. A late, older fix never moves them back | Built P11 (11b) |
+| 87 | What the overview shows | Online drivers, drivers on a trip, active trips and disabled drivers, at most 10 seconds old. Fixes per minute and ack latency stay in Grafana | Built P11 (11b) |
+| 88 | Who sees the fleet | OPERATOR and ADMIN see the driver list, a driver's detail and the overview. Only ADMIN downloads the CSV or rebuilds the view | Built P11 (11b) |
+| 89 | The fleet view is ever wrong | An admin rebuilds it from the stored data, and the audit log keeps who did. A driver whose last fix is older than 90 days shows no position after a rebuild (row 78) | Built P11 (11b) |
+| 90 | How staff find a driver | By part of the name, in any case, or by the whole driver id. A map area may not cross the antimeridian | Built P11 (11b) |
 
 ## Open questions, most important first
 

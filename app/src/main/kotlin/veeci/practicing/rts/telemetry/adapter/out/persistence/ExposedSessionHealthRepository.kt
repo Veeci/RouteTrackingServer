@@ -3,6 +3,7 @@ package veeci.practicing.rts.telemetry.adapter.out.persistence
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.v1.core.ResultRow
+import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
@@ -45,6 +46,15 @@ class ExposedSessionHealthRepository : SessionHealthRepository {
         SessionHealthTable
             .selectAll()
             .where { SessionHealthTable.sessionId eq sessionId }
+            .singleOrNull()
+            ?.toRecord()
+
+    override suspend fun latestForDriver(driverId: UUID): SessionHealthRecord? =
+        SessionHealthTable
+            .selectAll()
+            .where { SessionHealthTable.driverId eq driverId }
+            .orderBy(SessionHealthTable.startedAt to SortOrder.DESC, SessionHealthTable.sessionId to SortOrder.DESC)
+            .limit(1)
             .singleOrNull()
             ?.toRecord()
 
