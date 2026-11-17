@@ -91,7 +91,10 @@ data class TripProgress(
  * Something happened on the trip. [event] says what: [STATUS_CHANGED] (the trip moved to [status]) or a moment
  * such as [DRIVER_ARRIVING]. [status] is always the trip's stage at that time. New [event] values may be added
  * in a later server, so a client ignores values it does not know. After a final stage (COMPLETED, CANCELLED)
- * the server closes the socket with 1000.
+ * the server closes the guest socket with 1000.
+ *
+ * Phase 11d: the driver socket carries it too (where it is a [ServerMessage]), for one case only: the trip the driver
+ * is assigned to was cancelled. [cancelledBy] says whose action cancelled it, on both sockets.
  */
 @Serializable
 @SerialName("trip_event")
@@ -106,7 +109,10 @@ data class TripEvent(
     val levelPercent: Int? = null,
     /** DRIVER_STALE: when the server last heard from the driver's phone. */
     val lastSeenAt: Instant? = null,
-) : GuestServerMessage {
+    /** STATUS_CHANGED to CANCELLED: GUEST, DRIVER or OPERATOR (phase 11d). Absent from older servers. */
+    val cancelledBy: String? = null,
+) : GuestServerMessage,
+    ServerMessage {
     companion object {
         const val STATUS_CHANGED = "status_changed"
         const val DRIVER_ARRIVING = "driver_arriving"

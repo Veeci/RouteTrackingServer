@@ -9,6 +9,7 @@ import org.junit.jupiter.params.provider.EnumSource
 import veeci.practicing.rts.shared.DomainException
 import veeci.practicing.rts.testing.trip.TripSamples
 import veeci.practicing.rts.testing.trip.TripSamples.T0
+import veeci.practicing.rts.trip.domain.event.CancelledBy
 import veeci.practicing.rts.trip.domain.event.StatusCause
 import veeci.practicing.rts.trip.domain.event.TripStatus
 import veeci.practicing.rts.trip.domain.event.TripStatus.ACCEPTED
@@ -63,6 +64,7 @@ class TripTest {
                             later,
                             pickup = trip.pickup,
                             destination = trip.destination,
+                            cancelledBy = if (target == CANCELLED) CancelledBy.GUEST else null,
                         ),
                     )
             }
@@ -131,11 +133,64 @@ class TripTest {
     }
 
     @Test
-    fun `another guest and an admin may not cancel the trip`() {
-        listOf(TripSamples.guest(), TripSamples.admin()).forEach { stranger ->
-            val trip = TripSamples.requested(guest)
+    fun `another guest and another driver may not cancel the trip`() {
+        listOf(TripSamples.guest(), TripSamples.driver()).forEach { stranger ->
+            val trip = TripSamples.inStatus(ACCEPTED, guest, driver)
 
             shouldThrow<DomainException> { trip.perform(TripAction.CANCEL, stranger, later) }.code shouldBe TripError.TRIP_ACTION_FORBIDDEN
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(names = ["REQUESTED", "ACCEPTED", "ARRIVED", "IN_PROGRESS"])
+    fun `TC-11-API-03 staff may cancel a trip that has not ended, recorded as cancelled by OPERATOR`(status: TripStatus) {
+        listOf(TripSamples.operator(), TripSamples.admin()).forEach { staff ->
+            val trip = TripSamples.inStatus(status, guest, driver)
+
+            trip.perform(TripAction.CANCEL, staff, later)
+
+            trip.status shouldBe CANCELLED
+            trip.stages.endedAt shouldBe later
+            trip.pullEvents().single().let {
+                it.from shouldBe status
+                it.cancelledBy shouldBe CancelledBy.OPERATOR
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(names = ["COMPLETED", "CANCELLED"])
+    fun `staff may not cancel a trip that has ended`(status: TripStatus) {
+        val trip = TripSamples.inStatus(status, guest, driver)
+
+        shouldThrow<DomainException> { trip.perform(TripAction.CANCEL, TripSamples.operator(), later) }.code shouldBe
+            TripError.ILLEGAL_TRANSITION
+    }
+
+    @Test
+    fun `the driver may not cancel a ride in progress, and a cancel by the driver says so`() {
+        shouldThrow<DomainException> {
+            TripSamples.inStatus(IN_PROGRESS, guest, driver).perform(TripAction.CANCEL, driver, later)
+        }.code shouldBe TripError.ILLEGAL_TRANSITION
+        val trip = TripSamples.inStatus(ACCEPTED, guest, driver)
+
+        trip.perform(TripAction.CANCEL, driver, later)
+
+        trip.pullEvents().single().cancelledBy shouldBe CancelledBy.DRIVER
+    }
+
+    @Test
+    fun `staff may not accept, arrive, start or complete a trip`() {
+        listOf(
+            REQUESTED to TripAction.ACCEPT,
+            ACCEPTED to TripAction.ARRIVE,
+            ARRIVED to TripAction.START,
+            IN_PROGRESS to TripAction.COMPLETE,
+        ).forEach { (status, action) ->
+            val trip = TripSamples.inStatus(status, guest, driver)
+
+            shouldThrow<DomainException> { trip.perform(action, TripSamples.operator(), later) }.code shouldBe
+                TripError.TRIP_ACTION_FORBIDDEN
         }
     }
 

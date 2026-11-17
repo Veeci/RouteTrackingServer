@@ -43,6 +43,44 @@ jobs:
             **/build/test-results/
           retention-days: 7
 
+  # TC-11-CI-01: TypeScript types for the admin dashboard, generated from the OpenAPI contract with a pinned
+  # openapi-typescript, then compiled with tsc together with clients/ts/usage.ts, which uses a few endpoint types.
+  # The result is a build artifact named after the commit; the dashboard repo pins one. Nothing goes to npm.
+  ts-client:
+    name: TypeScript client
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: clients/ts
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: clients/ts/package-lock.json
+
+      # Exact versions from package-lock.json: openapi-typescript 7.13.0, typescript 5.9.3.
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Generate
+        run: npm run generate
+
+      - name: Compile
+        run: npm run check
+
+      - name: Upload client
+        uses: actions/upload-artifact@v7
+        with:
+          name: rts-client-${{ github.sha }}
+          path: |
+            clients/ts/generated/rts-v1.ts
+            app/src/main/resources/openapi/rts-v1.yaml
+          retention-days: 90
+
   image:
     name: Docker image
     needs: build

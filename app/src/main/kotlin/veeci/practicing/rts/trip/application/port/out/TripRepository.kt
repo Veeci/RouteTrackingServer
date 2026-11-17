@@ -12,6 +12,15 @@ data class TripCursor(
     val id: TripId,
 )
 
+/** Which trips staff list (phase 11d); every field narrows the list. [from] is inclusive, [to] exclusive, on createdAt. */
+data class TripFilter(
+    val statuses: Set<TripStatus> = emptySet(),
+    val driverId: UserId? = null,
+    val guestId: UserId? = null,
+    val from: Instant? = null,
+    val to: Instant? = null,
+)
+
 /** The side of a trip a user is on: the column a history query matches them against. */
 enum class TripParty { GUEST, DRIVER }
 
@@ -34,6 +43,16 @@ interface TripRepository {
     suspend fun findHistory(
         user: UserId,
         party: TripParty,
+        before: TripCursor?,
+        limit: Int,
+    ): List<Trip>
+
+    /**
+     * Up to [limit] trips that match [filter], newest first: by createdAt, then id, both descending. The page starts
+     * after [before], the last trip of the previous page (phase 11d, the staff trip list).
+     */
+    suspend fun findMatching(
+        filter: TripFilter,
         before: TripCursor?,
         limit: Int,
     ): List<Trip>

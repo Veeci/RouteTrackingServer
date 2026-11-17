@@ -198,18 +198,27 @@ class GuestSocket(
             }
 
             is TripStatusUpdate -> {
-                // Read the trip again: the update may be an old one (replayed or repeated), the trip is the truth.
-                val trip = snapshot(update.tripId, actor)
-                if (trip == null) {
-                    close(CloseReason(CloseReason.Codes.NORMAL, "Trip no longer visible"))
-                    false
-                } else {
-                    send(TripEvent(trip.id.toString(), TripEvent.STATUS_CHANGED, trip.status.name, trip.updatedAt))
-                    if (trip.status.isTerminal) finish(trip)
-                    !trip.status.isTerminal
-                }
+                forwardStatus(update, actor)
             }
         }
+
+    /** A change of stage: read the trip again, send it, and close the socket after a final stage. False once it ended. */
+    private suspend fun WsSession.forwardStatus(
+        update: TripStatusUpdate,
+        actor: Actor,
+    ): Boolean {
+        // Read the trip again: the update may be an old one (replayed or repeated), the trip is the truth.
+        val trip = snapshot(update.tripId, actor)
+        if (trip == null) {
+            close(CloseReason(CloseReason.Codes.NORMAL, "Trip no longer visible"))
+            return false
+        }
+        // Only the update that cancelled the trip knows who did it; an older update read late has none.
+        val cancelledBy = update.cancelledBy?.takeIf { trip.status == TripStatus.CANCELLED && update.status == TripStatus.CANCELLED }
+        send(TripEvent(trip.id.toString(), TripEvent.STATUS_CHANGED, trip.status.name, trip.updatedAt, cancelledBy = cancelledBy))
+        if (trip.status.isTerminal) finish(trip)
+        return !trip.status.isTerminal
+    }
 
     /** The trip as this guest may see it, or null after telling the guest why not. */
     private suspend fun WsSession.snapshot(
@@ -224,8 +233,6 @@ class GuestSocket(
         }
 
     private suspend fun WsSession.finish(trip: TripSnapshot) = close(CloseReason(CloseReason.Codes.NORMAL, "Trip ${trip.status}"))
-
-    private suspend fun WsSession.send(message: GuestServerMessage) = send(GuestServerMessage.serializer(), message)
 
     private fun TripSnapshot.toGuestTrip() =
         GuestTrip(
@@ -247,3 +254,5 @@ class GuestSocket(
         const val ENDPOINT = "guest"
     }
 }
+
+private suspend fun WsSession.send(message: GuestServerMessage) = send(GuestServerMessage.serializer(), message)

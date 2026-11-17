@@ -25,13 +25,16 @@ import veeci.practicing.rts.protocol.RouteUpdated
 import veeci.practicing.rts.protocol.Subscribed
 import veeci.practicing.rts.protocol.TripEvent
 import veeci.practicing.rts.protocol.TripProgress
+import veeci.practicing.rts.simulator.fleet.FleetOptions
+import veeci.practicing.rts.simulator.fleet.FleetRun
 import kotlin.system.exitProcess
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 
 private const val USAGE = """Usage: simulator <command> [options]
 
-simulator token --role GUEST|DRIVER|ADMIN [--name NAME] [--url URL]
+simulator token --role GUEST|DRIVER|OPERATOR|ADMIN [--name NAME] [--url URL]
   Creates a user and prints an access token for it (dev and test servers only).
   --url URL                 server                 (default http://localhost:8080)
 
@@ -62,9 +65,27 @@ simulator driver --token TOKEN [options]
 
 simulator guest --token TOKEN --trip TRIP_ID [--url URL]
   Watches a trip live and prints every position, progress update and status change.
-  --url URL                 guest endpoint         (default ws://localhost:8080/ws/v1/guest)"""
+  --url URL                 guest endpoint         (default ws://localhost:8080/ws/v1/guest)
 
-/** Entry point of the simulator CLI: `token`, `driver` or `guest`. */
+simulator fleet --drivers N [options]
+  Many drivers in one JVM, each a coroutine that loops a Hanoi route (phase 11d). Driver n is the user sim-driver-NNN,
+  the same user on every run. Each starts at a random point of the loop, moved up to --spread metres, after a random
+  wait. Dev and test servers only; for hundreds of drivers start the server with HTTP_RATELIMITPERMINUTE=100000.
+  --url URL[,URL...]        server, or several instances: driver and dashboard n use URL n modulo the count
+                            (default http://localhost:8080)
+  --dashboards M            admin fleet sockets    (default 0); an OPERATOR token, a ticket each, the --bbox area;
+                            prints p50, p95 and max of the time between two fleet_delta messages
+  --duration D              how long to run        (default 60s; also 5m or a number of seconds)
+  --bbox A,B,C,D            minLng,minLat,maxLng,maxLat (default 105.70,20.90,105.98,21.12)
+  --gpx FILE                GPX file or resource   (default routes/hanoi_loop.gpx)
+  --spread M                metres                 (default 6000)
+  --fix-every D             time between two fixes (default 1s)
+  --batch-size N            fixes per batch        (default 5): one batch per driver every fix-every x N
+  --expect-gap D            the server's fleet tick (default 2s)
+  --tolerance D             allowed p95 distance from it (default 500ms)
+  Exits with 1 when dashboards ran and the p95 gap is outside expect-gap ± tolerance."""
+
+/** Entry point of the simulator CLI: `token`, `driver`, `guest` or `fleet`. */
 fun main(args: Array<String>) {
     val options =
         args
@@ -77,6 +98,7 @@ fun main(args: Array<String>) {
             "token" -> runBlocking { token(options) }
             "driver" -> runBlocking { replay(DriverOptions.of(options)) }
             "guest" -> runBlocking { watch(options) }
+            "fleet" -> runBlocking { fleet(options) }
             else -> false.also { println(USAGE) }
         }
     exitProcess(if (succeeded) 0 else 1)
@@ -102,6 +124,32 @@ private suspend fun token(options: Map<String, String>): Boolean {
         return response.status.isSuccess()
     }
 }
+
+private suspend fun fleet(values: Map<String, String>): Boolean {
+    val drivers = values["drivers"]?.toIntOrNull() ?: return false.also { println(USAGE) }
+    val defaults = FleetOptions()
+    val options =
+        FleetOptions(
+            baseUrls = values["url"]?.split(",")?.map { it.trim() } ?: defaults.baseUrls,
+            drivers = drivers,
+            dashboards = values["dashboards"]?.toInt() ?: 0,
+            duration = values["duration"]?.let(::duration) ?: defaults.duration,
+            bbox = values["bbox"]?.split(",")?.map { it.trim().toDouble() } ?: defaults.bbox,
+            spreadM = values["spread"]?.toDouble() ?: defaults.spreadM,
+            fixEvery = values["fix-every"]?.let(::duration) ?: defaults.fixEvery,
+            batchSize = values["batch-size"]?.toInt() ?: defaults.batchSize,
+            expectedGap = values["expect-gap"]?.let(::duration) ?: defaults.expectedGap,
+            tolerance = values["tolerance"]?.let(::duration) ?: defaults.tolerance,
+        )
+    val route = GpxReader.load(values["gpx"] ?: "routes/hanoi_loop.gpx")
+    println("Starting $drivers drivers and ${options.dashboards} dashboards against ${options.baseUrls} for ${options.duration}")
+    val report = FleetRun.httpClient(drivers + options.dashboards).use { http -> FleetRun(http, options, route).run() }
+    report.lines().forEach(::println)
+    return report.cadenceOk
+}
+
+/** `60s`, `5m`, `500ms` (Kotlin's duration format), or a plain number of seconds. */
+private fun duration(text: String): Duration = text.toLongOrNull()?.seconds ?: Duration.parse(text)
 
 private suspend fun watch(options: Map<String, String>): Boolean {
     val token = options["token"]

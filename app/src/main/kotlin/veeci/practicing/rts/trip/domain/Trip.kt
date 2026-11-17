@@ -5,6 +5,7 @@ import veeci.practicing.rts.shared.DomainException
 import veeci.practicing.rts.shared.Role
 import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.shared.geo.GeoPoint
+import veeci.practicing.rts.trip.domain.event.CancelledBy
 import veeci.practicing.rts.trip.domain.event.StatusCause
 import veeci.practicing.rts.trip.domain.event.TripStatus
 import veeci.practicing.rts.trip.domain.event.TripStatus.ACCEPTED
@@ -38,6 +39,12 @@ enum class TripAction { ACCEPT, ARRIVE, START, COMPLETE, CANCEL }
  * | ARRIVED                      | START    | the assigned driver      | IN_PROGRESS |
  * | IN_PROGRESS                  | COMPLETE | the assigned driver      | COMPLETED   |
  * | REQUESTED, ACCEPTED, ARRIVED | CANCEL   | the guest or the driver  | CANCELLED   |
+ * | REQUESTED, ACCEPTED, ARRIVED | CANCEL   | staff (OPERATOR, ADMIN)  | CANCELLED   |
+ * | IN_PROGRESS                  | CANCEL   | staff only               | CANCELLED   |
+ *
+ * A guest or driver who tries to cancel IN_PROGRESS still gets ILLEGAL_TRANSITION: for them the move does not
+ * exist ([TRANSITIONS]). Only staff have the extra move ([STAFF_TRANSITIONS]). A change to CANCELLED records who
+ * cancelled ([CancelledBy]).
  *
  * The server itself may also move an ACCEPTED trip to ARRIVED ([autoArrive]), when the arrival rules see the
  * driver at the pickup.
@@ -80,12 +87,13 @@ class Trip private constructor(
     ) {
         val target =
             TRANSITIONS[status to action]
+                ?: STAFF_TRANSITIONS[status to action]?.takeIf { actor.role.isStaff }
                 ?: throw DomainException(TripError.ILLEGAL_TRANSITION, "A trip that is $status cannot be ${action.done()}")
         if (!mayPerform(action, actor)) {
             throw DomainException(TripError.TRIP_ACTION_FORBIDDEN, "You may not ${action.name.lowercase()} this trip")
         }
         if (action == TripAction.ACCEPT) driverId = actor.userId
-        record(from = status, to = target, now)
+        record(from = status, to = target, now, cancelledBy = if (target == CANCELLED) actor.cancelledBy() else null)
         moveTo(target, now)
     }
 
@@ -124,9 +132,16 @@ class Trip private constructor(
         return when (action) {
             TripAction.ACCEPT -> actor.role == Role.DRIVER
             TripAction.ARRIVE, TripAction.START, TripAction.COMPLETE -> isAssignedDriver
-            TripAction.CANCEL -> isAssignedDriver || (actor.role == Role.GUEST && actor.userId == guestId)
+            TripAction.CANCEL -> isAssignedDriver || (actor.role == Role.GUEST && actor.userId == guestId) || actor.role.isStaff
         }
     }
+
+    private fun Actor.cancelledBy(): CancelledBy =
+        when (role) {
+            Role.GUEST -> CancelledBy.GUEST
+            Role.DRIVER -> CancelledBy.DRIVER
+            Role.OPERATOR, Role.ADMIN -> CancelledBy.OPERATOR
+        }
 
     private fun moveTo(
         target: TripStatus,
@@ -142,8 +157,9 @@ class Trip private constructor(
         to: TripStatus,
         at: Instant,
         cause: StatusCause = StatusCause.USER,
+        cancelledBy: CancelledBy? = null,
     ) {
-        events += TripStatusChanged(id.value, guestId.value, driverId?.value, from, to, at, cause, pickup, destination)
+        events += TripStatusChanged(id.value, guestId.value, driverId?.value, from, to, at, cause, pickup, destination, cancelledBy)
     }
 
     private fun TripAction.done(): String =
@@ -167,6 +183,10 @@ class Trip private constructor(
                 (ACCEPTED to TripAction.CANCEL) to CANCELLED,
                 (ARRIVED to TripAction.CANCEL) to CANCELLED,
             )
+
+        /** Moves only staff may make (phase 11d): stopping a ride in progress. */
+        val STAFF_TRANSITIONS: Map<Pair<TripStatus, TripAction>, TripStatus> =
+            mapOf((IN_PROGRESS to TripAction.CANCEL) to CANCELLED)
 
         /** Only a guest books trips. Separate from [request] so a caller can check it before costly work. */
         fun ensureMayRequest(actor: Actor) {

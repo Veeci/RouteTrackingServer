@@ -14,6 +14,9 @@ enum class StatusCause {
     AUTO,
 }
 
+/** Who cancelled a trip (phase 11d). Staff (OPERATOR or ADMIN) count as OPERATOR. Clients see this name. */
+enum class CancelledBy { GUEST, DRIVER, OPERATOR }
+
 /** A trip moved to another stage. [from] is null when the trip was just requested. */
 data class TripStatusChanged(
     val tripId: UUID,
@@ -26,6 +29,8 @@ data class TripStatusChanged(
     /** Where the trip starts and ends (phase 5: device control places geofences there). */
     val pickup: GeoPoint? = null,
     val destination: GeoPoint? = null,
+    /** Set when [to] is CANCELLED: whose action cancelled the trip. Never the reason, which only the audit log keeps. */
+    val cancelledBy: CancelledBy? = null,
 )
 
 /**
@@ -47,6 +52,8 @@ data class TripStatusChangedV1(
     val pickupLng: Double? = null,
     val destinationLat: Double? = null,
     val destinationLng: Double? = null,
+    /** Added in phase 11d, only on a change to CANCELLED. Absent in older events. */
+    val cancelledBy: String? = null,
 ) {
     fun toEvent() =
         TripStatusChanged(
@@ -59,6 +66,7 @@ data class TripStatusChangedV1(
             cause = cause?.let(StatusCause::valueOf) ?: StatusCause.USER,
             pickup = if (pickupLat != null && pickupLng != null) GeoPoint(pickupLat, pickupLng) else null,
             destination = if (destinationLat != null && destinationLng != null) GeoPoint(destinationLat, destinationLng) else null,
+            cancelledBy = cancelledBy?.let(CancelledBy::valueOf),
         )
 
     companion object {
@@ -77,6 +85,7 @@ data class TripStatusChangedV1(
                 pickupLng = event.pickup?.lng,
                 destinationLat = event.destination?.lat,
                 destinationLng = event.destination?.lng,
+                cancelledBy = event.cancelledBy?.name,
             )
     }
 }

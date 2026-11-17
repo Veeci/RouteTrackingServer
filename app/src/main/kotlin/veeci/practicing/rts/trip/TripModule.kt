@@ -11,11 +11,13 @@ import veeci.practicing.rts.platform.jobs.BackgroundWorker
 import veeci.practicing.rts.platform.jobs.ScheduledJob
 import veeci.practicing.rts.trip.adapter.inbound.event.ArrivalListener
 import veeci.practicing.rts.trip.adapter.inbound.event.BatteryListener
+import veeci.practicing.rts.trip.adapter.inbound.event.DriverCancelListener
 import veeci.practicing.rts.trip.adapter.inbound.event.DriverRouteListener
 import veeci.practicing.rts.trip.adapter.inbound.event.FixesAcceptedListener
 import veeci.practicing.rts.trip.adapter.inbound.event.TripFinishedListener
 import veeci.practicing.rts.trip.adapter.inbound.event.TripSummaryListener
 import veeci.practicing.rts.trip.adapter.inbound.job.StaleDriverJob
+import veeci.practicing.rts.trip.adapter.out.driver.DriverCancelPush
 import veeci.practicing.rts.trip.adapter.out.driver.DriverRoutePush
 import veeci.practicing.rts.trip.adapter.out.live.LiveProgressPublisher
 import veeci.practicing.rts.trip.adapter.out.persistence.ExposedProgressStateStore
@@ -28,6 +30,7 @@ import veeci.practicing.rts.trip.adapter.out.persistence.ExposedTripSummaryRepos
 import veeci.practicing.rts.trip.application.RerouteHandler
 import veeci.practicing.rts.trip.application.RerouteWorker
 import veeci.practicing.rts.trip.application.Rerouter
+import veeci.practicing.rts.trip.application.TripAdminService
 import veeci.practicing.rts.trip.application.TripEventService
 import veeci.practicing.rts.trip.application.TripHistoryService
 import veeci.practicing.rts.trip.application.TripProgressService
@@ -61,6 +64,10 @@ fun tripModule(
         single<TripEventOutbox> { ExposedTripEventOutbox(get()) }
         single<TripRouteRepository> { ExposedTripRouteRepository() }
         single { TripService(get(), get(), get(), get(), get(), get()) } bind TripQuery::class
+        // Phase 11d: staff list every trip and cancel with a reason.
+        single { TripAdminService(get(), get(), get(), get(), get()) }
+        single { DriverCancelPush(get()) }
+        single { DriverCancelListener(get()) } bind OutboxEventHandler::class
 
         single<ProgressStateStore> { ExposedProgressStateStore(get()) }
         single<ProgressPublisher> { LiveProgressPublisher(get()) }

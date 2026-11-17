@@ -27,6 +27,8 @@ object TripSamples {
 
     fun admin(): Actor = Actor(UserId(UUID.randomUUID()), Role.ADMIN)
 
+    fun operator(): Actor = Actor(UserId(UUID.randomUUID()), Role.OPERATOR)
+
     fun requested(
         guest: Actor = guest(),
         at: Instant = T0,

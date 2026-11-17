@@ -24,6 +24,7 @@ import veeci.practicing.rts.protocol.PROTOCOL_VERSION
 import veeci.practicing.rts.protocol.ProtocolJson
 import veeci.practicing.rts.protocol.RouteUpdated
 import veeci.practicing.rts.protocol.ServerMessage
+import veeci.practicing.rts.protocol.TripEvent
 import veeci.practicing.rts.protocol.Welcome
 import java.util.UUID
 import kotlin.time.Duration
@@ -55,6 +56,13 @@ class DriverClient(
 
     /** What the phone does around each batch besides sending it: heartbeats, silences. */
     var hooks: BatchHooks = BatchHooks.NONE
+
+    /**
+     * Phase 11d, `simulator fleet`: when set, the client asks it for the next fixes whenever the outbox is empty, right
+     * after the pace delay, so the fixes are recorded just before they are sent. [sendAll] then never ends by itself;
+     * cancel the coroutine to stop it.
+     */
+    var source: (() -> List<FixDto>)? = null
 
     private val outbox = ArrayDeque<FixBatch>()
     private var nextSeq = 1L
@@ -89,7 +97,7 @@ class DriverClient(
     ): Boolean {
         var failures = 0
         val backoff = Backoff(base = retryDelay, cap = MAX_RETRY_DELAY)
-        while (outbox.isNotEmpty() && failures < maxFailures) {
+        while ((outbox.isNotEmpty() || source != null) && failures < maxFailures) {
             connections++
             try {
                 connectAndSend(pace, batchesPerConnection)
@@ -125,10 +133,18 @@ class DriverClient(
                 lastAckedSeq = outbox.removeFirst().seq
             }
             var acked = 0
-            while (outbox.isNotEmpty() && acked < maxBatches) {
+            while (acked < maxBatches) {
+                // With a source, the pace comes first and the fixes are recorded right after it, as a phone would.
+                val refill = outbox.isEmpty()
+                if (refill) {
+                    val next = source ?: break
+                    delay(pace)
+                    enqueue(next())
+                }
                 val batch = outbox.first()
-                delay(pace + hooks.pauseBefore(batch))
+                delay((if (refill) Duration.ZERO else pace) + hooks.pauseBefore(batch))
                 hooks.statusBefore(batch)?.let { sendMessage(it) }
+                hooks.sending(batch)
                 sendMessage(batch)
                 when (val reply = receiveSkippingCommands()) {
                     is Ack -> {
@@ -147,7 +163,7 @@ class DriverClient(
                         error("Unexpected welcome")
                     }
 
-                    is Command, is RouteUpdated -> {
+                    is Command, is RouteUpdated, is TripEvent -> {
                         error("receiveSkippingCommands returned a ${reply::class.simpleName}")
                     }
                 }
@@ -159,14 +175,15 @@ class DriverClient(
         send(Frame.Text(ProtocolJson.encodeToString(ClientMessage.serializer(), message)))
 
     /**
-     * The next message that is neither a `command` nor a `route_updated`. Commands in between are answered with
-     * `command_ack`; routes go to [BatchHooks.routeUpdated].
+     * The next message that is not a `command`, a `route_updated` or a `trip_event`. Commands in between are answered
+     * with `command_ack`; routes go to [BatchHooks.routeUpdated], trip events to [BatchHooks.tripEvent].
      */
     private suspend fun DefaultClientWebSocketSession.receiveSkippingCommands(): ServerMessage {
         while (true) {
             when (val message = receiveMessage()) {
                 is Command -> sendMessage(CommandAck(message.commandId, hooks.answer(message)))
                 is RouteUpdated -> hooks.routeUpdated(message)
+                is TripEvent -> hooks.tripEvent(message)
                 else -> return message
             }
         }
@@ -197,8 +214,14 @@ interface BatchHooks {
     /** The answer to a server [command]: applied (the default) or rejected. */
     fun answer(command: Command): String = CommandAck.APPLIED
 
+    /** Right before [batch] goes on the wire (phase 11d: the fleet measures ack latency from here). */
+    fun sending(batch: FixBatch) = Unit
+
     /** The server sent the route the driver follows now (phase 7). */
     fun routeUpdated(route: RouteUpdated) = Unit
+
+    /** The server says the driver's trip was cancelled (phase 11d), with `cancelledBy`. */
+    fun tripEvent(event: TripEvent) = Unit
 
     companion object {
         /** Only batches, no heartbeats and no silences: the behaviour before phase 4. */

@@ -143,12 +143,12 @@ The plan was written before phases 4 to 10. These replace the parts they name:
 - [x] T11.1 ~~PostGIS image everywhere; `V11__fleet.sql`; Exposed column type for `geography`.~~ Replaced by the corrections: `V20__fleet_drivers.sql` with plain `lat`, `lng`.
 - [x] T11.2 `fleet` context: projection handlers (idempotent by newer-wins, not coalesced), the driver query, rebuild command.
 - [x] T11.3 ~~`FleetPositionCache`~~ + fleet socket with snapshot, conflated deltas, clustering fallback. Replaced by the corrections: no cache, one tick per instance reads `fleet_drivers`.
-- [ ] T11.4 Roles `OPERATOR`, operator actor in trip aggregate; driver enable/disable in `identity`.
-- [ ] T11.5 Admin REST endpoints + OpenAPI; CSV export. Driver list, detail, overview, CSV and rebuild done in 11b; the trip list is 11d.
+- [x] T11.4 Roles `OPERATOR`, operator actor in trip aggregate; driver enable/disable in `identity`. Roles and disable in 11a, the operator actor in 11d.
+- [x] T11.5 Admin REST endpoints + OpenAPI; CSV export. Driver list, detail, overview, CSV and rebuild in 11b; the trip list and the operator cancel in 11d.
 - [x] T11.6 Audit log (table, writer used inside services, query endpoint, DB grants).
 - [x] T11.7 CORS, WebSocket tickets, admin token expiry, security headers. Token expiry in 11a, the rest in 11c.
-- [ ] T11.8 CI job generating and publishing the TypeScript client.
-- [ ] T11.9 Seed script: 500 simulated drivers across the city for dashboard development (`simulator fleet --drivers 500`).
+- [x] T11.8 CI job generating and publishing the TypeScript client. Published as a build artifact, not to npm (11d).
+- [x] T11.9 Seed script: 500 simulated drivers across the city for dashboard development (`simulator fleet --drivers 500`).
 
 ## Test plan
 
@@ -169,7 +169,8 @@ The plan was written before phases 4 to 10. These replace the parts they name:
 | TC-11-FL-06 | API | GUEST or DRIVER token/ticket → rejected 4403 | P0 |
 | TC-11-API-01 | API | Driver list filters (`online`, `onTrip`, `q`) and keyset pagination work together; no duplicates across pages | P0 |
 | TC-11-API-02 | API | Disable driver → their open socket closes with 4403; new `hello` rejected; enable restores | P0 |
-| TC-11-API-03 | API | Operator cancels an IN_PROGRESS trip → 200; guest and driver receive CANCELLED with reason | P1 |
+| TC-11-API-03 | API | Operator cancels an IN_PROGRESS trip → 200; guest and driver receive CANCELLED with `cancelledBy = OPERATOR` (the reason stays in the audit log) | P1 |
+| TC-11-API-06 | API | Trip list filters (`status` repeated, `driverId`, `guestId`, `from`, `to`) and keyset pagination work together | P0 |
 | TC-11-API-04 | API | `/overview` numbers match seeded data; second call within 10 s served from cache | P1 |
 | TC-11-API-05 | API | CSV export streams all drivers with a header row | P2 |
 | TC-11-AUD-01 | Service | Every admin mutation writes exactly one audit row with actor, target, reason, requestId | P0 |
@@ -297,7 +298,74 @@ The plan was written before phases 4 to 10. These replace the parts they name:
   - `FleetAuthorizationIT` has the tickets row. The fleet messages have golden files checked against the AsyncAPI
     document (TC-11-CON-01).
 
+## As built (11d)
+
+- Staff are an actor of the trip aggregate. `Trip.mayPerform` lets OPERATOR and ADMIN cancel, and a second table,
+  `Trip.STAFF_TRANSITIONS`, holds the one move only staff have: IN_PROGRESS to CANCELLED. A guest or driver who tries
+  that move still gets 409 ILLEGAL_TRANSITION, as before, because for them the move does not exist. A trip that has
+  ended answers ILLEGAL_TRANSITION to staff too.
+- `POST /api/v1/admin/trips/{id}/cancel {reason}` (OPERATOR, ADMIN) runs `TripAdminService.cancel`: one transaction
+  with the trip update, the outbox event and the audit row `TRIP_CANCELLED` (target TRIP, the reason, and the stage
+  it left in `details.from`). A blank or missing reason is 422 REASON_REQUIRED. The user route
+  `POST /api/v1/trips/{id}/cancel` refuses staff with 403, so every staff cancel has a reason and an audit row; the
+  trip authorization matrix keeps its 403 for ADMIN and OPERATOR on that route.
+- `TripStatusChanged` has `cancelledBy` (GUEST, DRIVER, OPERATOR; ADMIN counts as OPERATOR), set on every change to
+  CANCELLED. The outbox JSON `trip.TripStatusChanged.v1` gains the optional field, which old readers ignore. The guest's
+  `trip_event` carries it. The guest socket reads the trip again on each status update; it adds `cancelledBy` only when
+  both the update and the trip say CANCELLED, so a stale update never guesses.
+- The driver socket had no status messages before. `DriverCancelPush` (an outbox handler) now sends the assigned driver
+  the same `trip_event` frame when their trip is cancelled, through `DriverLink`, on any instance. It is sent once and
+  not again after a reconnect: the `trip_ended` command and `GET /api/v1/trips/{id}` cover a driver who was offline.
+  `TripEvent` is now a `ServerMessage` too, like `route_updated`. Both contracts are updated: AsyncAPI (`trip_event` on
+  the `driver` channel, `cancelledBy`, a new golden file) and `protocol.md`.
+- `GET /api/v1/admin/trips` (OPERATOR, ADMIN) filters by `status` (repeat it for several), `driverId`, `guestId`,
+  `from` (inclusive) and `to` (exclusive) on `created_at`, newest first, keyset paged by `(created_at DESC, id DESC)`
+  with the existing `TripCursor`, 50 a page and 100 at most. A bad parameter is 400 with every field error at once.
+- `EXPLAIN ANALYZE` over 200 000 trips (Postgres 16, before V22): the status, guest and driver filters already used
+  `trips_status_created`, `trips_guest_history` and `trips_driver_history` (under 0.1 ms). The unfiltered list, the
+  dashboard's first page, and a `from`/`to` range ran a parallel sequential scan with a top-N sort: 18.3 ms for the
+  first page, 18.5 ms for a deep page, 12.7 ms for one day. V22 adds `trips_created (created_at DESC, id DESC)`. After
+  it, each of those is an index scan of 51 rows: 0.08 ms, 0.06 ms and 0.04 ms, and `status=COMPLETED&status=CANCELLED`
+  uses it too.
+- TypeScript client (TC-11-CI-01): the CI job `ts-client` runs `openapi-typescript` 7.13.0 on `rts-v1.yaml`, then
+  `tsc --noEmit` (TypeScript 5.9.3, the generator's peer range) over the output and `clients/ts/usage.ts`, which uses
+  the trip list, the cancel body, the driver list and the ticket types. Versions are pinned in
+  `clients/ts/package-lock.json`. It uploads the artifact `rts-client-<sha>` with the generated file and the spec,
+  kept 90 days. Nothing goes to npm.
+- `simulator fleet --drivers N [--dashboards M] [--duration D]` (T11.9) runs every driver as a coroutine with its own
+  `DriverClient`. Driver n is `sim-driver-NNN` with a user id derived from the name. The dev token endpoint does not
+  look users up by name, it creates a new user unless the request has a `userId`, so the simulator sends that stable
+  id and the endpoint updates the same user on every run. No server change was needed. Each driver loops
+  `routes/hanoi_loop.gpx` (a new synthetic loop around Hoan Kiem Lake, 300 fixes 1 s apart), moved up to 6 km in each
+  direction, from a random point, after a random wait. `DriverClient` gained an optional fix source, so it sends
+  without end, and a `sending` hook to measure ack latency. Dashboards use an OPERATOR dev token, a ticket each, and
+  the fleet socket over the Hanoi area; the run prints p50, p95 and max of the time between two deltas and exits 1
+  when p95 is outside 2 s ± 0.5 s. `--url` takes several instances.
+- `docker-compose.yml` passes `HTTP_RATELIMITPERMINUTE` to the app: 1 000 drivers from one address need more than the
+  default 300 requests a minute for their tokens and socket upgrades.
+- Tests:
+  - `TripTest`: staff cancel each stage that has not ended, never one that has, and never accept or drive; guests and
+    drivers still cannot cancel IN_PROGRESS; `cancelledBy` for each actor.
+  - `TripAdminServiceTest`: the audit row and the event, the reason rule, forbidden callers, the race, paging.
+  - `TripRepositoryContract` (TC-11-API-06 on both repositories) and `AdminTripsIT`: TC-11-API-03 with a guest socket
+    and a driver socket, the audit row over the API, 409, 422, 404, the user route's 403 for staff, and the list
+    filters and paging with contract checks.
+  - `FleetAuthorizationIT` has both routes, with a fresh trip for each cancel call.
+  - `FleetLoadE2ETest`: TC-11-LOAD-01 small, 50 drivers, 2 dashboards, 100 ms tick, cadence only.
+  - The full TC-11-LOAD-01 run is manual: `docs/testing/load-11.md`. Run on 2026-11-17 on one Mac: 500 drivers keep
+    the 2 s cadence (p95 2.25 s), 1 000 drivers do not (p95 3.26 s). Both miss the ingest SLO (ack p95 350 ms and
+    1 483 ms against 250 ms). The limits are the pool of 10 database connections per instance and the single outbox
+    relay, not the fleet socket. TC-11-LOAD-01 is open.
+
 ## Definition of Done
 
 - The dashboard (running locally against staging) shows 500 simulated drivers moving on the map, the driver list, driver detail with a working command button, and the audit log.
 - All P0 cases pass; OpenAPI/AsyncAPI updated; TypeScript client published by CI.
+
+Status after 11d (2026-11-17):
+
+- Server side done: every admin route of the plan, the fleet socket, and `simulator fleet --drivers 500` to feed a
+  dashboard. The dashboard itself is the `RouteTrackingAdmin` repo and is not built yet, so the first point is open.
+- All P0 cases pass in `./gradlew check`. OpenAPI and AsyncAPI are updated. CI builds the TypeScript client as the
+  artifact `rts-client-<sha>` (the first run is on this PR).
+- Open: TC-11-LOAD-01 (P1) at 1 000 drivers, see `docs/testing/load-11.md`.

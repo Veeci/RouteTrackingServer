@@ -7,6 +7,7 @@ import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greater
+import org.jetbrains.exposed.v1.core.greaterEq
 import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.core.java.javaUUID
 import org.jetbrains.exposed.v1.core.less
@@ -23,6 +24,7 @@ import veeci.practicing.rts.shared.DomainException
 import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.shared.geo.GeoPoint
 import veeci.practicing.rts.trip.application.port.out.TripCursor
+import veeci.practicing.rts.trip.application.port.out.TripFilter
 import veeci.practicing.rts.trip.application.port.out.TripParty
 import veeci.practicing.rts.trip.application.port.out.TripRepository
 import veeci.practicing.rts.trip.domain.StageTimes
@@ -109,6 +111,18 @@ class ExposedTripRepository : TripRepository {
             .map { it.toTrip() }
     }
 
+    override suspend fun findMatching(
+        filter: TripFilter,
+        before: TripCursor?,
+        limit: Int,
+    ): List<Trip> =
+        TripsTable
+            .selectAll()
+            .where { filter.matches() and before.endsBefore() }
+            .orderBy(TripsTable.createdAt to SortOrder.DESC, TripsTable.id to SortOrder.DESC)
+            .limit(limit)
+            .map { it.toTrip() }
+
     override suspend fun findActive(): List<Trip> =
         TripsTable
             .selectAll()
@@ -153,13 +167,6 @@ class ExposedTripRepository : TripRepository {
             throw e
         }
 
-    private fun UpdateBuilder<*>.stages(stages: StageTimes) {
-        this[TripsTable.acceptedAt] = stages.acceptedAt
-        this[TripsTable.arrivedAt] = stages.arrivedAt
-        this[TripsTable.startedAt] = stages.startedAt
-        this[TripsTable.endedAt] = stages.endedAt
-    }
-
     private fun ResultRow.toTrip() =
         Trip.restore(
             id = TripId(this[TripsTable.id]),
@@ -189,6 +196,22 @@ class ExposedTripRepository : TripRepository {
         const val ONE_ACTIVE_TRIP_INDEX = "one_active_trip_per_driver"
     }
 }
+
+private fun UpdateBuilder<*>.stages(stages: StageTimes) {
+    this[TripsTable.acceptedAt] = stages.acceptedAt
+    this[TripsTable.arrivedAt] = stages.arrivedAt
+    this[TripsTable.startedAt] = stages.startedAt
+    this[TripsTable.endedAt] = stages.endedAt
+}
+
+private fun TripFilter.matches(): Op<Boolean> =
+    listOfNotNull(
+        statuses.takeIf { it.isNotEmpty() }?.let { set -> TripsTable.status inList set.map { it.name } },
+        driverId?.let { TripsTable.driverId eq it.value },
+        guestId?.let { TripsTable.guestId eq it.value },
+        from?.let { TripsTable.createdAt greaterEq it },
+        to?.let { TripsTable.createdAt less it },
+    ).fold(Op.TRUE as Op<Boolean>) { all, next -> all and next }
 
 /** Keyset paging: rows after the cursor in (created_at, id) order. */
 private fun TripCursor?.startsAfter(): Op<Boolean> =

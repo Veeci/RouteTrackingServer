@@ -11,6 +11,7 @@ import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.testing.tracking.DirectTransactionRunner
 import veeci.practicing.rts.testing.trip.TripSamples.T0
 import veeci.practicing.rts.trip.application.port.out.TripCursor
+import veeci.practicing.rts.trip.application.port.out.TripFilter
 import veeci.practicing.rts.trip.application.port.out.TripParty
 import veeci.practicing.rts.trip.application.port.out.TripRepository
 import veeci.practicing.rts.trip.domain.StageTimes
@@ -148,6 +149,40 @@ abstract class TripRepositoryContract {
                 listOf(running.id, done.id)
             tx { trips.findHistory(driver.userId, TripParty.GUEST, before = null, limit = 10) } shouldBe emptyList()
         }
+
+    @Test
+    fun `TC-11-API-06 the staff list combines status, party and time filters, newest first, paged without gaps`() =
+        runTest {
+            val guest = TripSamples.guest()
+            val open = (0 until 5).map { TripSamples.requested(guest, at = T0 + it.minutes) }
+            // One driver per accepted trip: a driver has one active trip at a time.
+            val accepted = (5 until 8).map { TripSamples.inStatus(TripStatus.ACCEPTED, guest, TripSamples.driver(), at = T0 + it.minutes) }
+            val done = TripSamples.inStatus(TripStatus.COMPLETED, guest, TripSamples.driver(), at = T0 + 9.minutes)
+            val otherGuest = TripSamples.requested(at = T0 + 1.minutes)
+            tx { (open + accepted + done + otherGuest).shuffled().forEach { trips.insert(it) } }
+            val mine = TripFilter(guestId = guest.userId)
+
+            matching(mine.copy(statuses = setOf(TripStatus.REQUESTED, TripStatus.ACCEPTED)), size = 3).map { it.id } shouldBe
+                (open + accepted).reversed().map { it.id }
+            matching(mine.copy(driverId = accepted[1].driverId), size = 2).map { it.id } shouldBe listOf(accepted[1].id)
+            matching(mine.copy(from = T0 + 2.minutes, to = T0 + 6.minutes), size = 10).map { it.id } shouldBe
+                listOf(accepted[0], open[4], open[3], open[2]).map { it.id }
+        }
+
+    /** Reads every trip matching [filter] page by page, as a client would. */
+    private suspend fun matching(
+        filter: TripFilter,
+        size: Int,
+    ): List<Trip> {
+        val all = mutableListOf<Trip>()
+        var cursor: TripCursor? = null
+        do {
+            val page = tx { trips.findMatching(filter, cursor, size) }
+            all += page
+            cursor = page.lastOrNull()?.let { TripCursor(it.createdAt, it.id) }
+        } while (page.size == size)
+        return all
+    }
 
     /** Reads the whole history of [user] page by page, as a client would. */
     private suspend fun pagesOf(
