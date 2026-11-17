@@ -281,6 +281,7 @@ when the application has a bug.
 | A stored idempotent response (`Idempotency.execute`) | Primary key of `idempotency_keys` |
 | Idle sessions after the health job's watermark, page by page (`SessionTelemetry.idleSessions`) | `tracking_sessions_last_seen (last_seen_at, id)` (V16) |
 | A session's fixes for its health (`SessionTelemetry.fixes`) | `fixes_session_time` |
+| Session health by start time, for the provider report (`SessionHealthRepository.startedBetween`) | `session_health_started (started_at)` (V16) |
 | A driver's applied constraints in a window (`AppliedConstraints.history`) | `device_commands_driver (driver_id, status, created_at)`, then a sort of that driver's few APPLIED rows |
 
 There is no index on `tracking_sessions.device_id`, because no query needs it yet. An index is added

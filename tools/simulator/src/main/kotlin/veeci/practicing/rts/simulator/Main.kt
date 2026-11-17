@@ -15,9 +15,11 @@ import kotlinx.serialization.json.jsonPrimitive
 import veeci.practicing.rts.protocol.Ack
 import veeci.practicing.rts.protocol.Command
 import veeci.practicing.rts.protocol.CommandAck
+import veeci.practicing.rts.protocol.DeviceDto
 import veeci.practicing.rts.protocol.DriverPosition
 import veeci.practicing.rts.protocol.FixBatch
 import veeci.practicing.rts.protocol.GuestServerMessage
+import veeci.practicing.rts.protocol.LocationProviderDto
 import veeci.practicing.rts.protocol.ProtocolJson
 import veeci.practicing.rts.protocol.RouteUpdated
 import veeci.practicing.rts.protocol.Subscribed
@@ -48,6 +50,15 @@ simulator driver --token TOKEN [options]
   --reject-commands true    answer every server command with rejected (default: applied)
   --detour-at S:D:M         after S seconds of route, drive M metres east of it for D seconds (default none);
                             during a ride, 60:60:150 makes the server see the driver off-route and re-route
+  --provider P              provider of every fix (default GMS_FUSED); also AOSP_GPS, AOSP_NETWORK, AOSP_FUSED
+  --manufacturer M          device block of hello  (default Google)
+  --model M                                        (default Pixel 7)
+  --android-sdk N                                  (default 35)
+  --rom R                                          (default none, a stock ROM)
+  --has-gms true|false                             (default true)
+  --motion M                motion in each status  (default IN_VEHICLE)
+  --doze-gap S:D            after S seconds of route, the phone lies still for D seconds and sends nothing;
+                            later fixes move D later, and statuses near the gap say STILL (default none)
 
 simulator guest --token TOKEN --trip TRIP_ID [--url URL]
   Watches a trip live and prints every position, progress update and status change.
@@ -145,10 +156,10 @@ private class DriverOptions(
     val batchSize: Int,
     val speedup: Double,
     val disconnectEvery: Int,
-    val device: String,
     val token: String?,
     val phone: DeviceSettings,
     val detour: Detour?,
+    val profile: PhoneProfile,
 ) {
     companion object {
         fun of(values: Map<String, String>) =
@@ -158,7 +169,6 @@ private class DriverOptions(
                 batchSize = values["batch-size"]?.toInt() ?: 10,
                 speedup = values["speedup"]?.toDouble() ?: 10.0,
                 disconnectEvery = values["disconnect-every"]?.toInt() ?: 0,
-                device = values["device"] ?: "dev-sim-1",
                 token = values["token"],
                 phone =
                     DeviceSettings(
@@ -168,14 +178,20 @@ private class DriverOptions(
                         rejectCommands = values["reject-commands"] == "true",
                     ),
                 detour = values["detour-at"]?.let(Detour::parse),
+                profile = PhoneProfile.of(values),
             )
     }
 }
 
 private suspend fun replay(options: DriverOptions): Boolean {
-    val points = GpxReader.load(options.gpx).let { options.detour?.applyTo(it) ?: it }
-    val fixes = points.toFixes(now = Instant.fromEpochMilliseconds(System.currentTimeMillis()))
-    val interval = (points.last().time - points.first().time) / (points.size - 1)
+    val recorded = GpxReader.load(options.gpx)
+    // The pace follows the recorded route, before a Doze gap stretches it.
+    val interval = (recorded.last().time - recorded.first().time) / (recorded.size - 1)
+    val points =
+        recorded
+            .let { options.detour?.applyTo(it) ?: it }
+            .let { options.profile.dozeGap?.applyTo(it) ?: it }
+    val fixes = points.toFixes(now = Instant.fromEpochMilliseconds(System.currentTimeMillis()), provider = options.profile.provider)
     val pace = interval * options.batchSize / options.speedup
     val stats = Stats()
     val script =
@@ -185,6 +201,8 @@ private suspend fun replay(options: DriverOptions): Boolean {
             drainPerMinute = options.phone.batteryDrain,
             pauseAt = options.phone.pause?.first,
             pauseFor = options.phone.pause?.second ?: Duration.ZERO,
+            motion = options.profile.motion,
+            dozeGap = options.profile.dozeGap,
         )
     // The script, plus a line on the console for each heartbeat and silence.
     val hooks =
@@ -208,17 +226,50 @@ private suspend fun replay(options: DriverOptions): Boolean {
             DriverClient(
                 http,
                 options.url,
-                options.device,
+                options.profile.deviceId,
                 token = options.token,
                 onWelcome = { println("Connected; the server resumes from seq ${it.resumeFromSeq}") },
                 onAck = stats::record,
                 onConnectionFailed = { println("Connection failed (${it.message}); trying again") },
-            ).also { it.hooks = hooks }
+            ).also {
+                it.hooks = hooks
+                it.device = options.profile.hardware
+            }
         fixes.chunked(options.batchSize).forEach(client::enqueue)
         println("Session ${client.sessionId}: ${fixes.size} fixes in ${client.pending} batches, one batch every $pace")
         val succeeded = client.sendAll(pace, batchesPerConnection = options.disconnectEvery.takeIf { it > 0 } ?: Int.MAX_VALUE)
         stats.print(client.connections)
         return succeeded
+    }
+}
+
+/** What the phone is and how it locates: `--device`, and (phase 9) `--provider`, the device block, `--motion` and `--doze-gap`. */
+private class PhoneProfile(
+    /** `--device`, the id the phone sends in hello. */
+    val deviceId: String,
+    val provider: LocationProviderDto,
+    val hardware: DeviceDto,
+    val motion: String,
+    val dozeGap: DozeGap?,
+) {
+    companion object {
+        private const val DEFAULT_ANDROID_SDK = 35
+
+        fun of(values: Map<String, String>) =
+            PhoneProfile(
+                deviceId = values["device"] ?: "dev-sim-1",
+                provider = values["provider"]?.let(LocationProviderDto::valueOf) ?: LocationProviderDto.GMS_FUSED,
+                hardware =
+                    DeviceDto(
+                        manufacturer = values["manufacturer"] ?: "Google",
+                        model = values["model"] ?: "Pixel 7",
+                        androidSdk = values["android-sdk"]?.toInt() ?: DEFAULT_ANDROID_SDK,
+                        rom = values["rom"],
+                        hasGms = values["has-gms"]?.toBooleanStrict() ?: true,
+                    ),
+                motion = values["motion"] ?: DeviceScript.DEFAULT_MOTION,
+                dozeGap = values["doze-gap"]?.let(DozeGap::parse),
+            )
     }
 }
 

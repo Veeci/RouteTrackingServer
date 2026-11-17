@@ -14,6 +14,7 @@ import veeci.practicing.rts.protocol.Ack
 import veeci.practicing.rts.protocol.ClientMessage
 import veeci.practicing.rts.protocol.Command
 import veeci.practicing.rts.protocol.CommandAck
+import veeci.practicing.rts.protocol.DeviceDto
 import veeci.practicing.rts.protocol.DeviceStatus
 import veeci.practicing.rts.protocol.ErrorMessage
 import veeci.practicing.rts.protocol.FixBatch
@@ -48,6 +49,9 @@ class DriverClient(
     private val onAck: (Ack) -> Unit = {},
     private val onConnectionFailed: (Exception) -> Unit = {},
 ) {
+    /** The `device` block of hello (phase 9); null sends none, like an SDK older than 0.10. */
+    var device: DeviceDto? = null
+
     /** What the phone does around each batch besides sending it: heartbeats, silences. */
     var hooks: BatchHooks = BatchHooks.NONE
 
@@ -115,7 +119,7 @@ class DriverClient(
         maxBatches: Int = Int.MAX_VALUE,
     ) {
         http.webSocket(url, request = { token?.let(::bearerAuth) }) {
-            sendMessage(Hello(PROTOCOL_VERSION, deviceId, sessionId, lastAckedSeq, SDK_VERSION))
+            sendMessage(Hello(PROTOCOL_VERSION, deviceId, sessionId, lastAckedSeq, SDK_VERSION, device))
             val welcome = receiveMessage() as? Welcome ?: error("The server did not answer hello with welcome")
             onWelcome(welcome)
             // A batch below resumeFromSeq is stored already: its ack was lost, not the batch.

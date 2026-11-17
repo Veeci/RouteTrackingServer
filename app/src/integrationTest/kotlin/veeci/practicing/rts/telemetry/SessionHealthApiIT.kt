@@ -46,8 +46,7 @@ class SessionHealthApiIT {
     @Test
     fun `an admin computes a recorded session's health, reads it back, and both match the contract`() =
         socketApp {
-            val session = UUID.randomUUID().toString()
-            record(session)
+            val session = record()
 
             val computed = health(session, admin, recompute = true)
             computed.status shouldBe HttpStatusCode.OK
@@ -98,28 +97,12 @@ class SessionHealthApiIT {
     }
 
     /** A hello with a device, [FIXES] AOSP fixes 5 s apart that end now, and one status sample. */
-    private suspend fun SocketTestApp.record(session: String) =
-        createClient { install(WebSockets) }.webSocket("/ws/v1/driver", request = { bearerAuth(TestTokens.driver()) }) {
-            suspend fun send(message: ClientMessage) = send(Frame.Text(ProtocolJson.encodeToString(ClientMessage.serializer(), message)))
-
-            suspend fun receive() = ProtocolJson.decodeFromString(ServerMessage.serializer(), (incoming.receive() as Frame.Text).readText())
-
-            val device = DeviceDto("Google", "Pixel 7", 35, "LineageOS 22.1", hasGms = false)
-            send(Hello(1, "phone-1", session, sdkVersion = "0.10.0", device = device))
-            receive().shouldBeInstanceOf<Welcome>()
-            val now = Clock.System.now()
-            val fixes =
-                (0 until FIXES).map {
-                    val at = now - ((FIXES - 1 - it) * 5).seconds
-                    FixDto(21.0285 + it * 1e-4, 105.8542, accuracyM = 5.0, recordedAt = at, provider = LocationProviderDto.AOSP_GPS)
-                }
-            send(FixBatch(1, fixes))
-            send(DeviceStatus(now, BatteryDto(levelPercent = 80, isCharging = false), motion = "STILL"))
-            while (true) {
-                val message = receive()
-                if (message is Ack && message.seq == 1L) break
-            }
-        }
+    private suspend fun SocketTestApp.record(): String {
+        val now = Clock.System.now()
+        val fixes = (0 until FIXES).map { fixAt(now - ((FIXES - 1 - it) * 5).seconds, it, LocationProviderDto.AOSP_GPS) }
+        val device = DeviceDto("Google", "Pixel 7", 35, "LineageOS 22.1", hasGms = false)
+        return recordSession(device, fixes, listOf(statusAt(now, "STILL")))
+    }
 
     private companion object {
         const val FIXES = 6

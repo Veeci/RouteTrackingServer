@@ -48,6 +48,7 @@ import veeci.practicing.rts.platform.ws.echoEndpoint
 import veeci.practicing.rts.routing.adapter.inbound.web.routeRoutes
 import veeci.practicing.rts.routing.application.RoadGraphLoader
 import veeci.practicing.rts.routing.routingModule
+import veeci.practicing.rts.telemetry.adapter.inbound.web.providerReportRoutes
 import veeci.practicing.rts.telemetry.adapter.inbound.web.sessionHealthRoutes
 import veeci.practicing.rts.telemetry.telemetryModule
 import veeci.practicing.rts.tracking.adapter.inbound.ws.driverSocket
@@ -125,6 +126,7 @@ fun Application.module(
             routeRoutes(get())
             adminCommandRoutes(get())
             sessionHealthRoutes(get())
+            providerReportRoutes(get())
         }
         if (config.app.env != AppEnv.PROD) echoEndpoint(get())
         // Interactive API docs generated from the contract; local development only.

@@ -136,7 +136,7 @@ is closed, and sign-up and login for real users.
 | 62 | Where a timeline entry sits on the GeoJSON map | At the driver's last fix at or before its time, inside the leg including its end. With no such fix, the point has no geometry, never a guessed position | Built P8 (8d) |
 | 63 | What the exports hold | One leg each, with the same access rules as the track. GPX holds the points and their times only; GeoJSON adds the timeline as points | Built P8 (8d) |
 
-## Phase 9 (9a and 9b built, decided 2026-11-16)
+## Phase 9 (built, decided 2026-11-16)
 
 | # | Problem | What will happen | Source |
 |---|---|---|---|
@@ -147,6 +147,9 @@ is closed, and sign-up and login for real users.
 | 68 | Who sees a session's health | Admins only. A driver gets 403, even for their own session | Built P9 (9b) |
 | 69 | Which fix interval a gap is measured against | The SET_CONSTRAINT the device had applied when the gap started, counted from its ack. It holds across sessions until the next one. Without one, 5 s | Built P9 (9b) |
 | 70 | How battery drain is reported | Percent per hour while not charging, positive when the battery runs down. A stretch under 10 minutes or with one sample is left out | Built P9 (9b) |
+| 71 | What the provider report compares | Sessions that started in a range of at most 31 days, grouped by primary provider, GMS, ROM and Android SDK. Each value is a median over the group. A group under 3 sessions is marked low sample | Built P9 (9c) |
+| 72 | How gaps are compared across groups | Per tracked hour, so long sessions are not penalised for their length | Built P9 (9c) |
+| 73 | Who may download the report | Admins only, as JSON or CSV | Built P9 (9c) |
 
 ## Open questions, most important first
 

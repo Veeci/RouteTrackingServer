@@ -502,6 +502,54 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/admin/reports/providers:
+    get:
+      tags: [admin]
+      operationId: getProviderReport
+      summary: Compare location stacks across sessions (ADMIN)
+      description: |
+        Groups the computed session health of sessions that started in [from, to) by primary provider, Google Play
+        services, ROM and Android SDK (phase 9). Each metric is the median over the group's sessions that have a
+        value for it. A session appears once its health is computed, 10 to 15 minutes after its last message.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/ReportFrom'
+        - $ref: '#/components/parameters/ReportTo'
+      responses:
+        '200':
+          description: One entry per group, ordered by provider, GMS, ROM and SDK, with unknown values last.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/admin/reports/providers.csv:
+    get:
+      tags: [admin]
+      operationId: getProviderReportCsv
+      summary: The provider report as CSV (ADMIN)
+      description: |
+        The same groups as the JSON report, as RFC 4180 CSV with a header row. Decimals use `.`, an unknown value is
+        an empty cell, and a text cell that starts with `=`, `+`, `-` or `@` gets a leading `'`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/ReportFrom'
+        - $ref: '#/components/parameters/ReportTo'
+      responses:
+        '200':
+          description: The report as a CSV download.
+          headers:
+            Content-Disposition:
+              schema: { type: string, examples: ['attachment; filename=providers-1793491200000-1794096000000.csv'] }
+          content:
+            text/csv:
+              schema: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
   /health/live:
     get:
       tags: [operations]
@@ -567,6 +615,18 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    ReportFrom:
+      name: from
+      in: query
+      required: true
+      description: Sessions that started at or after this time.
+      schema: { type: string, format: date-time }
+    ReportTo:
+      name: to
+      in: query
+      required: true
+      description: Sessions that started before this time. At most 31 days after from.
+      schema: { type: string, format: date-time }
     SessionId:
       name: id
       in: path
@@ -704,6 +764,37 @@ components:
         route:
           $ref: '#/components/schemas/TripRoute'
           description: The road route from pickup to destination. Sent by POST /trips and GET /trips/{id} only.
+    ProviderReport:
+      type: object
+      required: [from, to, groups]
+      additionalProperties: false
+      properties:
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        groups:
+          type: array
+          items: { $ref: '#/components/schemas/ProviderGroup' }
+    ProviderGroup:
+      type: object
+      required: [sessions, lowSample, trackedHours]
+      additionalProperties: false
+      description: An absent key field means the sessions did not report it; such sessions form their own group.
+      properties:
+        primaryProvider: { type: string }
+        hasGms: { type: boolean }
+        rom: { type: string }
+        androidSdk: { type: integer }
+        sessions: { type: integer, minimum: 1 }
+        lowSample: { type: boolean, description: Fewer than 3 sessions, too few to trust the medians. }
+        trackedHours: { type: number, description: Total time from each session's start to its last message. }
+        acceptedRatio: { type: number }
+        intervalP50S: { type: number }
+        intervalP95S: { type: number }
+        accuracyP50M: { type: number }
+        accuracyP95M: { type: number }
+        batteryDrainPctPerHour: { type: number }
+        gapsPerHour: { type: number, description: Median over sessions of gaps per tracked hour. }
+        dozeGapsPerHour: { type: number }
     SessionHealth:
       type: object
       required: [sessionId, startedAt, sessionLastSeenAt, computedAt, fixCount, rejectedCount, rejectionsByReason, gaps, providerMix]

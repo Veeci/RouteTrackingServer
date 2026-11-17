@@ -86,9 +86,9 @@ The plan above was written before phases 4 to 8. These corrections replace the p
 - [x] T9.2 Percentile helper, linear regression helper (pure, in `shared/stats`).
 - [x] T9.3 `SessionHealthCalculator` including gap and Doze heuristics.
 - [x] T9.4 `ComputeSessionHealth` on close + admin recompute; `session_health` repository.
-- [ ] T9.5 `ProviderComparisonReport` + JSON/CSV endpoints.
-- [ ] T9.6 Simulator: `--provider AOSP_GPS --doze-gap 6m` to generate comparable sessions.
-- [ ] T9.7 Document how to run a field comparison (same route, two phones/stacks) in `docs/data/field-test.md`.
+- [x] T9.5 `ProviderComparisonReport` + JSON/CSV endpoints.
+- [x] T9.6 Simulator: `--provider AOSP_GPS --doze-gap 6m` to generate comparable sessions.
+- [x] T9.7 Document how to run a field comparison (same route, two phones/stacks) in `docs/data/field-test.md`.
 
 ## Test plan
 
@@ -156,6 +156,32 @@ The plan above was written before phases 4 to 8. These corrections replace the p
   leaves the watermark alone.
 - TC-9-DB-01 (health half) and the job's paging and resume are in `SessionHealthJobIT`. TC-9-RPT-04 covers the
   health endpoints in `SessionHealthApiIT`. The report endpoints come with 9c.
+
+## As built (9c)
+
+- `ProviderComparison` in `telemetry/domain` is pure. It groups by `(primaryProvider, hasGms, rom, androidSdk)`,
+  where a null is its own value, and takes the median of each metric over the sessions that have it. Groups come
+  out ordered by those four fields, with unknown values last.
+- Gaps are compared per tracked hour, not per session, so a 3-hour session does not look worse than a
+  20-minute one for being long. A session with no tracked time has no rate.
+- `SessionHealthService.providerReport` reads `session_health` by `started_at` in [from, to), at most 31 days,
+  through `session_health_started`. The medians are computed in Kotlin with `percentile`, not with Postgres
+  `percentile_cont`: the same interpolation, without a second copy of the rule in SQL over jsonb.
+- `GET /api/v1/admin/reports/providers` returns JSON and `.../providers.csv` returns RFC 4180 CSV with CRLF line
+  ends. Numbers are `BigDecimal.toPlainString`, so a German or French locale still writes `6.25` and never
+  `1.0E-4`. A text cell that starts with `=`, `+`, `-` or `@` gets a leading `'` (CSV injection: `rom` comes from
+  the phone).
+- Both reports share `SESSION_HEALTH_FORBIDDEN` for non-admins. A bad or missing `from` or `to`, `to` not after
+  `from`, or a range over 31 days is 400 with field errors.
+- The simulator's routes last 160 s, too short to cut a 6-minute gap out of. `--doze-gap S:D` therefore inserts
+  D seconds of stillness at route second S: later points move D later and keep their position. `--pause-at` was
+  no help, because it waits in real time while the fix times stay on the GPX clock.
+- The simulator always sends a `device` block (Google, Pixel 7, SDK 35, GMS by default), so its sessions never
+  land in the unknown group. New flags: `--provider`, `--manufacturer`, `--model`, `--android-sdk`, `--rom`,
+  `--has-gms`, `--motion`, `--doze-gap`.
+- TC-9-E2E-01 is in `ProviderReportIT`. The app's tests cannot depend on the simulator module, so the test records
+  a GMS session and an AOSP session with a 6-minute still gap over the socket, as the two simulator runs in
+  `docs/data/field-test.md` would.
 
 ## Definition of Done
 
