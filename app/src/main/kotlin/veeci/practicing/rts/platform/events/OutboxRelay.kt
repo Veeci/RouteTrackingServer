@@ -15,6 +15,7 @@ import org.jetbrains.exposed.v1.core.isNull
 import org.jetbrains.exposed.v1.core.vendors.ForUpdateOption
 import org.jetbrains.exposed.v1.datetime.CurrentTimestamp
 import org.jetbrains.exposed.v1.jdbc.selectAll
+import org.jetbrains.exposed.v1.jdbc.transactions.TransactionManager
 import org.jetbrains.exposed.v1.jdbc.update
 import org.slf4j.LoggerFactory
 import veeci.practicing.rts.platform.config.EventsConfig
@@ -35,8 +36,9 @@ interface OutboxEventHandler {
 
 /**
  * Delivers the outbox to the handlers, oldest event first. Each event is one transaction: lock the oldest
- * undelivered row (`FOR UPDATE SKIP LOCKED`, so a second server instance takes the next row instead of waiting),
- * run every handler of its type, then set `published_at`. If a handler fails, the transaction rolls back and the
+ * undelivered row (`FOR UPDATE SKIP LOCKED`), run every handler of its type, then set `published_at`. With several
+ * instances, only one delivers at a time (an advisory lock, phase 10): with SKIP LOCKED alone, two instances would
+ * handle two events of one trip at the same time, out of order. If a handler fails, the transaction rolls back and the
  * event is tried again later; after [MAX_ATTEMPTS] failures it is logged and skipped, so that one broken event
  * cannot stop the others. A crash between handling and commit delivers the event again: at least once.
  */
@@ -88,6 +90,8 @@ class OutboxRelay(
         return try {
             transactions
                 .inTransaction {
+                    // One instance delivers at a time, so the events of one trip are handled in order (phase 10).
+                    if (!holdsDeliveryLock()) return@inTransaction false
                     val row =
                         OutboxTable
                             .selectAll()
@@ -123,11 +127,24 @@ class OutboxRelay(
         }
     }
 
+    /**
+     * `pg_try_advisory_xact_lock`: true when this transaction may deliver. Postgres frees the lock at commit or
+     * rollback, so a crashed instance never keeps it, and the next event may go to any instance. Order still holds:
+     * whoever holds the lock takes the oldest undelivered event.
+     */
+    private fun holdsDeliveryLock(): Boolean =
+        TransactionManager.current().exec("SELECT pg_try_advisory_xact_lock($DELIVERY_LOCK_KEY)") { rows ->
+            rows.next() && rows.getBoolean(1)
+        } ?: false
+
     private fun markPublished(id: Long) {
         OutboxTable.update({ OutboxTable.id eq id }) { it[publishedAt] = CurrentTimestamp }
     }
 
     private companion object {
         const val MAX_ATTEMPTS = 5
+
+        /** Unique among advisory lock keys: jobs use 4_001 and up by phase; 10 for phase 10, 1 for the relay. */
+        const val DELIVERY_LOCK_KEY = 10_001L
     }
 }

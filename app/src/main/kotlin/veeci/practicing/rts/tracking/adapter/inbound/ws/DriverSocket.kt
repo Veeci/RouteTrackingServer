@@ -7,8 +7,10 @@ import io.ktor.websocket.CloseReason
 import io.ktor.websocket.close
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Timer
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
 import veeci.practicing.rts.platform.security.actor
 import veeci.practicing.rts.platform.ws.WsSession
@@ -110,7 +112,7 @@ class DriverSocket(
             }
         } finally {
             handshake.cancel()
-            registered?.let { drivers.disconnected(actor.userId, it) }
+            registered?.let { withContext(NonCancellable) { drivers.disconnected(actor.userId, it) } }
         }
     }
 

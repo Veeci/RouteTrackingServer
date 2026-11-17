@@ -17,7 +17,7 @@ import veeci.practicing.rts.trip.adapter.inbound.event.TripSummaryListener
 import veeci.practicing.rts.trip.adapter.inbound.job.StaleDriverJob
 import veeci.practicing.rts.trip.adapter.out.driver.DriverRoutePush
 import veeci.practicing.rts.trip.adapter.out.live.LiveProgressPublisher
-import veeci.practicing.rts.trip.adapter.out.memory.InMemoryProgressStateStore
+import veeci.practicing.rts.trip.adapter.out.persistence.ExposedProgressStateStore
 import veeci.practicing.rts.trip.adapter.out.persistence.ExposedRuleStateStore
 import veeci.practicing.rts.trip.adapter.out.persistence.ExposedTripEventOutbox
 import veeci.practicing.rts.trip.adapter.out.persistence.ExposedTripMomentRepository
@@ -57,7 +57,7 @@ fun tripModule(events: EventsConfig): Module =
         single<TripRouteRepository> { ExposedTripRouteRepository() }
         single { TripService(get(), get(), get(), get(), get(), get()) } bind TripQuery::class
 
-        single<ProgressStateStore> { InMemoryProgressStateStore() }
+        single<ProgressStateStore> { ExposedProgressStateStore(get()) }
         single<ProgressPublisher> { LiveProgressPublisher(get()) }
         single { TripProgressService(get(), get(), get(), get(), get(), get()) }
 

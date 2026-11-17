@@ -13,8 +13,11 @@ interface LiveUpdateBus : LiveUpdates {
     /** The updates of [tripId] from now on, starting with the latest one published before, if any. */
     fun subscribe(tripId: UUID): Flow<LiveUpdate>
 
-    /** How many collectors watch [tripId] right now. */
+    /** How many collectors watch [tripId] on this instance right now. */
     fun subscriberCount(tripId: UUID): Int
+
+    /** Whether anyone watches [tripId], on this instance or another one (phase 10). */
+    suspend fun isWatched(tripId: UUID): Boolean
 
     /** How many trips the bus keeps state for; finished trips without watchers are dropped. */
     val tripCount: Int

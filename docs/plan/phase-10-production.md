@@ -35,6 +35,29 @@ dashboards and alerts; backup/restore drill; data-retention job; capacity test.
 The ports introduced in earlier phases make each replacement an adapter swap selected by config
 (`live.bus = memory | redis`); in-memory adapters stay for dev and tests.
 
+### Corrections to this plan (approved 2026-11-17)
+
+The table above was written before phases 4 to 9. Reading the code changed it:
+
+- **The real cause is the outbox relay.** It locks events with `FOR UPDATE SKIP LOCKED`, so with two instances
+  each event's handlers run on whichever instance locked it, not where the socket is. Two events of one trip can
+  also run at the same moment on two instances, out of order. Fix: only one instance delivers at a time
+  (`pg_try_advisory_xact_lock`, key 10_001), and it always takes the oldest event.
+- **Presence needs nothing.** Stale detection reads `tracking_sessions.last_seen_at` in Postgres since phase 4, and
+  every job holds an advisory lock. The `PresenceStore` row is dropped.
+- **Progress state goes to Postgres, not Redis.** Progress runs inside the relay's transaction, so a row written in
+  that transaction (V17) rolls back with the event. Redis could not.
+- **Commands are routed per driver** on `driver:{driverId}`, not per session: commands are addressed to drivers
+  (V10). The same channel carries `route_updated`, because both go through `DriverLink`.
+- **Guest watching was instance-local too.** `GuestSocket` counted guests on its own instance before telling device
+  control that the first guest arrived or the last left. It now asks the bus whether anyone watches anywhere.
+- **Redis is not critical for readiness.** TC-10-RED-02 said Redis down makes `/health/ready` DOWN. That would take
+  every instance out of the load balancer during a Redis outage, and stop ingest, which does not need Redis.
+  Redis is reported in readiness, but only the database and the road graph decide it.
+- **Slices:** 10a is T10.1 to T10.3 plus the relay lock and V17. 10b is T10.4 and reconnect backoff. 10c is the
+  retention job, metrics, alerts and the runbook. 10d is the production environment, deploys, the restore drill and
+  the capacity test, after the staging laptop (phase 1.5) is running.
+
 ### WebSockets behind a load balancer
 
 - No sticky sessions required: a socket lives on one instance for its lifetime; cross-instance
@@ -72,9 +95,9 @@ Secrets: platform secret store → env vars (`DB_PASSWORD`, `JWT_SECRET`, `REDIS
 
 ## Tasks
 
-- [ ] T10.1 Redis in compose + Testcontainers; `platform/redis` client (Lettuce) with health indicator.
-- [ ] T10.2 Redis adapters: live bus, presence, progress state, device command routing; config switch.
-- [ ] T10.3 Contract tests for each port run against the Redis adapter too.
+- [x] T10.1 Redis in compose + Testcontainers; `platform/redis` client (Lettuce) with health indicator.
+- [x] T10.2 Redis adapters: live bus, presence, progress state, device command routing; config switch.
+- [x] T10.3 Contract tests for each port run against the Redis adapter too.
 - [ ] T10.4 Multi-instance E2E harness: two app instances + Postgres + Redis in Testcontainers (or compose).
 - [ ] T10.5 `prod` environment: app, managed Postgres with backups, secrets, promotion job with approval, rolling strategy.
 - [ ] T10.6 Dashboards, alerts, runbook; retention job.
@@ -104,6 +127,32 @@ Secrets: platform secret store → env vars (`DB_PASSWORD`, `JWT_SECRET`, `REDIS
   client at one port and the guest client at the other.
 - **Guest update delay** is measured by the simulator: fix `recordedAt` vs guest receive time (same machine clock).
 - Load tests run against the deployed staging environment or `docker compose --scale app=2` behind the compose `nginx` LB.
+
+## As built (10a)
+
+- `OutboxRelay` takes `pg_try_advisory_xact_lock(10_001)` at the start of each event's transaction and skips the
+  round when another instance holds it. The lock ends with the transaction, so a crashed instance never keeps it,
+  and the next event may go to any instance. TC-10-REL-01: two relays deliver 100 events in order, never two at once.
+- `ExposedProgressStateStore` (V17 `trip_progress_state`) replaces the in-memory store. The followed route is
+  stored as kind and version only. Each instance keeps up to 1 000 decoded lines in an LRU cache, filled from
+  `trip_routes` on a miss. A route version never changes, so a cached line is never out of date. The port's
+  methods became `suspend`.
+- `RedisConnections` (Lettuce 7.9) holds one command connection and one pub/sub connection. Redis is on when
+  `REDIS_URL` is set and not blank. Without it, the app runs alone exactly as before, with the in-memory adapters.
+- `RedisLiveUpdateBus` wraps an `InMemoryLiveUpdateBus`, which still fans out to the local sockets.
+  - A Lua script numbers each update (`INCR trip:seq:{id}`), keeps it as the trip's latest (`trip:last:{id}`) and
+    publishes it on `trip:{id}`, atomically. Both keys expire after `redis.lastUpdateTtl`, 1 hour by default.
+  - An instance subscribes to `trip:{id}` only while it has a guest of the trip, waits for the confirmation, then
+    reads `trip:last:{id}`. The number drops a copy that is older than one already seen.
+  - `isWatched` is local guests or `PUBSUB NUMSUB trip:{id}`, which counts the instances subscribed. An instance
+    that dies drops its subscriptions with its connection, so the count never stays too high.
+  - A publish never waits and never throws: it gives up after `redis.publishTimeout`, 500 ms by default.
+- `RedisDriverLink` wraps `ConnectedDrivers`. It sends locally first. Otherwise it publishes on `driver:{id}`, and
+  each instance subscribes to that channel while it holds a socket of the driver, so `PUBLISH` returns how many
+  instances got it. Zero, or Redis down, answers false, and the command waits as PENDING for the next `welcome`.
+- Starting an instance with `REDIS_URL` set needs Redis to answer, because Lettuce connects at startup. A running
+  instance survives a Redis outage and reconnects by itself.
+- `deploy/docker-compose.yml` has a `redis` service in the `scale` profile and a port range for `--scale app=2`.
 
 ## Definition of Done
 

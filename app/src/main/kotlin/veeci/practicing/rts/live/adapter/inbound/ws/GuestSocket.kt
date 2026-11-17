@@ -113,8 +113,10 @@ class GuestSocket(
     }
 
     /**
-     * Forwards the trip's updates until it ends or the socket closes. The first guest watching a trip on this
+     * Forwards the trip's updates until it ends or the socket closes. The first guest watching a trip on any
      * instance, and the last one leaving it, tell device control, which changes the driver's tracking precision.
+     * Two guests who arrive at the same moment on two instances may both count as first: device control then sends
+     * the same constraint twice, which the device applies once.
      */
     private suspend fun WsSession.watch(
         tripId: UUID,
@@ -123,7 +125,7 @@ class GuestSocket(
     ) {
         val driver = trip.driverId?.let(::UserId)
         var status = trip.status
-        if (driver != null && bus.subscriberCount(tripId) == 0) watching.firstGuestWatching(driver)
+        if (driver != null && !bus.isWatched(tripId)) watching.firstGuestWatching(driver)
         try {
             // takeWhile stops collecting (and unsubscribes) after the update that ended the trip.
             bus
@@ -134,8 +136,8 @@ class GuestSocket(
                 }.collect {}
         } finally {
             // Runs also when the socket was cancelled; the call is quick and never throws.
-            if (driver != null && bus.subscriberCount(tripId) == 0) {
-                withContext(NonCancellable) { watching.lastGuestLeft(driver, rideStarted = status == TripStatus.IN_PROGRESS) }
+            withContext(NonCancellable) {
+                if (driver != null && !bus.isWatched(tripId)) watching.lastGuestLeft(driver, rideStarted = status == TripStatus.IN_PROGRESS)
             }
         }
     }

@@ -5,7 +5,7 @@ import org.slf4j.LoggerFactory
 import veeci.practicing.rts.platform.ws.WsSession
 import veeci.practicing.rts.protocol.ServerMessage
 import veeci.practicing.rts.shared.UserId
-import veeci.practicing.rts.tracking.application.api.DriverLink
+import veeci.practicing.rts.tracking.application.api.LocalDriverLink
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
@@ -14,11 +14,16 @@ import java.util.concurrent.CopyOnWriteArrayList
  * Which drivers have a socket on this instance, after their `welcome`. In memory, so it only knows this
  * instance; phase 10 routes commands to the instance that holds the socket.
  */
-class ConnectedDrivers : DriverLink {
+class ConnectedDrivers : LocalDriverLink {
     private val log = LoggerFactory.getLogger(ConnectedDrivers::class.java)
     private val sessions = ConcurrentHashMap<UserId, MutableSet<WsSession>>()
     private val connectListeners = CopyOnWriteArrayList<suspend (UserId) -> Unit>()
     private val ackListeners = CopyOnWriteArrayList<suspend (UserId, UUID, Boolean) -> Unit>()
+    private val presenceListeners = CopyOnWriteArrayList<suspend (UserId, Boolean) -> Unit>()
+
+    override fun onPresenceChanged(listener: suspend (driver: UserId, here: Boolean) -> Unit) {
+        presenceListeners += listener
+    }
 
     @Suppress("TooGenericExceptionCaught") // a socket that just closed must not stop the others
     override suspend fun send(
@@ -51,7 +56,15 @@ class ConnectedDrivers : DriverLink {
         driver: UserId,
         session: WsSession,
     ) {
-        sessions.computeIfAbsent(driver) { ConcurrentHashMap.newKeySet() }.add(session)
+        var first = false
+        // compute() is atomic per key, so a socket that closes at the same moment cannot lose this one.
+        sessions.compute(driver) { _, sockets ->
+            val set = sockets ?: ConcurrentHashMap.newKeySet()
+            first = set.isEmpty()
+            set.add(session)
+            set
+        }
+        if (first) presenceListeners.forEach { it(driver, true) }
         connectListeners.forEach {
             try {
                 it(driver)
@@ -63,11 +76,17 @@ class ConnectedDrivers : DriverLink {
         }
     }
 
-    internal fun disconnected(
+    internal suspend fun disconnected(
         driver: UserId,
         session: WsSession,
     ) {
-        sessions[driver]?.remove(session)
+        var last = false
+        sessions.computeIfPresent(driver) { _, set ->
+            set.remove(session)
+            last = set.isEmpty()
+            if (last) null else set
+        }
+        if (last) presenceListeners.forEach { it(driver, false) }
     }
 
     internal suspend fun acked(

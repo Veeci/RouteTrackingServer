@@ -143,10 +143,10 @@ fun appModule(
         includes(
             platformModule(config, metrics),
             identityModule(),
-            trackingModule(config.tracking, config.ws),
+            trackingModule(config.tracking, config.ws, redis = config.redis.enabled),
             tripModule(config.events),
             deviceControlModule(config.commands),
-            liveModule(),
+            liveModule(redis = config.redis.enabled),
             routingModule(config.routing),
             telemetryModule(config.telemetry),
         )
