@@ -58,8 +58,8 @@ data class ProgressState(
 )
 
 /**
- * A stored route, decoded once per version, with the driver's place on it. Kept in memory with the rest of the
- * progress state: after a restart it is decoded again and the matcher searches from the route's start.
+ * A stored route, decoded once per version, with the driver's place on it. The progress state stores only its
+ * version and the place; each instance keeps the decoded line in a cache (ExposedProgressStateStore).
  */
 data class FollowedRoute(
     val kind: RouteKind,
@@ -79,16 +79,17 @@ data class FollowedRoute(
 }
 
 /**
- * Progress state per trip. It is derived from the fixes: losing it (a restart) makes the ETA less smooth for a few
- * fixes and makes the matcher search the route again, nothing worse.
+ * Progress state per trip. It is derived from the fixes: losing it makes the ETA less smooth for a few fixes and
+ * makes the matcher search the route again, nothing worse. Since phase 10 it is in Postgres and joins the caller's
+ * transaction, because the events of one trip may be handled on any instance.
  */
 interface ProgressStateStore {
-    fun get(trip: TripId): ProgressState?
+    suspend fun get(trip: TripId): ProgressState?
 
-    fun put(
+    suspend fun put(
         trip: TripId,
         state: ProgressState,
     )
 
-    fun remove(trip: TripId)
+    suspend fun remove(trip: TripId)
 }

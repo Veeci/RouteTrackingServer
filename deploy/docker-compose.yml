@@ -2,6 +2,8 @@
 #   docker compose -f deploy/docker-compose.yml up -d db          # database only (usual dev loop, app runs from Gradle/IDE)
 #   docker compose -f deploy/docker-compose.yml up --build        # database + app container
 #   docker compose -f deploy/docker-compose.yml --profile observability up --build   # + Jaeger tracing UI on :16686
+#   REDIS_URL=redis://redis:6379 docker compose -f deploy/docker-compose.yml --profile scale up --build --scale app=2
+#                                                                     # + Redis, for several app instances (phase 10)
 name: route-tracking
 
 services:
@@ -35,13 +37,27 @@ services:
       DB_USER: ${DB_USER:-rts}
       DB_PASSWORD: ${DB_PASSWORD}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in deploy/.env}
+      # Empty: one instance, no Redis. Set with the scale profile to share live updates between instances.
+      REDIS_URL: ${REDIS_URL:-}
       # Tracing is off unless the observability profile's settings are provided (see .env.example).
       # Extra JVM flags for the start script (empty by default; the JVM would announce an empty JAVA_TOOL_OPTIONS).
       APP_OPTS: ${OTEL_JAVA_TOOL_OPTIONS:-}
       OTEL_SERVICE_NAME: route-tracking-server
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     ports:
-      - "8080:8080"
+      # A range, so --scale app=2 gives each instance its own port (8080, 8081). Phase 10b puts a load balancer in front.
+      - "8080-8081:8080"
+
+  redis:
+    image: redis:7-alpine
+    profiles: ["scale"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   jaeger:
     image: jaegertracing/jaeger:2.21.0

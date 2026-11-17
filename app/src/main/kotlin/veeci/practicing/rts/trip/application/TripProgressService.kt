@@ -154,7 +154,7 @@ class TripProgressService(
         }
 
     /** The trip is finished: its state is not needed any more. */
-    fun forget(trip: TripId) = states.remove(trip)
+    suspend fun forget(trip: TripId) = states.remove(trip)
 
     /** Adds one position: the speed the device measured, or else the speed implied by the distance from the last one. */
     private fun ProgressState?.next(position: FixesAccepted.Position): ProgressState {

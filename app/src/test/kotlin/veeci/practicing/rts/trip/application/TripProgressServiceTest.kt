@@ -11,6 +11,7 @@ import veeci.practicing.rts.shared.geo.Haversine
 import veeci.practicing.rts.shared.geo.PolylineCodec
 import veeci.practicing.rts.testing.geo.offset
 import veeci.practicing.rts.testing.tracking.DirectTransactionRunner
+import veeci.practicing.rts.testing.trip.InMemoryProgressStateStore
 import veeci.practicing.rts.testing.trip.InMemoryTripRepository
 import veeci.practicing.rts.testing.trip.InMemoryTripRouteRepository
 import veeci.practicing.rts.testing.trip.TripSamples
@@ -18,7 +19,6 @@ import veeci.practicing.rts.testing.trip.TripSamples.DESTINATION
 import veeci.practicing.rts.testing.trip.TripSamples.PICKUP
 import veeci.practicing.rts.testing.trip.TripSamples.T0
 import veeci.practicing.rts.tracking.domain.event.FixesAccepted
-import veeci.practicing.rts.trip.adapter.out.memory.InMemoryProgressStateStore
 import veeci.practicing.rts.trip.application.port.out.DriverPosition
 import veeci.practicing.rts.trip.application.port.out.ProgressBasis
 import veeci.practicing.rts.trip.application.port.out.ProgressPublisher

@@ -61,6 +61,7 @@ Local stack:
 | `docker compose -f deploy/docker-compose.yml up -d db` | PostgreSQL on `localhost:5432` |
 | `docker compose -f deploy/docker-compose.yml up --build` | PostgreSQL + the app as a container |
 | `docker compose -f deploy/docker-compose.yml --profile observability up --build` | + Jaeger tracing UI on `localhost:16686` |
+| `REDIS_URL=redis://redis:6379 docker compose -f deploy/docker-compose.yml --profile scale up --build --scale app=2` | + Redis and two app instances on `localhost:8080` and `:8081` (phase 10) |
 | `docker compose -f deploy/docker-compose.yml down` | Stop everything (data kept in the `db-data` volume; add `-v` to wipe it) |
 
 Connect to the database: `docker compose -f deploy/docker-compose.yml exec db psql -U rts -d rts`

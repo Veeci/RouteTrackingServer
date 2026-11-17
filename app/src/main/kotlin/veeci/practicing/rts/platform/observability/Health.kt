@@ -19,6 +19,12 @@ enum class HealthStatus { UP, DOWN }
 interface HealthIndicator {
     val name: String
 
+    /**
+     * False for a dependency the instance can serve without (Redis, phase 10): its status is reported, but it does
+     * not make the instance unready. Otherwise a Redis outage would take every instance out of the load balancer.
+     */
+    val critical: Boolean get() = true
+
     /** May block (e.g. on a socket); [HealthRegistry] runs it on the IO pool under a deadline. */
     fun check(): HealthStatus
 }
@@ -56,7 +62,8 @@ class HealthRegistry(
             running.associate { (indicator, check) ->
                 indicator.name to if (check.isCompleted) check.await() else HealthStatus.DOWN
             }
-        val allUp = !stopping && checks.values.all { it == HealthStatus.UP }
+        val critical = indicators.filter { it.critical }.map { it.name }.toSet()
+        val allUp = !stopping && checks.filterKeys { it in critical }.values.all { it == HealthStatus.UP }
         return HealthReport(if (allUp) HealthStatus.UP else HealthStatus.DOWN, checks)
     }
 

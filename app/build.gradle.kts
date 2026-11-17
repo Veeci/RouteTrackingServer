@@ -53,6 +53,7 @@ dependencies {
     implementation(libs.exposed.kotlin.datetime)
     implementation(libs.exposed.json)
     implementation(libs.flyway.core)
+    implementation(libs.lettuce.core)
     runtimeOnly(libs.flyway.postgresql)
     runtimeOnly(libs.postgresql)
 

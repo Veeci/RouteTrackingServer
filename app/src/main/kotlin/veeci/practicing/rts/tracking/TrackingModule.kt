@@ -15,6 +15,7 @@ import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedSessionTelem
 import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedTrackHistoryRepository
 import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedTrackingEventOutbox
 import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedTrackingSessionRepository
+import veeci.practicing.rts.tracking.adapter.out.redis.RedisDriverLink
 import veeci.practicing.rts.tracking.application.TrackingHistory
 import veeci.practicing.rts.tracking.application.TrackingPresence
 import veeci.practicing.rts.tracking.application.TrackingService
@@ -34,6 +35,7 @@ import veeci.practicing.rts.tracking.domain.PipelineConfig
 fun trackingModule(
     config: TrackingConfig,
     ws: WsConfig,
+    redis: Boolean = false,
 ): Module =
     module {
         single<TrackingSessionRepository> { ExposedTrackingSessionRepository() }
@@ -59,7 +61,13 @@ fun trackingModule(
         // One session's raw telemetry, read by the telemetry context for session health (phase 9).
         single<SessionTelemetry> { TrackingTelemetry(get(), get(), ExposedSessionTelemetryRepository(), get()) }
         // The driver sockets of this instance; device control sends commands through it (phase 5).
-        single { ConnectedDrivers() } bind DriverLink::class
+        // With Redis, a message for a driver on another instance goes through Redis (phase 10).
+        if (redis) {
+            single { ConnectedDrivers() }
+            single<DriverLink>(createdAtStart = true) { RedisDriverLink(get<ConnectedDrivers>(), get()) }
+        } else {
+            single { ConnectedDrivers() } bind DriverLink::class
+        }
         single {
             val limits = LimitsDto(config.maxFixesPerBatch, ws.maxFrameBytes, ws.messagesPerSecond)
             DriverSocket(get(), get(), get(), limits, config.handshakeTimeout, get(), get())

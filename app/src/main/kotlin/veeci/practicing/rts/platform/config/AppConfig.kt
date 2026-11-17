@@ -2,6 +2,7 @@ package veeci.practicing.rts.platform.config
 
 import com.sksamuel.hoplite.Secret
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
@@ -19,6 +20,7 @@ data class AppConfig(
     val commands: CommandsConfig = CommandsConfig(),
     val routing: RoutingConfig = RoutingConfig(),
     val telemetry: TelemetryConfig = TelemetryConfig(),
+    val redis: RedisConfig = RedisConfig(),
 )
 
 data class AppInfo(
@@ -90,6 +92,21 @@ data class CommandsConfig(
     /** How often the expiry job looks for overdue commands. */
     val expiryCheckEvery: Duration = 30.seconds,
 )
+
+/**
+ * Redis, for running several instances (phase 10). Without [url] the app runs alone: live updates and driver
+ * messages stay in this process. Set `REDIS_URL` (for example `redis://localhost:6379`) to share them.
+ */
+data class RedisConfig(
+    val url: String? = null,
+    /** How long a publish may take before it is given up: live delivery is best effort. */
+    val publishTimeout: Duration = 500.milliseconds,
+    /** How long a trip's latest update stays for guests who subscribe later. */
+    val lastUpdateTtl: Duration = 1.hours,
+) {
+    /** A blank URL counts as none, so compose can pass `REDIS_URL=` when Redis is off. */
+    val enabled: Boolean get() = !url.isNullOrBlank()
+}
 
 /** Session health (phase 9). */
 data class TelemetryConfig(

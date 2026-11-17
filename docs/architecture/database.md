@@ -123,6 +123,7 @@ erDiagram
 | `users` | identity | One person and the role they act in | Phase 3: by the dev token endpoint only (dev and test) | V4 |
 | `tracking_sessions` | tracking | One tracking run of one phone | On `hello`; updated on every reconnect and every stored batch | V3, V5 (`driver_id`), V15 (device columns) |
 | `device_status_samples` | tracking | One battery and motion reading of a session's phone | On every `device_status` message | V15 |
+| `trip_progress_state` | trip | The live progress of one active trip: smoothed speed, last fix, place on the route | On every batch of the trip's driver, in the relay's transaction; removed when the trip ends | V17 |
 | `session_health` | telemetry | The computed health of one tracking session | By the health job once the session is idle, or by an admin; computing again replaces it | V16 |
 | `session_health_watermark` | telemetry | Where the health job stopped (one row at most) | With every run of the job that computed a session | V16 |
 | `fix_batches` | tracking | One numbered upload (`seq`) of a session | Once per new `seq` | V3 |
@@ -158,6 +159,13 @@ Every `device_status` message of a session (phase 9): battery level, charging, t
 motion, at the time the device read them. Session health reads them to compute battery drain and to flag gaps
 that look like Doze. The primary key `(session_id, at)` makes a resent sample harmless, like `fix_batches`. The
 row is written in the same transaction as the session's `last_seen_at` and the `DeviceStatusReported` outbox row.
+
+### `trip_progress_state`
+
+Derived data (phase 10): what progress remembers between two batches of a trip, so that any instance can handle
+the trip's next event. The followed route is stored as its kind and version, not its polyline, which is in
+`trip_routes`. Losing a row only makes the ETA less smooth for a few fixes, so its JSON shape may change without a
+migration of old rows.
 
 ### `session_health` and `session_health_watermark`
 

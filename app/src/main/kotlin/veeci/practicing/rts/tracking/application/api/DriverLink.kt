@@ -29,3 +29,11 @@ interface DriverLink {
      */
     fun onCommandAck(listener: suspend (driver: UserId, commandId: UUID, applied: Boolean) -> Unit)
 }
+
+/**
+ * The driver sockets of this instance only, plus a signal when a driver's first socket here opens or the last one
+ * closes. The Redis link (phase 10) uses it to listen for messages to drivers it holds.
+ */
+interface LocalDriverLink : DriverLink {
+    fun onPresenceChanged(listener: suspend (driver: UserId, here: Boolean) -> Unit)
+}

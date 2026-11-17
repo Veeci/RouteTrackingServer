@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
@@ -25,6 +26,7 @@ import veeci.practicing.rts.testing.TestConfig
 import veeci.practicing.rts.testing.TestDatabase
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Duration.Companion.milliseconds
 
 @Testcontainers(disabledWithoutDocker = true)
@@ -139,12 +141,46 @@ class OutboxRelayIT {
             append(*(1..200).toList().toIntArray())
             val relays = List(2) { OutboxRelay(transactions, listOf(handler), config.copy(relayBatchSize = 500)) }
 
-            val delivered = coroutineScope { relays.map { async(Dispatchers.IO) { it.deliverPending() } }.awaitAll() }
+            val delivered = coroutineScope { relays.map { async(Dispatchers.IO) { it.deliverUntilEmpty() } }.awaitAll() }
 
             delivered.sum() shouldBe 200
             counts.size shouldBe 200
             counts.values.all { it == 1 } shouldBe true
         }
+
+    @Test
+    fun `TC-10-REL-01 two relays never handle two events at once, so the events come in order`() =
+        runTest {
+            val order = ConcurrentLinkedQueue<Int>()
+            val inFlight = AtomicInteger()
+            val mostAtOnce = AtomicInteger()
+            val handler =
+                object : OutboxEventHandler {
+                    override val eventType = TYPE
+
+                    override suspend fun handle(payload: JsonElement) {
+                        mostAtOnce.accumulateAndGet(inFlight.incrementAndGet(), ::maxOf)
+                        delay(1) // long enough for the other relay to try
+                        order += (payload.jsonObject.getValue("n") as JsonPrimitive).int
+                        inFlight.decrementAndGet()
+                    }
+                }
+            append(*(1..100).toList().toIntArray())
+            val relays = List(2) { OutboxRelay(transactions, listOf(handler), config) }
+
+            val delivered = coroutineScope { relays.map { async(Dispatchers.IO) { it.deliverUntilEmpty() } }.awaitAll() }
+
+            delivered.sum() shouldBe 100
+            order.toList() shouldBe (1..100).toList()
+            mostAtOnce.get() shouldBe 1
+        }
+
+    /** Like the relay loop: delivers until the outbox is empty, whoever else delivers at the same time. */
+    private suspend fun OutboxRelay.deliverUntilEmpty(): Int {
+        var delivered = 0
+        while (unpublished() > 0) delivered += deliverPending()
+        return delivered
+    }
 
     private companion object {
         const val TYPE = "test.Numbered.v1"

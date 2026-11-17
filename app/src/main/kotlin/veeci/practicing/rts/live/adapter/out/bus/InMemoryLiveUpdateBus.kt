@@ -51,6 +51,8 @@ class InMemoryLiveUpdateBus : LiveUpdateBus {
 
     override fun subscriberCount(tripId: UUID): Int = trips[tripId]?.updates?.subscriptionCount?.value ?: 0
 
+    override suspend fun isWatched(tripId: UUID): Boolean = subscriberCount(tripId) > 0
+
     private fun dropIfUnused(
         tripId: UUID,
         trip: TripFlow,

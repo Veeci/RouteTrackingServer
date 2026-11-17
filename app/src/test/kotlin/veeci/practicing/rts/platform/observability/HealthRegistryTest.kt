@@ -1,0 +1,34 @@
+package veeci.practicing.rts.platform.observability
+
+import io.kotest.matchers.shouldBe
+import kotlinx.coroutines.test.runTest
+import org.junit.jupiter.api.Test
+
+class HealthRegistryTest {
+    private fun indicator(
+        name: String,
+        status: HealthStatus,
+        critical: Boolean = true,
+    ) = object : HealthIndicator {
+        override val name = name
+        override val critical = critical
+
+        override fun check() = status
+    }
+
+    @Test
+    fun `TC-10-RED-02 a non-critical check that is DOWN is reported but leaves the instance ready`() =
+        runTest {
+            HealthRegistry(listOf(indicator("db", HealthStatus.UP), indicator("redis", HealthStatus.DOWN, critical = false))).use {
+                it.readiness() shouldBe HealthReport(HealthStatus.UP, mapOf("db" to HealthStatus.UP, "redis" to HealthStatus.DOWN))
+            }
+        }
+
+    @Test
+    fun `a critical check that is DOWN makes the instance unready`() =
+        runTest {
+            HealthRegistry(listOf(indicator("db", HealthStatus.DOWN), indicator("redis", HealthStatus.UP, critical = false))).use {
+                it.readiness().status shouldBe HealthStatus.DOWN
+            }
+        }
+}

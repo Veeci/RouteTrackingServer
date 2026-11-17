@@ -21,6 +21,8 @@ import veeci.practicing.rts.platform.jobs.JobScheduler
 import veeci.practicing.rts.platform.jobs.PostgresJobLock
 import veeci.practicing.rts.platform.observability.HealthIndicator
 import veeci.practicing.rts.platform.observability.HealthRegistry
+import veeci.practicing.rts.platform.redis.RedisConnections
+import veeci.practicing.rts.platform.redis.RedisHealthIndicator
 import veeci.practicing.rts.platform.security.AccessTokens
 import veeci.practicing.rts.platform.ws.WsSessionRegistry
 import veeci.practicing.rts.platform.ws.WsSessionRunner
@@ -55,6 +57,11 @@ fun platformModule(
 
         // Contexts add their own dependencies (Redis, ...) the same way: bind them as HealthIndicator.
         single { DatabaseHealthIndicator(get()) } bind HealthIndicator::class
+        // Redis only when configured (phase 10): one instance runs without it.
+        if (config.redis.enabled) {
+            single(createdAtStart = true) { RedisConnections(config.redis) } onClose { it?.close() }
+            single { RedisHealthIndicator(get()) } bind HealthIndicator::class
+        }
         single { HealthRegistry(getAll()) } onClose { it?.close() }
 
         // Built at startup, so a missing or short JWT_SECRET stops the app before it serves anything.
