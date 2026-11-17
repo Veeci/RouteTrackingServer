@@ -24,11 +24,15 @@ import io.ktor.websocket.readText
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
+import org.jetbrains.exposed.v1.jdbc.transactions.TransactionManager
 import org.junit.jupiter.api.Test
+import org.koin.ktor.ext.get
 import org.testcontainers.junit.jupiter.Testcontainers
 import veeci.practicing.rts.platform.audit.AuditPage
+import veeci.practicing.rts.platform.db.TransactionRunner
 import veeci.practicing.rts.protocol.ClientMessage
 import veeci.practicing.rts.protocol.GuestClientMessage
 import veeci.practicing.rts.protocol.GuestServerMessage
@@ -47,6 +51,7 @@ import veeci.practicing.rts.testing.trip.TripApi
 import veeci.practicing.rts.testing.trip.trip
 import veeci.practicing.rts.testing.trip.tripPage
 import java.util.UUID
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 /** The staff trip API of phase 11d: the operator cancel, seen live by the guest and the driver, and the trip list. */
@@ -66,6 +71,9 @@ class AdminTripsIT {
         socketApp {
             val trip = api().created(guest).id
             api().moved(trip, driver, "accept", "arrive", "start")
+            // The relay may still hold the "start" update. Delivered after the cancel commits, the guest socket rereads
+            // the trip, sends CANCELLED with no cancelledBy, and closes. Let it deliver first.
+            awaitTripEventsDelivered(trip)
             val driverReady = CompletableDeferred<Unit>()
             val guestReady = CompletableDeferred<Unit>()
 
@@ -181,6 +189,19 @@ class AdminTripsIT {
         return ids
     }
 
+    /** Waits until the outbox relay has published every stored event of [trip]. */
+    private suspend fun SocketTestApp.awaitTripEventsDelivered(trip: String) {
+        withTimeout(TIMEOUT) {
+            while (unpublishedEvents(trip) > 0) delay(POLL)
+        }
+    }
+
+    private suspend fun SocketTestApp.unpublishedEvents(trip: String): Long =
+        application.get<TransactionRunner>().inTransaction {
+            val query = "SELECT count(*) FROM outbox WHERE published_at IS NULL AND payload->>'tripId' = '$trip'"
+            TransactionManager.current().exec(query) { rows -> rows.next().let { rows.getLong(1) } } ?: 0
+        }
+
     /** The guest watches [trip] and returns the `trip_event` that ended it. */
     private suspend fun SocketTestApp.watchUntilCancelled(
         trip: String,
@@ -230,5 +251,6 @@ class AdminTripsIT {
 
     private companion object {
         val TIMEOUT = 15.seconds
+        val POLL = 50.milliseconds
     }
 }
