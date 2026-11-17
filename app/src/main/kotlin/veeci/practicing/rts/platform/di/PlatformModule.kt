@@ -4,7 +4,9 @@ import com.zaxxer.hikari.HikariDataSource
 import io.micrometer.core.instrument.MeterRegistry
 import org.jetbrains.exposed.v1.core.DatabaseConfig
 import org.jetbrains.exposed.v1.jdbc.Database
+import org.jetbrains.exposed.v1.jdbc.transactions.TransactionManager
 import org.koin.core.module.Module
+import org.koin.core.qualifier.named
 import org.koin.dsl.bind
 import org.koin.dsl.module
 import org.koin.dsl.onClose
@@ -13,6 +15,7 @@ import veeci.practicing.rts.platform.audit.ExposedAuditLog
 import veeci.practicing.rts.platform.config.AppConfig
 import veeci.practicing.rts.platform.db.DatabaseHealthIndicator
 import veeci.practicing.rts.platform.db.ExposedTransactionRunner
+import veeci.practicing.rts.platform.db.RELAY_POOL
 import veeci.practicing.rts.platform.db.TransactionRunner
 import veeci.practicing.rts.platform.db.createDataSource
 import veeci.practicing.rts.platform.events.OutboxMetrics
@@ -50,13 +53,25 @@ fun platformModule(
         single<DataSource>(createdAtStart = true) { createDataSource(config.db, metrics) } onClose { (it as? HikariDataSource)?.close() }
 
         // One attempt per transaction: retrying a failed block could repeat its side effects.
-        single { Database.connect(get<DataSource>(), databaseConfig = DatabaseConfig { defaultMaxAttempts = 1 }) }
+        // Set as Exposed's default explicitly: connecting the relay's Database later must not replace it.
+        single {
+            Database.connect(get<DataSource>(), databaseConfig = DatabaseConfig { defaultMaxAttempts = 1 }).also {
+                TransactionManager.defaultDatabase = it
+            }
+        }
 
-        single<TransactionRunner> { ExposedTransactionRunner(get()) }
+        single<TransactionRunner> { ExposedTransactionRunner(get(), config.db.maxPoolSize) }
         single { OutboxWriter() }
         single<AuditLog> { ExposedAuditLog(get()) }
+
+        // The outbox relay's own pool, so it never waits behind ingest for a connection (load check 11). The
+        // handlers it calls use the main TransactionRunner, which joins the relay's open transaction.
+        single<DataSource>(RELAY) { createDataSource(config.db, metrics, RELAY_POOL, config.db.relayPoolSize) } onClose {
+            (it as? HikariDataSource)?.close()
+        }
+        single(RELAY) { Database.connect(get<DataSource>(RELAY), databaseConfig = DatabaseConfig { defaultMaxAttempts = 1 }) }
         // Every context's OutboxEventHandler definitions, found with getAll().
-        single { OutboxRelay(get(), getAll(), config.events, get()) }
+        single { OutboxRelay(ExposedTransactionRunner(get(RELAY), config.db.relayPoolSize), getAll(), config.events, get()) }
         single { OutboxMetrics(get(), get()) } bind BackgroundWorker::class
         single<JobLock> { PostgresJobLock(get()) }
         single { JobScheduler(get()) }
@@ -79,3 +94,6 @@ fun platformModule(
         single { WsSessionRegistry(get()) }
         single { WsSessionRunner(config.ws, get()) }
     }
+
+/** Koin name of the outbox relay's pool and its Database. */
+private val RELAY = named("relay")

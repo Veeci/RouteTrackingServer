@@ -50,6 +50,8 @@ data class DBConfig(
     val password: Secret,
     val maxPoolSize: Int,
     val migrateOnStart: Boolean,
+    /** The outbox relay's own pool, on top of [maxPoolSize]. It runs one transaction at a time; one spare. */
+    val relayPoolSize: Int = 2,
 )
 
 data class WsConfig(

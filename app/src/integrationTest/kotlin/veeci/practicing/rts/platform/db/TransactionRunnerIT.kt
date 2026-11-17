@@ -26,12 +26,14 @@ class TransactionRunnerIT {
         override val primaryKey = PrimaryKey(id)
     }
 
+    private lateinit var env: Map<String, String>
     private lateinit var dataSource: HikariDataSource
     private lateinit var runner: TransactionRunner
 
     @BeforeEach
     fun setUp() {
-        dataSource = createDataSource(TestConfig.load(TestDatabase.freshDatabaseEnv()).db)
+        env = TestDatabase.freshDatabaseEnv()
+        dataSource = createDataSource(TestConfig.load(env).db)
         val database = Database.connect(dataSource)
         transaction(database) { SchemaUtils.create(Probe) }
         runner = ExposedTransactionRunner(database)
@@ -73,6 +75,38 @@ class TransactionRunnerIT {
             }
 
             rowCount() shouldBe 0 // ...yet id=2 is gone too: it was never committed on its own
+        }
+
+    @Test
+    fun `a runner on another pool joins the open transaction and rolls back with it`() =
+        runTest {
+            // Like the outbox relay: its transaction is on its own pool, its handlers use the main runner.
+            createDataSource(TestConfig.load(env).db, name = "other", size = 1).use { other ->
+                val outer = ExposedTransactionRunner(Database.connect(other), maxConnections = 1)
+
+                shouldThrow<IllegalStateException> {
+                    outer.inTransaction {
+                        runner.inTransaction { Probe.insert { it[id] = 1 } }
+                        error("the outer block fails after the inner call finished")
+                    }
+                }
+            }
+
+            rowCount() shouldBe 0
+        }
+
+    @Test
+    fun `with a connection limit, a block that returns null runs once`() =
+        runTest {
+            val limited = ExposedTransactionRunner(Database.connect(dataSource), maxConnections = 1)
+            var runs = 0
+
+            limited.inTransaction {
+                runs++
+                null
+            } shouldBe null
+
+            runs shouldBe 1
         }
 
     private suspend fun rowCount(): Long = runner.inTransaction { Probe.selectAll().count() }

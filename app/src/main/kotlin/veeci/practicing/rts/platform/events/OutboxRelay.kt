@@ -11,8 +11,10 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import org.jetbrains.exposed.v1.core.SortOrder
-import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.and
+import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.core.isNull
+import org.jetbrains.exposed.v1.core.less
 import org.jetbrains.exposed.v1.core.vendors.ForUpdateOption
 import org.jetbrains.exposed.v1.datetime.CurrentTimestamp
 import org.jetbrains.exposed.v1.jdbc.selectAll
@@ -36,14 +38,19 @@ interface OutboxEventHandler {
 }
 
 /**
- * Delivers the outbox to the handlers, oldest event first. Each event is one transaction: lock the oldest
- * undelivered row (`FOR UPDATE SKIP LOCKED`), run every handler of its type, then set `published_at`. With several
- * instances, only one delivers at a time (an advisory lock, phase 10): with SKIP LOCKED alone, two instances would
- * handle two events of one trip at the same time, out of order. If a handler fails, the transaction rolls back and the
- * event is tried again later; after [MAX_ATTEMPTS] failures it is logged and skipped, so that one broken event
- * cannot stop the others. A crash between handling and commit delivers the event again: at least once.
+ * Delivers the outbox to the handlers, oldest event first. One pass is one transaction (load check 11): lock up to
+ * [EventsConfig.relayBatchSize] of the oldest undelivered rows (`FOR UPDATE SKIP LOCKED`), run every handler of each
+ * event in order, set `published_at` on all of them with one UPDATE, and commit once. With several instances, only
+ * one delivers at a time (an advisory lock, phase 10): with SKIP LOCKED alone, two instances would handle two events
+ * of one trip at the same time, out of order.
+ *
+ * If a handler fails, the whole pass rolls back. The failure counts against that event, and the events before it
+ * are delivered again without it, so a failing event never holds back the events that came before it. After
+ * [MAX_ATTEMPTS] failures the event is logged and skipped, so that it cannot stop the others. A crash between
+ * handling and commit delivers the events again: at least once.
  */
 class OutboxRelay(
+    /** On the relay's own pool (`db.relayPoolSize`); the handlers' own runner joins its open transaction. */
     private val transactions: TransactionRunner,
     handlers: List<OutboxEventHandler>,
     private val config: EventsConfig,
@@ -74,7 +81,7 @@ class OutboxRelay(
             }.also { job = it }
 
     /**
-     * Stops delivering and waits until the event in hand is done (its transaction commits or rolls back).
+     * Stops delivering and waits until the batch in hand is done (its transaction commits or rolls back).
      * Events not delivered yet stay in the outbox for the next start: at least once.
      */
     suspend fun stop() {
@@ -83,44 +90,80 @@ class OutboxRelay(
 
     /** Delivers up to one batch of waiting events and returns how many it delivered. */
     suspend fun deliverPending(): Int {
-        var delivered = 0
-        while (delivered < config.relayBatchSize && deliverNext()) delivered++
-        return delivered
+        val failed =
+            try {
+                return deliverBatch(before = null)
+            } catch (e: BatchFailed) {
+                e.record()
+            }
+        // The events before the failed one did not fail: deliver them again, this time without it.
+        return failed?.takeIf { it.handledBefore > 0 }?.eventId?.let { deliverBefore(it) } ?: 0
     }
 
-    /** False when nothing is waiting, or when the next event failed (it is retried on the next round). */
-    @Suppress("TooGenericExceptionCaught") // whatever a handler throws, the relay must keep running
-    private suspend fun deliverNext(): Boolean {
-        var eventId: Long? = null
-        return try {
-            transactions
-                .inTransaction {
-                    // One instance delivers at a time, so the events of one trip are handled in order (phase 10).
-                    if (!holdsDeliveryLock()) return@inTransaction false
-                    val row =
-                        OutboxTable
-                            .selectAll()
-                            .where { OutboxTable.publishedAt.isNull() }
-                            .orderBy(OutboxTable.id to SortOrder.ASC)
-                            .limit(1)
-                            .forUpdate(ForUpdateOption.PostgreSQL.ForUpdate(mode = ForUpdateOption.PostgreSQL.MODE.SKIP_LOCKED))
-                            .singleOrNull() ?: return@inTransaction false
-                    eventId = row[OutboxTable.id]
-                    handlers[row[OutboxTable.eventType]].orEmpty().forEach { it.handle(row[OutboxTable.payload]) }
-                    markPublished(row[OutboxTable.id])
-                    true
-                }.also {
-                    if (it) {
-                        eventId?.let(failures::remove)
-                        delivered?.increment()
-                    }
-                }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            eventId?.let { giveUpOrRetry(it, e) } ?: log.error("Reading the outbox failed", e)
-            false
+    private suspend fun deliverBefore(failedId: Long): Int =
+        try {
+            deliverBatch(before = failedId)
+        } catch (e: BatchFailed) {
+            e.record()
+            0
         }
+
+    /** One transaction: the oldest undelivered events (only those with an id below [before], when it is set). */
+    @Suppress("TooGenericExceptionCaught") // whatever a handler throws, the relay must keep running
+    private suspend fun deliverBatch(before: Long?): Int {
+        var current: Long? = null
+        var handled = 0
+        val ids =
+            try {
+                transactions.inTransaction {
+                    // One instance delivers at a time, so the events of one trip are handled in order (phase 10).
+                    if (!holdsDeliveryLock()) return@inTransaction emptyList()
+                    val rows = oldestUndelivered(before)
+                    for (row in rows) {
+                        current = row[OutboxTable.id]
+                        handlers[row[OutboxTable.eventType]].orEmpty().forEach { it.handle(row[OutboxTable.payload]) }
+                        handled++
+                    }
+                    current = null
+                    rows.map { it[OutboxTable.id] }.also { if (it.isNotEmpty()) markPublished(it) }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                throw BatchFailed(current, handled, e)
+            }
+        ids.forEach(failures::remove)
+        delivered?.increment(ids.size.toDouble())
+        return ids.size
+    }
+
+    private fun oldestUndelivered(before: Long?) =
+        OutboxTable
+            .selectAll()
+            .where {
+                val undelivered = OutboxTable.publishedAt.isNull()
+                if (before == null) undelivered else undelivered and (OutboxTable.id less before)
+            }.orderBy(OutboxTable.id to SortOrder.ASC)
+            .limit(config.relayBatchSize)
+            .forUpdate(ForUpdateOption.PostgreSQL.ForUpdate(mode = ForUpdateOption.PostgreSQL.MODE.SKIP_LOCKED))
+            .toList()
+
+    /** A pass rolled back. [eventId] is the event whose handler failed; null when the failure was elsewhere. */
+    private class BatchFailed(
+        val eventId: Long?,
+        /** How many events of the pass were handled before the failure. */
+        val handledBefore: Int,
+        val error: Exception,
+    ) : Exception(error)
+
+    /** Counts the failure against its event, or logs it when no event was at fault. Returns the failure, or null. */
+    private suspend fun BatchFailed.record(): BatchFailed? {
+        if (eventId == null) {
+            log.error("Delivering an outbox batch failed", error)
+            return null
+        }
+        giveUpOrRetry(eventId, error)
+        return this
     }
 
     private suspend fun giveUpOrRetry(
@@ -132,7 +175,7 @@ class OutboxRelay(
             log.warn("Delivering outbox event {} failed (attempt {} of {}); it is retried", id, attempts, MAX_ATTEMPTS, cause)
         } else {
             log.error("Delivering outbox event {} failed {} times; it is skipped", id, attempts, cause)
-            transactions.inTransaction { markPublished(id) }
+            transactions.inTransaction { markPublished(listOf(id)) }
             failures.remove(id)
         }
     }
@@ -147,8 +190,8 @@ class OutboxRelay(
             rows.next() && rows.getBoolean(1)
         } ?: false
 
-    private fun markPublished(id: Long) {
-        OutboxTable.update({ OutboxTable.id eq id }) { it[publishedAt] = CurrentTimestamp }
+    private fun markPublished(ids: List<Long>) {
+        OutboxTable.update({ OutboxTable.id inList ids }) { it[publishedAt] = CurrentTimestamp }
     }
 
     private companion object {

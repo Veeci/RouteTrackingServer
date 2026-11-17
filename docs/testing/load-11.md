@@ -96,3 +96,27 @@ Ideas for a follow-up, not tried here:
 - Raise `db.maxPoolSize` and the Postgres `max_connections` together.
 - Deliver `FixesAccepted` in batches per relay pass, so that one transaction covers many events.
 - Repeat the run on hardware where the load generator does not share CPUs with the server.
+
+### 2026-11-17, branch `perf/relay-batches` (on main `3ffbf99`): 1 000 drivers pass
+
+Same Mac mini, same OrbStack limits (10 CPUs, 8 GB), no OSM extract. The change: the outbox relay delivers up to
+100 events in one transaction, on its own pool of 2 connections (`db.relayPoolSize`). The main pool is 20
+connections (`db.maxPoolSize`), and a coroutine waits for a free connection by suspending, not by blocking a thread.
+
+| Run | Delta gap (p50, p95, max) | Cadence | Ack latency (p50, p95, max) | Batches acked | Failed connections | Outbox behind at the end |
+|---|---|---|---|---|---|---|
+| 1 000 drivers, 20 dashboards, 5 min | 2.01 s, 2.05 s, 2.44 s | pass | 10 ms, 145 ms, 1 203 ms | 58 172 of about 60 000 | 0 | 0 events |
+
+**TC-11-LOAD-01 passes at 1 000 drivers on this machine**, and so does the ingest SLO (ack p95 under 250 ms).
+
+- **Relay.** It delivered about 200 events a second (`rts_relay_delivered_total`, both instances together), as many
+  as arrived. The backlog stayed between 0 and 88 events in samples every 30 s, against 38 268 at the end of the
+  first run.
+- **Pools.** In every sample the main pool had at most 1 connection in use and none waiting, and the relay pool none
+  waiting. Postgres had 45 connections, 43 of them idle. A thread dump at 2.5 min showed no thread waiting inside
+  Hikari.
+- **Outbox query.** `EXPLAIN (ANALYZE, BUFFERS)` of the relay's read took 0.1 ms on the partial index
+  `outbox_unpublished`, with 10 622 dead rows in the table: dead index entries are not a cost at this rate.
+
+The first run was mostly the cost of one transaction per event, with each one waiting for a connection of a full
+pool. Batch-aware handlers (one fleet upsert per batch) are not needed for this load.

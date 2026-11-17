@@ -39,7 +39,7 @@ groups:
           runbook: "docs/ops/runbook.md#an-instance-is-down"
 
       - alert: DatabasePoolNearlyFull
-        expr: max(hikaricp_connections_active / hikaricp_connections_max) > 0.8
+        expr: max(hikaricp_connections_active{pool="rts-db"} / hikaricp_connections_max{pool="rts-db"}) > 0.8
         for: 5m
         labels: { severity: warn }
         annotations:
