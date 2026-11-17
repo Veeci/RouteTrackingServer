@@ -114,11 +114,29 @@ class GoldenFilesTest {
         private val at = Instant.parse("2026-09-30T02:15:04.120Z")
 
         @JvmStatic
-        fun samples(): List<Sample<*>> = driverSamples() + commandSamples() + guestSamples() + tripEventSamples() + routeSamples()
+        fun samples(): List<Sample<*>> =
+            helloSamples() + driverSamples() + commandSamples() + guestSamples() + tripEventSamples() + routeSamples()
+
+        /** The plain hello, and the one with the device block (phase 9). */
+        private fun helloSamples(): List<Sample<*>> =
+            listOf(
+                Sample("hello", Hello(1, "dev-sim-1", SESSION, lastAckedSeq = 41, sdkVersion = "0.9.0"), ClientMessage.serializer()),
+                Sample(
+                    "hello",
+                    Hello(
+                        1,
+                        "dev-sim-1",
+                        SESSION,
+                        sdkVersion = "0.10.0",
+                        device = DeviceDto("Google", "Pixel 7", 35, "LineageOS 22.1", hasGms = false),
+                    ),
+                    ClientMessage.serializer(),
+                    file = "hello_device",
+                ),
+            )
 
         private fun driverSamples(): List<Sample<*>> =
             listOf(
-                Sample("hello", Hello(1, "dev-sim-1", SESSION, lastAckedSeq = 41, sdkVersion = "0.9.0"), ClientMessage.serializer()),
                 Sample(
                     "fix_batch",
                     FixBatch(

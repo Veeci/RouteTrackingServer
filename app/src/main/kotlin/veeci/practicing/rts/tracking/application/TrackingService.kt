@@ -3,6 +3,7 @@ package veeci.practicing.rts.tracking.application
 import veeci.practicing.rts.platform.db.TransactionRunner
 import veeci.practicing.rts.shared.DomainException
 import veeci.practicing.rts.shared.UserId
+import veeci.practicing.rts.tracking.application.port.out.DeviceStatusSampleRepository
 import veeci.practicing.rts.tracking.application.port.out.FixBatchRepository
 import veeci.practicing.rts.tracking.application.port.out.InsertResult
 import veeci.practicing.rts.tracking.application.port.out.NewBatch
@@ -11,6 +12,8 @@ import veeci.practicing.rts.tracking.application.port.out.TrackingEventOutbox
 import veeci.practicing.rts.tracking.application.port.out.TrackingSessionRepository
 import veeci.practicing.rts.tracking.domain.AcceptedFix
 import veeci.practicing.rts.tracking.domain.DeviceId
+import veeci.practicing.rts.tracking.domain.DeviceInfo
+import veeci.practicing.rts.tracking.domain.DeviceStatusSample
 import veeci.practicing.rts.tracking.domain.FixPipeline
 import veeci.practicing.rts.tracking.domain.FixReading
 import veeci.practicing.rts.tracking.domain.PipelineContext
@@ -30,6 +33,7 @@ data class OpenSession(
     val sdkVersion: String,
     /** The authenticated driver who sends the fixes. */
     val driverId: UserId,
+    val device: DeviceInfo? = null,
 )
 
 data class SessionOpened(
@@ -72,6 +76,7 @@ class TrackingService(
     private val pipeline: FixPipeline,
     private val clock: Clock,
     private val maxFixesPerBatch: Int,
+    private val statusSamples: DeviceStatusSampleRepository,
 ) {
     /** Starts a session, or continues it after a reconnect. Says which seq the client sends next. */
     suspend fun openSession(command: OpenSession): SessionOpened =
@@ -80,13 +85,14 @@ class TrackingService(
             val session =
                 sessions
                     .find(command.sessionId)
-                    ?.apply { reconnect(command.deviceId, command.driverId, command.sdkVersion, now) }
+                    ?.apply { reconnect(command.deviceId, command.driverId, command.sdkVersion, now, command.device) }
                     ?: TrackingSession(
                         command.sessionId,
                         command.deviceId,
                         command.sdkVersion,
                         startedAt = now,
                         driverId = command.driverId,
+                        device = command.device,
                     )
             sessions.save(session)
             SessionOpened(session.id, session.resumeFrom(batches.highestSeq(session.id)))
@@ -102,8 +108,9 @@ class TrackingService(
     }
 
     /**
-     * Records that the device is alive (the session's last-seen time moves to now, which is what presence reads)
-     * and announces its battery and motion to other contexts. Nothing else is stored (telemetry, phase 9).
+     * Records that the device is alive (the session's last-seen time moves to now, which is what presence reads),
+     * stores the sample for session health (phase 9), and announces its battery and motion to other contexts. All
+     * three are in one transaction, so a stored sample always has its event and the other way round.
      */
     suspend fun reportStatus(command: ReportStatus) {
         transactions.inTransaction {
@@ -112,6 +119,7 @@ class TrackingService(
                     ?: throw DomainException(TrackingError.SESSION_NOT_FOUND, "Send hello before device_status")
             session.touch(now())
             sessions.save(session)
+            statusSamples.insert(DeviceStatusSample(session.id, command.at, command.battery, command.motion))
             outbox.add(
                 DeviceStatusReported(
                     session.id.value,

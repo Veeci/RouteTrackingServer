@@ -26,6 +26,15 @@ class ClientMessageTest {
     }
 
     @Test
+    fun `TC-9-PRO-01 a hello without a device block decodes with no device, and a partial block keeps what it has`() {
+        val old = """{"type":"hello","protocolVersion":1,"deviceId":"d","sessionId":"s","sdkVersion":"0.9.0"}"""
+        val partial = """{"type":"hello","protocolVersion":1,"deviceId":"d","sessionId":"s","sdkVersion":"0.10.0","device":{"model":"X"}}"""
+
+        (decode(old) as Hello).device shouldBe null
+        (decode(partial) as Hello).device shouldBe DeviceDto(model = "X")
+    }
+
+    @Test
     fun `TC-2-PRO-04 a provider this server does not know decodes to UNKNOWN`() {
         val fix = minimalFix.replace("}", ""","provider":"HMS_FUSED"}""")
 

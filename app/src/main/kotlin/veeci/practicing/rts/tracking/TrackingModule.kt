@@ -9,6 +9,7 @@ import veeci.practicing.rts.protocol.LimitsDto
 import veeci.practicing.rts.shared.geo.Meters
 import veeci.practicing.rts.tracking.adapter.inbound.ws.ConnectedDrivers
 import veeci.practicing.rts.tracking.adapter.inbound.ws.DriverSocket
+import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedDeviceStatusSampleRepository
 import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedFixBatchRepository
 import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedTrackHistoryRepository
 import veeci.practicing.rts.tracking.adapter.out.persistence.ExposedTrackingEventOutbox
@@ -19,6 +20,7 @@ import veeci.practicing.rts.tracking.application.TrackingService
 import veeci.practicing.rts.tracking.application.api.DriverLink
 import veeci.practicing.rts.tracking.application.api.DriverPresence
 import veeci.practicing.rts.tracking.application.api.DriverTrack
+import veeci.practicing.rts.tracking.application.port.out.DeviceStatusSampleRepository
 import veeci.practicing.rts.tracking.application.port.out.FixBatchRepository
 import veeci.practicing.rts.tracking.application.port.out.TrackingEventOutbox
 import veeci.practicing.rts.tracking.application.port.out.TrackingSessionRepository
@@ -45,7 +47,8 @@ fun trackingModule(
                 ),
             )
         }
-        single { TrackingService(get(), get(), get(), get(), get(), get(), config.maxFixesPerBatch) }
+        single<DeviceStatusSampleRepository> { ExposedDeviceStatusSampleRepository() }
+        single { TrackingService(get(), get(), get(), get(), get(), get(), config.maxFixesPerBatch, get()) }
         // Presence, read by the trip context's stale-driver job.
         single<DriverPresence> { TrackingPresence(get(), get()) }
         // Where a driver drove, read by the trip context for summaries and history (phase 8).

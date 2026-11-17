@@ -4,6 +4,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import veeci.practicing.rts.platform.db.TransactionRunner
 import veeci.practicing.rts.shared.UserId
+import veeci.practicing.rts.tracking.application.port.out.DeviceStatusSampleRepository
 import veeci.practicing.rts.tracking.application.port.out.FixBatchRepository
 import veeci.practicing.rts.tracking.application.port.out.InsertResult
 import veeci.practicing.rts.tracking.application.port.out.NewBatch
@@ -12,6 +13,8 @@ import veeci.practicing.rts.tracking.application.port.out.TrackingEventOutbox
 import veeci.practicing.rts.tracking.application.port.out.TrackingSessionRepository
 import veeci.practicing.rts.tracking.domain.AcceptedFix
 import veeci.practicing.rts.tracking.domain.DeviceId
+import veeci.practicing.rts.tracking.domain.DeviceInfo
+import veeci.practicing.rts.tracking.domain.DeviceStatusSample
 import veeci.practicing.rts.tracking.domain.SessionId
 import veeci.practicing.rts.tracking.domain.TrackingSession
 import veeci.practicing.rts.tracking.domain.event.DeviceStatusReported
@@ -38,6 +41,7 @@ class InMemoryTrackingSessionRepository : TrackingSessionRepository {
         val startedAt: Instant,
         val lastSeenAt: Instant,
         val driverId: UserId?,
+        val device: DeviceInfo?,
     )
 
     private val mutex = Mutex()
@@ -45,13 +49,21 @@ class InMemoryTrackingSessionRepository : TrackingSessionRepository {
 
     override suspend fun find(id: SessionId): TrackingSession? =
         mutex.withLock {
-            rows[id]?.let { TrackingSession(it.id, it.deviceId, it.sdkVersion, it.startedAt, it.lastSeenAt, it.driverId) }
+            rows[id]?.let { TrackingSession(it.id, it.deviceId, it.sdkVersion, it.startedAt, it.lastSeenAt, it.driverId, it.device) }
         }
 
     override suspend fun save(session: TrackingSession) =
         mutex.withLock {
             rows[session.id] =
-                Row(session.id, session.deviceId, session.sdkVersion, session.startedAt, session.lastSeenAt, session.driverId)
+                Row(
+                    session.id,
+                    session.deviceId,
+                    session.sdkVersion,
+                    session.startedAt,
+                    session.lastSeenAt,
+                    session.driverId,
+                    session.device,
+                )
         }
 
     override suspend fun lastSeenByDriver(drivers: Collection<UserId>): Map<UserId, Instant> =
@@ -112,4 +124,18 @@ class InMemoryTrackingEventOutbox : TrackingEventOutbox {
     val statuses: List<DeviceStatusReported> get() = statusesAdded.toList()
 
     override suspend fun add(event: DeviceStatusReported) = mutex.withLock { statusesAdded += event }
+}
+
+class InMemoryDeviceStatusSampleRepository : DeviceStatusSampleRepository {
+    private val mutex = Mutex()
+    private val rows = mutableMapOf<Pair<SessionId, Instant>, DeviceStatusSample>()
+
+    override suspend fun insert(sample: DeviceStatusSample) =
+        mutex.withLock {
+            rows.putIfAbsent(sample.sessionId to sample.at, sample)
+            Unit
+        }
+
+    override suspend fun forSession(sessionId: SessionId): List<DeviceStatusSample> =
+        mutex.withLock { rows.values.filter { it.sessionId == sessionId }.sortedBy { it.at } }
 }

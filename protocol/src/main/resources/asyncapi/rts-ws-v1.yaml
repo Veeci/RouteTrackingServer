@@ -510,6 +510,36 @@ components:
           description: Highest seq that the client received an ack for. Absent before the first ack. Informational only.
         sdkVersion:
           type: string
+        device:
+          $ref: '#/components/schemas/Device'
+
+    Device:
+      type: object
+      additionalProperties: false
+      description: >-
+        The phone the session runs on (phase 9), for comparing location stacks across devices and ROMs. Optional,
+        and so is every field: an older SDK sends no block. The first hello of a session sets it; a later hello
+        with a block replaces it.
+      properties:
+        manufacturer:
+          type: string
+          maxLength: 64
+          description: Build.MANUFACTURER, for example Google.
+        model:
+          type: string
+          maxLength: 64
+          description: Build.MODEL, for example Pixel 7.
+        androidSdk:
+          type: integer
+          minimum: 1
+          description: Build.VERSION.SDK_INT, the Android API level.
+        rom:
+          type: string
+          maxLength: 64
+          description: The ROM's name and version when it is not the stock one, for example LineageOS 22.1.
+        hasGms:
+          type: boolean
+          description: Whether Google Play services is installed and usable.
 
     Command:
       type: object
