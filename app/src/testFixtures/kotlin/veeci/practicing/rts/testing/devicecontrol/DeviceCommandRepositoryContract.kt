@@ -52,6 +52,36 @@ abstract class DeviceCommandRepositoryContract {
         }
 
     @Test
+    fun `applied constraints are the ones acked in the window, plus the last one before it`() =
+        runTest {
+            fun constraint(ms: Long) = command(CommandPayload.SetConstraint(TrackingAccuracy.HIGH, ms, "test"))
+
+            suspend fun applied(
+                command: DeviceCommand,
+                at: Instant,
+                applied: Boolean = true,
+            ) = command.also {
+                tx { commands.insert(it) }
+                it.acknowledge(applied, at)
+                tx { commands.update(it) }
+            }
+            applied(constraint(1), t0 - 2.minutes)
+            val inEffect = applied(constraint(2), t0 - 1.minutes)
+            val during = applied(constraint(3), t0 + 1.minutes)
+            applied(constraint(4), t0 + 2.minutes, applied = false) // rejected
+            applied(constraint(5), t0 + 10.minutes) // after the window
+            applied(command(), t0 + 3.minutes) // not a constraint
+            tx { commands.insert(constraint(6)) } // never acked
+            tx {
+                commands.insert(
+                    command(CommandPayload.SetConstraint(TrackingAccuracy.LOW, 7, "test"), driver = UserId(UUID.randomUUID())),
+                )
+            }
+
+            tx { commands.appliedConstraints(driver, t0, t0 + 5.minutes) }.map { it.id } shouldBe listOf(inEffect.id, during.id)
+        }
+
+    @Test
     fun `an update saves the status and its time`() =
         runTest {
             val command = command().also { tx { commands.insert(it) } }

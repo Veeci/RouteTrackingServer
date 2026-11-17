@@ -5,6 +5,8 @@ import kotlinx.coroutines.sync.withLock
 import veeci.practicing.rts.devicecontrol.application.port.out.CommandEventOutbox
 import veeci.practicing.rts.devicecontrol.application.port.out.DeviceCommandRepository
 import veeci.practicing.rts.devicecontrol.domain.CommandId
+import veeci.practicing.rts.devicecontrol.domain.CommandPayload
+import veeci.practicing.rts.devicecontrol.domain.CommandStatus
 import veeci.practicing.rts.devicecontrol.domain.DeviceCommand
 import veeci.practicing.rts.devicecontrol.domain.event.CommandIssued
 import veeci.practicing.rts.shared.UserId
@@ -51,6 +53,20 @@ class InMemoryDeviceCommandRepository : DeviceCommandRepository {
                 .filter { it.status.isOpen && it.expiresAt <= now }
                 .sortedBy { it.expiresAt }
                 .take(limit)
+                .map { it.copy() }
+        }
+
+    override suspend fun appliedConstraints(
+        driver: UserId,
+        from: Instant,
+        to: Instant,
+    ): List<DeviceCommand> =
+        mutex.withLock {
+            val applied =
+                rows.values
+                    .filter { it.driverId == driver && it.status == CommandStatus.APPLIED && it.payload is CommandPayload.SetConstraint }
+                    .sortedWith(compareBy({ it.updatedAt }, { it.id.value.toString() }))
+            (listOfNotNull(applied.lastOrNull { it.updatedAt < from }) + applied.filter { it.updatedAt >= from && it.updatedAt < to })
                 .map { it.copy() }
         }
 

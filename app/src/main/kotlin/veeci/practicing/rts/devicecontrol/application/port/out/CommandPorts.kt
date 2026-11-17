@@ -24,6 +24,16 @@ interface DeviceCommandRepository {
         limit: Int,
     ): List<DeviceCommand>
 
+    /**
+     * The driver's APPLIED SET_CONSTRAINT commands whose update time (the ack) is in [from, to), oldest first, plus
+     * the last one before [from].
+     */
+    suspend fun appliedConstraints(
+        driver: UserId,
+        from: Instant,
+        to: Instant,
+    ): List<DeviceCommand>
+
     /** Up to [limit] PENDING or SENT commands whose expiry time is at or before [now]. */
     suspend fun findDue(
         now: Instant,

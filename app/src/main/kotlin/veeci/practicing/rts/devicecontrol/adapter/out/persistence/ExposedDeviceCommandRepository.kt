@@ -9,8 +9,10 @@ import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.greaterEq
 import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.core.java.javaUUID
+import org.jetbrains.exposed.v1.core.less
 import org.jetbrains.exposed.v1.core.lessEq
 import org.jetbrains.exposed.v1.datetime.timestamp
 import org.jetbrains.exposed.v1.jdbc.insert
@@ -100,6 +102,31 @@ class ExposedDeviceCommandRepository : DeviceCommandRepository {
             .limit(limit)
             .map { it.toCommand() }
 
+    override suspend fun appliedConstraints(
+        driver: UserId,
+        from: Instant,
+        to: Instant,
+    ): List<DeviceCommand> {
+        val applied =
+            (DeviceCommandsTable.driverId eq driver.value) and
+                (DeviceCommandsTable.status eq CommandStatus.APPLIED.name) and
+                (DeviceCommandsTable.kind eq SET_CONSTRAINT)
+        val before =
+            DeviceCommandsTable
+                .selectAll()
+                .where { applied and (DeviceCommandsTable.updatedAt less from) }
+                .orderBy(DeviceCommandsTable.updatedAt to SortOrder.DESC, DeviceCommandsTable.id to SortOrder.DESC)
+                .limit(1)
+                .map { it.toCommand() }
+        val during =
+            DeviceCommandsTable
+                .selectAll()
+                .where { applied and (DeviceCommandsTable.updatedAt greaterEq from) and (DeviceCommandsTable.updatedAt less to) }
+                .orderBy(DeviceCommandsTable.updatedAt to SortOrder.ASC, DeviceCommandsTable.id to SortOrder.ASC)
+                .map { it.toCommand() }
+        return before + during
+    }
+
     private fun ResultRow.toCommand() =
         DeviceCommand.restore(
             CommandId(this[DeviceCommandsTable.id]),
@@ -169,5 +196,6 @@ class ExposedDeviceCommandRepository : DeviceCommandRepository {
 
     private companion object {
         val OPEN = listOf(CommandStatus.PENDING.name, CommandStatus.SENT.name)
+        const val SET_CONSTRAINT = "SET_CONSTRAINT"
     }
 }

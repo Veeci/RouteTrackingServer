@@ -18,6 +18,7 @@ data class AppConfig(
     val events: EventsConfig,
     val commands: CommandsConfig = CommandsConfig(),
     val routing: RoutingConfig = RoutingConfig(),
+    val telemetry: TelemetryConfig = TelemetryConfig(),
 )
 
 data class AppInfo(
@@ -88,6 +89,18 @@ data class CommandsConfig(
     val expireAfter: Duration = 10.minutes,
     /** How often the expiry job looks for overdue commands. */
     val expiryCheckEvery: Duration = 30.seconds,
+)
+
+/** Session health (phase 9). */
+data class TelemetryConfig(
+    /** How often the health job looks for idle sessions. */
+    val computeEvery: Duration = 5.minutes,
+    /** A session with no message for this long is computed. A session that resumes is computed again later. */
+    val idleAfter: Duration = 10.minutes,
+    /** At most this many sessions per run; a backlog drains over the next runs. */
+    val batchSize: Int = 100,
+    /** The fix interval a device keeps when no applied SET_CONSTRAINT says otherwise. */
+    val defaultInterval: Duration = 5.seconds,
 )
 
 /** Road routing (phase 6). */

@@ -11,6 +11,8 @@ import veeci.practicing.rts.devicecontrol.adapter.out.persistence.ExposedDeviceC
 import veeci.practicing.rts.devicecontrol.application.CommandDelivery
 import veeci.practicing.rts.devicecontrol.application.CommandPolicies
 import veeci.practicing.rts.devicecontrol.application.CommandService
+import veeci.practicing.rts.devicecontrol.application.ConstraintHistory
+import veeci.practicing.rts.devicecontrol.application.api.AppliedConstraints
 import veeci.practicing.rts.devicecontrol.application.api.GuestWatching
 import veeci.practicing.rts.devicecontrol.application.port.out.CommandEventOutbox
 import veeci.practicing.rts.devicecontrol.application.port.out.DeviceCommandRepository
@@ -31,4 +33,6 @@ fun deviceControlModule(config: CommandsConfig): Module =
         // The server's own commands: guest watching (called by live) and trip stages (outbox).
         single { CommandPolicies(get(), get(), get(), get()) } bind GuestWatching::class
         single { TripPolicyListener(get()) } bind OutboxEventHandler::class
+        // Which fix interval each device kept, read by the telemetry context (phase 9).
+        single<AppliedConstraints> { ConstraintHistory(get(), get()) }
     }
