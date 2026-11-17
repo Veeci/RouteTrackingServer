@@ -13,12 +13,18 @@ the AsyncAPI schema accepts the file. The Kotlin classes, error codes (`WsErrorC
 |---|---|---|---|
 | `/ws/v1/driver` | Driver SDK | `Authorization: Bearer <token>` (header) or `?token=` (fallback for clients that can't set headers) | Upload fixes and device status; receive ACKs and commands |
 | `/ws/v1/guest` | Guest app | same | Subscribe to one trip; receive driver position, progress and events |
+| `/ws/v1/admin/fleet` | Admin dashboard (browser) | `?ticket=` only, from `POST /api/v1/admin/ws-tickets` (phase 11c) | Watch the drivers in a map area: a snapshot, then a delta or cluster counts every 2 s |
 
 Since phase 3 both endpoints need an access token (a JWT; in dev and test, get one from
 `POST /api/v1/dev/tokens`). The server checks the token on the upgrade request: without a valid token the
 upgrade fails with HTTP 401 and no socket opens. A valid token with the wrong role (a GUEST on the driver
 endpoint, a DRIVER on the guest endpoint) opens the socket and closes it at once with 4403. The driver is
 identified by the token; `deviceId` in `hello` only names the device.
+
+The admin fleet socket takes no token. A browser cannot set headers on a WebSocket, and a token in a URL ends up in
+proxy and access logs. The dashboard trades its token for a ticket over REST instead. A ticket is valid 30 s and works
+once. Without a valid ticket the upgrade fails with HTTP 401. A ticket of a GUEST or DRIVER closes the socket with
+4403.
 
 ## Envelope
 
@@ -253,6 +259,7 @@ the `Error` schema of the AsyncAPI document.
 | 1008 | Policy violation (auth failed mid-session) | Refresh token, reconnect |
 | 1009 | Frame too large | Split batches; reconnect |
 | 1011 | Internal error | Reconnect with backoff |
+| 1013 | Fleet socket only: the client did not take a message within 5 s (phase 11c) | Reconnect with a new ticket |
 | 4400 | Unsupported protocol version | Stop, report |
 | 4401 | Handshake timeout / missing hello | Reconnect |
 | 4403 | The token's role may not use this endpoint, or the driver was disabled by an admin (phase 11, reason `Driver disabled`) (`WsCloseCodes.FORBIDDEN_ROLE`) | Stop |

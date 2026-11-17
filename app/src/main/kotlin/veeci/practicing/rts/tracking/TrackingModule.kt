@@ -72,7 +72,7 @@ fun trackingModule(
         // Raw location data past retention is deleted (phase 10).
         single<RetentionRepository> { ExposedRetentionRepository() }
         single { LocationRetention(get(), get(), get(), retention) }
-        single { RetentionJob(get(), get(), retention.checkEvery) } bind ScheduledJob::class
+        single { RetentionJob(get(), get(), get(), retention.checkEvery) } bind ScheduledJob::class
         // One session's raw telemetry, read by the telemetry context for session health (phase 9).
         single<SessionTelemetry> { TrackingTelemetry(get(), get(), ExposedSessionTelemetryRepository(), get()) }
         // Recent sessions and each driver's latest position and status, read by the fleet context (phase 11).

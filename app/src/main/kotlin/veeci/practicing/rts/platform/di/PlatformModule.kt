@@ -28,6 +28,7 @@ import veeci.practicing.rts.platform.observability.HealthRegistry
 import veeci.practicing.rts.platform.redis.RedisConnections
 import veeci.practicing.rts.platform.redis.RedisHealthIndicator
 import veeci.practicing.rts.platform.security.AccessTokens
+import veeci.practicing.rts.platform.security.WsTickets
 import veeci.practicing.rts.platform.ws.WsSessionRegistry
 import veeci.practicing.rts.platform.ws.WsSessionRunner
 import java.time.Clock
@@ -72,6 +73,8 @@ fun platformModule(
 
         // Built at startup, so a missing or short JWT_SECRET stops the app before it serves anything.
         single(createdAtStart = true) { AccessTokens(config.jwt, get()) }
+        // Single-use tickets for the admin fleet socket (phase 11c).
+        single { WsTickets(get(), get()) }
 
         single { WsSessionRegistry(get()) }
         single { WsSessionRunner(config.ws, get()) }

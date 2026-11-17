@@ -19,8 +19,10 @@ fun Route.tripSummaryRoutes(service: TripSummaryService) {
     get("/api/v1/trips/{id}/summary") {
         call.respond(TripSummaryResponse.of(service.get(call.tripId(), call.actor())))
     }
+}
 
-    // An admin computes a summary again; the answer is the new summary.
+/** An admin computes a summary again; the answer is the new summary. Mount in the admin area, inside `authenticate`. */
+fun Route.adminTripSummaryRoutes(service: TripSummaryService) {
     post("/api/v1/admin/trips/{id}/summary") {
         call.respond(TripSummaryResponse.of(service.recompute(call.tripId(), call.actor())))
     }

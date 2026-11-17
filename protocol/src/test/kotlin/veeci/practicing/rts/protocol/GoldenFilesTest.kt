@@ -54,8 +54,14 @@ class GoldenFilesTest {
     @Test
     fun `every message type has a sample, a golden file and an AsyncAPI message`() {
         val inCode =
-            listOf(ClientMessage.serializer(), ServerMessage.serializer(), GuestClientMessage.serializer(), GuestServerMessage.serializer())
-                .flatMap { it.descriptor.subclassNames() }
+            listOf(
+                ClientMessage.serializer(),
+                ServerMessage.serializer(),
+                GuestClientMessage.serializer(),
+                GuestServerMessage.serializer(),
+                FleetClientMessage.serializer(),
+                FleetServerMessage.serializer(),
+            ).flatMap { it.descriptor.subclassNames() }
                 .toSet()
         val goldenFiles = File(javaClass.getResource("/golden")!!.toURI()).list()!!.map { it.removeSuffix(".json") }.toSet()
 
@@ -115,7 +121,7 @@ class GoldenFilesTest {
 
         @JvmStatic
         fun samples(): List<Sample<*>> =
-            helloSamples() + driverSamples() + commandSamples() + guestSamples() + tripEventSamples() + routeSamples()
+            helloSamples() + driverSamples() + commandSamples() + guestSamples() + tripEventSamples() + routeSamples() + fleetSamples()
 
         /** The plain hello, and the one with the device block (phase 9). */
         private fun helloSamples(): List<Sample<*>> =
@@ -303,6 +309,42 @@ class GoldenFilesTest {
                     file = "trip_event_off_route",
                 ),
             )
+
+        /** The admin fleet socket (phase 11c): a marker with every field and one with only the required ones. */
+        private fun fleetSamples(): List<Sample<*>> {
+            val onTrip =
+                DriverMarker(
+                    "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+                    21.0285,
+                    105.8542,
+                    bearingDeg = 87.0,
+                    online = true,
+                    tripStatus = "IN_PROGRESS",
+                    batteryPct = 64,
+                    lastSeenAt = at,
+                )
+            val offline = DriverMarker(SESSION, 21.0301, 105.8411, online = false, lastSeenAt = Instant.parse("2026-09-30T02:10:00Z"))
+            val moved = onTrip.copy(lat = 21.0291, lng = 105.855, bearingDeg = 92.5, lastSeenAt = at + 2.seconds)
+            val tick = Instant.parse("2026-09-30T02:15:07Z")
+            return listOf(
+                Sample(
+                    "fleet_subscribe",
+                    FleetSubscribe(listOf(105.78, 20.99, 105.88, 21.06), FleetFilters(online = true)),
+                    FleetClientMessage.serializer(),
+                ),
+                Sample(
+                    "fleet_snapshot",
+                    FleetSnapshot(listOf(onTrip, offline), Instant.parse("2026-09-30T02:15:05Z")),
+                    FleetServerMessage.serializer(),
+                ),
+                Sample("fleet_delta", FleetDelta(listOf(moved), listOf(SESSION), tick), FleetServerMessage.serializer()),
+                Sample(
+                    "fleet_cluster",
+                    FleetCluster(listOf(FleetCell(21.0212, 105.8433, 3120), FleetCell(21.0457, 105.8018, 2204)), 0.025, 5324, tick),
+                    FleetServerMessage.serializer(),
+                ),
+            )
+        }
 
         /** `route_updated` (phase 7): the guest's frame, and the same frame decoded with the driver's family. */
         private fun routeSamples(): List<Sample<*>> {

@@ -1,0 +1,17 @@
+{
+  "type": "fleet_delta",
+  "upserts": [
+    {
+      "driverId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "lat": 21.0291,
+      "lng": 105.855,
+      "bearingDeg": 92.5,
+      "online": true,
+      "tripStatus": "IN_PROGRESS",
+      "batteryPct": 64,
+      "lastSeenAt": "2026-09-30T02:15:06.120Z"
+    }
+  ],
+  "removes": ["0f8fad5b-d9cb-469f-a165-70867728950e"],
+  "at": "2026-09-30T02:15:07Z"
+}

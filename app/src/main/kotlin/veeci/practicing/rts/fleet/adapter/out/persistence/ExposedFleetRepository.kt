@@ -1,17 +1,26 @@
 package veeci.practicing.rts.fleet.adapter.out.persistence
 
+import org.jetbrains.exposed.v1.core.CustomFunction
+import org.jetbrains.exposed.v1.core.DoubleColumnType
 import org.jetbrains.exposed.v1.core.Op
 import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.core.and
+import org.jetbrains.exposed.v1.core.avg
+import org.jetbrains.exposed.v1.core.between
+import org.jetbrains.exposed.v1.core.count
+import org.jetbrains.exposed.v1.core.div
+import org.jetbrains.exposed.v1.core.doubleLiteral
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greater
 import org.jetbrains.exposed.v1.core.isNotNull
 import org.jetbrains.exposed.v1.core.java.javaUUID
+import org.jetbrains.exposed.v1.core.or
 import org.jetbrains.exposed.v1.core.statements.UpdateBuilder
 import org.jetbrains.exposed.v1.datetime.timestamp
 import org.jetbrains.exposed.v1.jdbc.batchInsert
+import org.jetbrains.exposed.v1.jdbc.select
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.TransactionManager
 import org.jetbrains.exposed.v1.jdbc.upsert
@@ -22,6 +31,7 @@ import veeci.practicing.rts.fleet.domain.FleetCounts
 import veeci.practicing.rts.fleet.domain.FleetCursor
 import veeci.practicing.rts.fleet.domain.FleetDriver
 import veeci.practicing.rts.fleet.domain.FleetFilter
+import veeci.practicing.rts.fleet.domain.MapCell
 import veeci.practicing.rts.fleet.domain.TripState
 import java.util.UUID
 import kotlin.time.Instant
@@ -97,6 +107,36 @@ class ExposedFleetRepository : FleetRepository {
             disabled = count(table.enabled eq false),
         )
 
+    // Two indexes answer it together (a BitmapOr): fleet_drivers_updated and fleet_drivers_last_seen.
+    override suspend fun changedSince(
+        since: Instant,
+        staleFrom: Instant,
+        staleTo: Instant,
+    ): List<FleetDriver> =
+        table
+            .selectAll()
+            .where { (table.updatedAt greater since) or table.lastSeenAt.between(staleFrom, staleTo) }
+            .map { it.toDriver() }
+
+    // The cell size is a literal, not a bind parameter: Postgres matches a GROUP BY expression with the SELECT one by
+    // its text, and two parameters ($1, $2) never match even when they hold the same value.
+    override suspend fun cells(
+        filter: FleetFilter,
+        onlineSince: Instant,
+        cellDeg: Double,
+    ): List<MapCell> {
+        val latCell = CustomFunction<Double?>("FLOOR", DoubleColumnType(), table.lat / doubleLiteral(cellDeg))
+        val lngCell = CustomFunction<Double?>("FLOOR", DoubleColumnType(), table.lng / doubleLiteral(cellDeg))
+        val lat = table.lat.avg(MEAN_SCALE)
+        val lng = table.lng.avg(MEAN_SCALE)
+        val drivers = table.driverId.count()
+        return table
+            .select(latCell, lngCell, lat, lng, drivers)
+            .where { FleetConditions.matching(filter, onlineSince) }
+            .groupBy(latCell, lngCell)
+            .map { MapCell(checkNotNull(it[lat]).toDouble(), checkNotNull(it[lng]).toDouble(), it[drivers].toInt()) }
+    }
+
     override suspend fun clear() {
         TransactionManager.current().exec("TRUNCATE fleet_drivers")
     }
@@ -107,63 +147,71 @@ class ExposedFleetRepository : FleetRepository {
     ) {
         table.batchInsert(drivers, shouldReturnGeneratedValues = false) { fill(it, updatedAt) }
     }
-
-    private fun count(condition: Op<Boolean>): Int =
-        table
-            .selectAll()
-            .where { condition }
-            .count()
-            .toInt()
-
-    private fun UpdateBuilder<*>.fill(
-        driver: FleetDriver,
-        updatedAt: Instant,
-    ) {
-        this[table.driverId] = driver.driverId
-        this[table.displayName] = driver.displayName
-        this[table.enabled] = driver.enabled
-        this[table.lastSeenAt] = driver.lastSeenAt
-        this[table.lat] = driver.position?.lat
-        this[table.lng] = driver.position?.lng
-        this[table.speedMps] = driver.position?.speedMps?.toFloat()
-        this[table.bearingDeg] = driver.position?.bearingDeg?.toFloat()
-        this[table.positionAt] = driver.position?.at
-        this[table.batteryPct] = driver.device?.batteryPct?.toShort()
-        this[table.isCharging] = driver.device?.isCharging
-        this[table.motion] = driver.device?.motion
-        this[table.statusAt] = driver.device?.at
-        this[table.currentTripId] = driver.trip?.currentTripId
-        this[table.tripStatus] = driver.trip?.status
-        this[table.tripStatusAt] = driver.trip?.at
-        this[table.updatedAt] = updatedAt
-    }
-
-    private fun ResultRow.toDriver(): FleetDriver {
-        val positionAt = this[table.positionAt]
-        val statusAt = this[table.statusAt]
-        val tripAt = this[table.tripStatusAt]
-        return FleetDriver(
-            driverId = this[table.driverId],
-            displayName = this[table.displayName],
-            enabled = this[table.enabled],
-            position =
-                positionAt?.let {
-                    DriverPosition(
-                        checkNotNull(this[table.lat]),
-                        checkNotNull(this[table.lng]),
-                        this[table.speedMps]?.decimal(),
-                        this[table.bearingDeg]?.decimal(),
-                        it,
-                    )
-                },
-            device =
-                statusAt?.let {
-                    DeviceState(checkNotNull(this[table.batteryPct]).toInt(), checkNotNull(this[table.isCharging]), this[table.motion], it)
-                },
-            trip = tripAt?.let { TripState(this[table.currentTripId], checkNotNull(this[table.tripStatus]), it) },
-        )
-    }
 }
+
+private fun count(condition: Op<Boolean>): Int =
+    FleetDriversTable
+        .selectAll()
+        .where { condition }
+        .count()
+        .toInt()
+
+private fun UpdateBuilder<*>.fill(
+    driver: FleetDriver,
+    updatedAt: Instant,
+) {
+    this[FleetDriversTable.driverId] = driver.driverId
+    this[FleetDriversTable.displayName] = driver.displayName
+    this[FleetDriversTable.enabled] = driver.enabled
+    this[FleetDriversTable.lastSeenAt] = driver.lastSeenAt
+    this[FleetDriversTable.lat] = driver.position?.lat
+    this[FleetDriversTable.lng] = driver.position?.lng
+    this[FleetDriversTable.speedMps] = driver.position?.speedMps?.toFloat()
+    this[FleetDriversTable.bearingDeg] = driver.position?.bearingDeg?.toFloat()
+    this[FleetDriversTable.positionAt] = driver.position?.at
+    this[FleetDriversTable.batteryPct] = driver.device?.batteryPct?.toShort()
+    this[FleetDriversTable.isCharging] = driver.device?.isCharging
+    this[FleetDriversTable.motion] = driver.device?.motion
+    this[FleetDriversTable.statusAt] = driver.device?.at
+    this[FleetDriversTable.currentTripId] = driver.trip?.currentTripId
+    this[FleetDriversTable.tripStatus] = driver.trip?.status
+    this[FleetDriversTable.tripStatusAt] = driver.trip?.at
+    this[FleetDriversTable.updatedAt] = updatedAt
+}
+
+private fun ResultRow.toDriver(): FleetDriver {
+    val positionAt = this[FleetDriversTable.positionAt]
+    val statusAt = this[FleetDriversTable.statusAt]
+    val tripAt = this[FleetDriversTable.tripStatusAt]
+    return FleetDriver(
+        driverId = this[FleetDriversTable.driverId],
+        displayName = this[FleetDriversTable.displayName],
+        enabled = this[FleetDriversTable.enabled],
+        position =
+            positionAt?.let {
+                DriverPosition(
+                    checkNotNull(this[FleetDriversTable.lat]),
+                    checkNotNull(this[FleetDriversTable.lng]),
+                    this[FleetDriversTable.speedMps]?.decimal(),
+                    this[FleetDriversTable.bearingDeg]?.decimal(),
+                    it,
+                )
+            },
+        device =
+            statusAt?.let {
+                DeviceState(
+                    checkNotNull(this[FleetDriversTable.batteryPct]).toInt(),
+                    checkNotNull(this[FleetDriversTable.isCharging]),
+                    this[FleetDriversTable.motion],
+                    it,
+                )
+            },
+        trip = tripAt?.let { TripState(this[FleetDriversTable.currentTripId], checkNotNull(this[FleetDriversTable.tripStatus]), it) },
+    )
+}
+
+/** Decimals kept of a cell's mean position: 6 is about 0.1 m. */
+private const val MEAN_SCALE = 6
 
 /** 12.3f as 12.3, not 12.300000190734863: the shortest decimal that reads back as the same float. */
 private fun Float.decimal(): Double = toString().toDouble()

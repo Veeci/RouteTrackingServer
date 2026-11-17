@@ -142,11 +142,11 @@ The plan was written before phases 4 to 10. These replace the parts they name:
 
 - [x] T11.1 ~~PostGIS image everywhere; `V11__fleet.sql`; Exposed column type for `geography`.~~ Replaced by the corrections: `V20__fleet_drivers.sql` with plain `lat`, `lng`.
 - [x] T11.2 `fleet` context: projection handlers (idempotent by newer-wins, not coalesced), the driver query, rebuild command.
-- [ ] T11.3 `FleetPositionCache` + fleet socket with snapshot, conflated deltas, clustering fallback.
+- [x] T11.3 ~~`FleetPositionCache`~~ + fleet socket with snapshot, conflated deltas, clustering fallback. Replaced by the corrections: no cache, one tick per instance reads `fleet_drivers`.
 - [ ] T11.4 Roles `OPERATOR`, operator actor in trip aggregate; driver enable/disable in `identity`.
 - [ ] T11.5 Admin REST endpoints + OpenAPI; CSV export. Driver list, detail, overview, CSV and rebuild done in 11b; the trip list is 11d.
 - [x] T11.6 Audit log (table, writer used inside services, query endpoint, DB grants).
-- [ ] T11.7 CORS, WebSocket tickets, admin token expiry, security headers.
+- [x] T11.7 CORS, WebSocket tickets, admin token expiry, security headers. Token expiry in 11a, the rest in 11c.
 - [ ] T11.8 CI job generating and publishing the TypeScript client.
 - [ ] T11.9 Seed script: 500 simulated drivers across the city for dashboard development (`simulator fleet --drivers 500`).
 
@@ -249,6 +249,53 @@ The plan was written before phases 4 to 10. These replace the parts they name:
   `FleetRebuildIT` (TC-11-PRJ-05, drivers acting through the real services), `FleetApiIT` (TC-11-GEO-01, API-01,
   API-04, API-05, detail, audited rebuild), `FleetAuthorizationIT` (TC-11-SEC-01 for the five routes × five
   callers, with a completeness check). TC-11-PRJ-03 and GEO-02 no longer apply: there is no coalescing and no GiST.
+
+## As built (11c)
+
+- `POST /api/v1/admin/ws-tickets` (OPERATOR and ADMIN, others get 403 `TICKET_FORBIDDEN`) answers `{ticket, expiresAt}`:
+  32 random bytes in base64url, valid 30 s. `ws_tickets` (V21) stores only the SHA-256 with `user_id`, `role` and
+  `expires_at`. `WsTickets.redeem` is one `DELETE ... WHERE hash = ? AND expires_at > now RETURNING user_id, role`,
+  so a ticket works once on any instance: two instances racing for it cannot both delete the row. The retention job
+  (`RetentionJob`, lock 10_002) also deletes expired tickets and counts them as `rts_retention_deleted_total{table="ws_tickets"}`.
+- A second authentication provider, `AUTH_TICKET`, reads `?ticket=` and nothing else. Only the fleet socket uses it.
+  A missing, used or expired ticket is answered 401 before the upgrade, like a missing token on the other sockets. The
+  driver and guest sockets keep `AUTH_JWT` (header, or `?token=` as before).
+- `/ws/v1/admin/fleet` (contract: AsyncAPI channel `adminFleet`). A ticket of a role other than OPERATOR or ADMIN gets
+  close 4403. `fleet_subscribe {bbox, filters: {online, onTrip}}` replaces the subscription and answers
+  `fleet_snapshot`, read with the 11b driver query (`FleetRepository.page` with the bbox). An invalid bbox gets
+  `error` INVALID_MESSAGE and the socket stays open. `bearingDeg` in a `DriverMarker` is optional: a fix may have no
+  bearing.
+- `FleetLive` is a `BackgroundWorker`, one per instance. Every `fleet.tick` (2 s, 100 ms in tests) it runs one query
+  for all its sockets, `FleetRepository.changedSince`: rows with `updated_at` after the oldest subscriber's last
+  message minus 5 s, and rows with `last_seen_at` between that time minus the stale time and now minus the stale
+  time. The second part finds drivers who just went offline, which writes no row. Each subscriber filters the rows in
+  memory against its area, its filters and its sent map (`SentMarkers`, driver id to marker): a different marker is an
+  upsert, a driver that left the area or the filters is a remove, a duplicate is dropped. Every subscriber gets a
+  `fleet_delta` every tick, empty when nothing changed, so a dashboard can tell a quiet fleet from a dead socket.
+- Sends run in their own coroutines and the tick does not wait for them. A subscriber still busy with its last
+  message skips the tick (`Mutex.tryLock`). Its next query window starts at its own last message, so nothing is
+  lost. A send that takes over `fleet.sendTimeout` (5 s) closes the socket with 1013, or drops the connection when
+  even the close frame does not fit.
+- More than `fleet.maxMarkers` (5 000) drivers in the area: `fleet_cluster {cells, cellDeg, total, at}` every tick and
+  no deltas. Cells come from `GROUP BY floor(lat / cell), floor(lng / cell)` with the cell a sixteenth of the area's
+  longer side (at least 0.0001°), each with the mean position of its drivers. The cell size is a SQL literal, because
+  Postgres matches a `GROUP BY` expression with the `SELECT` one by its text and two bind parameters never match. When
+  the area holds few enough drivers again, a `fleet_snapshot` follows and deltas resume.
+- CORS: `adminArea` mounts every `/api/v1/admin` route under a route selector that matches the prefix without
+  consuming it, so the routes keep their full paths. Ktor's CORS plugin is installed there only when `ADMIN_ORIGINS`
+  (comma separated) is not empty: methods GET and POST, headers `Authorization`, `Content-Type` and `X-Request-Id`,
+  no credentials, preflight cached 10 minutes. An `OPTIONS` route under the prefix lets a preflight reach the
+  route-scoped plugin. The admin trip summary recompute moved to its own route function,
+  `adminTripSummaryRoutes`, because `tripSummaryRoutes` also serves the guest's `GET /api/v1/trips/{id}/summary`.
+- `SecurityHeaders` (an application plugin) adds `X-Content-Type-Options: nosniff` and `Referrer-Policy:
+  no-referrer` to every response, and `Cache-Control: no-store` to every `/api/v1/admin` response, errors included.
+- Tests:
+  - `FleetLiveTest`: TC-11-FL-03, overlap duplicates, going offline, cluster mode and back, a slow socket.
+  - `FleetSocketIT`: TC-11-FL-01, 02, 04, 05, 06, SEC-03, an invalid area, going offline over the socket.
+  - `WsTicketsIT`: SEC-03 binding and single use, hashed at rest, retention.
+  - `BrowserSecurityIT`: SEC-02, SEC-04.
+  - `FleetAuthorizationIT` has the tickets row. The fleet messages have golden files checked against the AsyncAPI
+    document (TC-11-CON-01).
 
 ## Definition of Done
 
