@@ -28,6 +28,7 @@ import veeci.practicing.rts.shared.geo.GeoPoint
 import veeci.practicing.rts.simulator.DriverClient
 import veeci.practicing.rts.simulator.GuestClient
 import veeci.practicing.rts.testing.SocketTestApp
+import veeci.practicing.rts.testing.TEST_DRIVER_PACE
 import veeci.practicing.rts.testing.TestDatabase
 import veeci.practicing.rts.testing.TestTokens
 import veeci.practicing.rts.testing.socketApp
@@ -60,7 +61,7 @@ class TripLiveE2ETest {
             coroutineScope {
                 val watching = async { watch(trip.id, messages) }
                 awaitSubscribed(messages)
-                driverClient().apply { route.chunked(10).forEach(::enqueue) }.connectAndSend()
+                driverClient().apply { route.chunked(10).forEach(::enqueue) }.connectAndSend(pace = TEST_DRIVER_PACE)
                 eventually { lastProgress(messages)!!.remainingM shouldBeLessThan 50.0 }
                 // Phase 4: the server marks the trip arrived by itself; the driver only starts and completes.
                 eventually { messages.filterIsInstance<TripEvent>().map { it.status } shouldContain "ARRIVED" }
@@ -93,14 +94,14 @@ class TripLiveE2ETest {
             coroutineScope {
                 val watching = async { watch(trip.id, messages) }
                 awaitSubscribed(messages)
-                client.connectAndSend(maxBatches = 5)
+                client.connectAndSend(pace = TEST_DRIVER_PACE, maxBatches = 5)
                 eventually { messages.filterIsInstance<TripProgress>().shouldNotBeEmpty() }
                 api().act(trip.id, "cancel", guest)
                 watching.await() // the server closes the guest socket after CANCELLED
             }
             awaitRelayIdle()
             val positionsBefore = bus.positions(trip.id)
-            client.connectAndSend()
+            client.connectAndSend(pace = TEST_DRIVER_PACE)
             awaitRelayIdle()
 
             client.pending shouldBe 0 // every batch acked and stored
