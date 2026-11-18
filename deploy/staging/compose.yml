@@ -12,7 +12,9 @@ services:
     volumes:
       - db-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U rts -d rts"]
+      # -h 127.0.0.1 checks over TCP. On first boot the image runs a temporary server on the Unix socket only,
+      # so a socket check could pass while the app still gets "connection refused".
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U rts -d rts"]
       interval: 5s
       timeout: 3s
       retries: 10
