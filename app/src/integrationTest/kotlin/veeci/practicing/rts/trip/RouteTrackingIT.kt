@@ -24,6 +24,7 @@ import veeci.practicing.rts.protocol.Ack
 import veeci.practicing.rts.protocol.ClientMessage
 import veeci.practicing.rts.protocol.Command
 import veeci.practicing.rts.protocol.CommandAck
+import veeci.practicing.rts.protocol.ErrorMessage
 import veeci.practicing.rts.protocol.FixBatch
 import veeci.practicing.rts.protocol.FixDto
 import veeci.practicing.rts.protocol.GuestClientMessage
@@ -41,6 +42,7 @@ import veeci.practicing.rts.shared.geo.GeoPoint
 import veeci.practicing.rts.shared.geo.MeasuredPolyline
 import veeci.practicing.rts.shared.geo.PolylineCodec
 import veeci.practicing.rts.testing.SocketTestApp
+import veeci.practicing.rts.testing.TEST_DRIVER_PACE
 import veeci.practicing.rts.testing.TestTokens
 import veeci.practicing.rts.testing.geo.offset
 import veeci.practicing.rts.testing.geo.track
@@ -224,7 +226,10 @@ class RouteTrackingIT {
             block(session)
         }
 
-    /** The driver's side of the socket: sends batches of 10 and keeps every `route_updated` it gets. */
+    /**
+     * The driver's side of the socket: sends batches of 10, [TEST_DRIVER_PACE] apart, and keeps every `route_updated`
+     * it gets. An `error` frame fails the test at once with the server's code.
+     */
     private class DriverSession(
         private val socket: DefaultClientWebSocketSession,
         start: Instant,
@@ -243,6 +248,7 @@ class RouteTrackingIT {
 
         suspend fun send(fixes: List<FixDto>) {
             fixes.chunked(BATCH).forEach { batch ->
+                delay(TEST_DRIVER_PACE)
                 sendMessage(FixBatch(++seq, batch))
                 while (true) {
                     val message = next()
@@ -262,9 +268,10 @@ class RouteTrackingIT {
             }
         }
 
-        /** The next message; commands get their ack, routes are kept. */
+        /** The next message; commands get their ack, routes are kept, and an `error` frame throws. */
         private suspend fun next(): ServerMessage =
             receive().also {
+                if (it is ErrorMessage) error("The server refused seq ${it.correlatesTo}: ${it.code} ${it.message}")
                 if (it is Command) sendMessage(CommandAck(it.commandId, CommandAck.APPLIED))
                 if (it is RouteUpdated) routes += it
             }
