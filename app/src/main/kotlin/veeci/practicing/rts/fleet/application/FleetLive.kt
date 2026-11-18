@@ -8,7 +8,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -132,7 +134,10 @@ class FleetLive(
         try {
             tick()
         } catch (e: CancellationException) {
-            throw e
+            // Rethrow only when the tick loop is stopping. A read that throws CancellationException while the loop is
+            // active would otherwise end it with no log line, and every live map would stop getting deltas.
+            currentCoroutineContext().ensureActive()
+            log.warn("Fleet tick failed; the next one runs in {}", config.tick, e)
         } catch (e: Exception) {
             log.warn("Fleet tick failed; the next one runs in {}", config.tick, e)
         }

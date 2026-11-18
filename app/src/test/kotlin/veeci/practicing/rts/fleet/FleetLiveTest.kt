@@ -5,9 +5,15 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import veeci.practicing.rts.fleet.application.FleetLive
@@ -162,6 +168,24 @@ class FleetLiveTest {
             stuck.tooSlow shouldBe 1
         }
 
+    @Test
+    fun `a read that throws CancellationException while the tick loop runs is logged and the next tick still runs`() =
+        runBlocking<Unit> {
+            table.write(driver(21.05, 105.85))
+            live.open(RecordingSink()).subscribe(MapView(area))
+            table.cancelNextRead = true
+            val loop = CoroutineScope(Job())
+            try {
+                live.start(loop)
+
+                // The tick is 100 ms. Before the fix the first read ended the loop, so a second read never came.
+                withTimeout(5.seconds) { while (table.reads < 2) delay(10.milliseconds) }
+                table.cancelNextRead shouldBe false
+            } finally {
+                loop.cancel()
+            }
+        }
+
     private suspend fun tick() = live.tick().joinAll()
 
     private fun live(
@@ -212,6 +236,14 @@ class FleetLiveTest {
     ) : FleetRepository {
         private val rows = linkedMapOf<UUID, Pair<FleetDriver, Instant>>()
 
+        /** How many times the tick read the changed rows. */
+        @Volatile
+        var reads = 0
+
+        /** The next read throws CancellationException, as a cancelled query does while the tick loop is active. */
+        @Volatile
+        var cancelNextRead = false
+
         fun write(driver: FleetDriver) {
             rows[driver.driverId] = driver to now()
         }
@@ -227,10 +259,16 @@ class FleetLiveTest {
             since: Instant,
             staleFrom: Instant,
             staleTo: Instant,
-        ): List<FleetDriver> =
-            rows.values
+        ): List<FleetDriver> {
+            reads++
+            if (cancelNextRead) {
+                cancelNextRead = false
+                throw CancellationException("query cancelled")
+            }
+            return rows.values
                 .filter { (driver, updatedAt) -> updatedAt > since || driver.lastSeenAt?.let { it in staleFrom..staleTo } == true }
                 .map { it.first }
+        }
 
         override suspend fun cells(
             filter: FleetFilter,
