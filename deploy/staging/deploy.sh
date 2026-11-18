@@ -30,7 +30,8 @@ wait_ready() {
 echo "Deploying ${NEW_TAG} (previous: ${PREV_TAG:-none})"
 export IMAGE_TAG="${NEW_TAG}"
 compose pull app
-compose up -d db
+# --wait blocks until the db healthcheck passes. migrate runs with --no-deps, so depends_on does not wait for it.
+compose up -d --wait db
 
 # Migrations run before the new app starts, with the new image's bin/migrate. --entrypoint is needed because the
 # image's ENTRYPOINT is /app/bin/app: a plain command would only reach it as arguments. If a migration fails,
