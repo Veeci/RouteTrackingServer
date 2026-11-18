@@ -24,6 +24,7 @@ import veeci.practicing.rts.protocol.Ack
 import veeci.practicing.rts.protocol.ClientMessage
 import veeci.practicing.rts.protocol.Command
 import veeci.practicing.rts.protocol.CommandAck
+import veeci.practicing.rts.protocol.ErrorMessage
 import veeci.practicing.rts.protocol.FixBatch
 import veeci.practicing.rts.protocol.FixDto
 import veeci.practicing.rts.protocol.GuestClientMessage
@@ -41,6 +42,7 @@ import veeci.practicing.rts.shared.geo.GeoPoint
 import veeci.practicing.rts.shared.geo.MeasuredPolyline
 import veeci.practicing.rts.shared.geo.PolylineCodec
 import veeci.practicing.rts.testing.SocketTestApp
+import veeci.practicing.rts.testing.TEST_DRIVER_PACE
 import veeci.practicing.rts.testing.TestTokens
 import veeci.practicing.rts.testing.geo.offset
 import veeci.practicing.rts.testing.geo.track
@@ -89,7 +91,7 @@ class RouteTrackingIT {
                 }
 
                 eventually {
-                    val last = seen.filterIsInstance<TripProgress>().last()
+                    val last = seen.lastProgress()
                     last.routeVersion shouldBe 2
                     last.remainingM shouldBeLessThan 50.0
                 }
@@ -118,7 +120,7 @@ class RouteTrackingIT {
                     d.send(fixes.filter { it.at < gapStart || it.at >= gapStart + 45.seconds }.map { fix(it.point, it.at) })
                 }
 
-                eventually { seen.filterIsInstance<TripProgress>().last().remainingM shouldBeLessThan 50.0 }
+                eventually { seen.lastProgress().remainingM shouldBeLessThan 50.0 }
                 delay(1.seconds) // a re-route, if any, would arrive this late
                 seen.filterIsInstance<TripEvent>().filter { it.event == TripEvent.OFF_ROUTE }.shouldBeEmpty()
                 seen.filterIsInstance<RouteUpdated>().filter { it.reason == RouteUpdated.OFF_ROUTE }.shouldBeEmpty()
@@ -141,7 +143,7 @@ class RouteTrackingIT {
 
                     // Progress before the ride now follows the APPROACH route.
                     d.send(listOf(fix(PICKUP.offset(northM = -140.0), d.clock)))
-                    eventually { seen.filterIsInstance<TripProgress>().last().basis shouldBe "ROUTE" }
+                    eventually { seen.lastProgress().basis shouldBe "ROUTE" }
 
                     api().moved(trip.id, driver, "arrive", "start")
                     d.awaitRoute { it.kind == "TRIP" }.reason shouldBe RouteUpdated.STATUS_CHANGED
@@ -206,6 +208,13 @@ class RouteTrackingIT {
         return seen.filterIsInstance<Subscribed>().first()
     }
 
+    /**
+     * The latest `trip_progress` the guest got. It fails as an assertion, not with `NoSuchElementException`, while none
+     * has arrived, so that [eventually] retries it.
+     */
+    private fun ConcurrentLinkedQueue<GuestServerMessage>.lastProgress(): TripProgress =
+        filterIsInstance<TripProgress>().lastOrNull().shouldNotBeNull()
+
     private suspend fun awaitSubscribedRoute(seen: ConcurrentLinkedQueue<GuestServerMessage>) =
         awaitSubscribed(seen).trip.route.shouldNotBeNull()
 
@@ -217,7 +226,10 @@ class RouteTrackingIT {
             block(session)
         }
 
-    /** The driver's side of the socket: sends batches of 10 and keeps every `route_updated` it gets. */
+    /**
+     * The driver's side of the socket: sends batches of 10, [TEST_DRIVER_PACE] apart, and keeps every `route_updated`
+     * it gets. An `error` frame fails the test at once with the server's code.
+     */
     private class DriverSession(
         private val socket: DefaultClientWebSocketSession,
         start: Instant,
@@ -236,6 +248,7 @@ class RouteTrackingIT {
 
         suspend fun send(fixes: List<FixDto>) {
             fixes.chunked(BATCH).forEach { batch ->
+                delay(TEST_DRIVER_PACE)
                 sendMessage(FixBatch(++seq, batch))
                 while (true) {
                     val message = next()
@@ -255,9 +268,10 @@ class RouteTrackingIT {
             }
         }
 
-        /** The next message; commands get their ack, routes are kept. */
+        /** The next message; commands get their ack, routes are kept, and an `error` frame throws. */
         private suspend fun next(): ServerMessage =
             receive().also {
+                if (it is ErrorMessage) error("The server refused seq ${it.correlatesTo}: ${it.code} ${it.message}")
                 if (it is Command) sendMessage(CommandAck(it.commandId, CommandAck.APPLIED))
                 if (it is RouteUpdated) routes += it
             }

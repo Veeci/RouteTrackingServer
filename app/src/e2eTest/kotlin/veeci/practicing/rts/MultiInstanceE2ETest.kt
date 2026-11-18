@@ -39,6 +39,7 @@ import veeci.practicing.rts.shared.geo.GeoPoint
 import veeci.practicing.rts.simulator.Backoff
 import veeci.practicing.rts.simulator.DriverClient
 import veeci.practicing.rts.simulator.GuestClient
+import veeci.practicing.rts.testing.TEST_DRIVER_PACE
 import veeci.practicing.rts.testing.TestTokens
 import veeci.practicing.rts.testing.TwoInstances
 import veeci.practicing.rts.testing.trip.TripApi
@@ -80,7 +81,7 @@ class MultiInstanceE2ETest {
                     "$wsA$DRIVER_PATH",
                     "mi-01",
                     token = driver,
-                ).apply { route.chunked(10).forEach(::enqueue) }.connectAndSend()
+                ).apply { route.chunked(10).forEach(::enqueue) }.connectAndSend(pace = TEST_DRIVER_PACE)
                 eventually { messages.filterIsInstance<TripEvent>().map { it.status } shouldContain "ARRIVED" }
                 TripApi(a.client).moved(trip.id, driver, "start", "complete")
                 withTimeout(10.seconds) { watching.await() }
