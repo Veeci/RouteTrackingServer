@@ -1,6 +1,7 @@
 package veeci.practicing.rts.platform.jobs
 
 import io.kotest.matchers.shouldBe
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -26,6 +27,7 @@ class JobSchedulerTest {
     private class CountingJob(
         override val period: Duration = 10.seconds,
         private val fail: Boolean = false,
+        private val cancelFirstRun: Boolean = false,
     ) : ScheduledJob {
         override val name = "counting"
         override val lockKey = 1L
@@ -34,6 +36,7 @@ class JobSchedulerTest {
         override suspend fun run() {
             runs++
             if (fail) error("this run fails")
+            if (cancelFirstRun && runs == 1) throw CancellationException("a timeout inside the run")
         }
     }
 
@@ -76,6 +79,18 @@ class JobSchedulerTest {
             advanceTimeBy(35.seconds)
 
             job.runs shouldBe 3
+        }
+
+    @Test
+    fun `a run that throws CancellationException while the scheduler runs is logged and the job keeps its schedule`() =
+        runTest {
+            val job = CountingJob(cancelFirstRun = true)
+            val scheduler = started(job)
+
+            advanceTimeBy(35.seconds)
+
+            job.runs shouldBe 3
+            scheduler.isRunning shouldBe true
         }
 
     @Test

@@ -1,6 +1,7 @@
 package veeci.practicing.rts.trip.application
 
 import io.kotest.matchers.shouldBe
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import veeci.practicing.rts.shared.geo.GeoPoint
@@ -28,6 +29,24 @@ class RerouteWorkerTest {
                 RerouteWorker({
                     handled += it.baseVersion
                     if (it.baseVersion == 2) error("planner bug")
+                    RerouteOutcome.REROUTED
+                })
+            worker.start(backgroundScope)
+
+            (1..3).forEach { worker.request(request(it)) shouldBe true }
+            testScheduler.runCurrent() // advanceUntilIdle ignores background work
+
+            handled shouldBe listOf(1, 2, 3)
+        }
+
+    @Test
+    fun `a re-route that throws CancellationException while the worker runs does not stop the worker`() =
+        runTest {
+            val handled = mutableListOf<Int>()
+            val worker =
+                RerouteWorker({
+                    handled += it.baseVersion
+                    if (it.baseVersion == 2) throw CancellationException("a timeout in the planner")
                     RerouteOutcome.REROUTED
                 })
             worker.start(backgroundScope)

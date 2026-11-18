@@ -7,6 +7,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import org.slf4j.LoggerFactory
 import veeci.practicing.rts.platform.jobs.BackgroundWorker
@@ -48,7 +50,10 @@ class RerouteWorker(
             val outcome = handler.reroute(request)
             log.info("Re-route of trip {} from version {}: {}", request.tripId.value, request.baseVersion, outcome)
         } catch (e: CancellationException) {
-            throw e
+            // Rethrow only when the worker is stopping. A re-route that throws CancellationException while the worker
+            // is active (a timeout in the planner) would otherwise end the queue loop for good, with no log line.
+            currentCoroutineContext().ensureActive()
+            log.error("Re-route of trip {} failed", request.tripId.value, e)
         } catch (e: Exception) {
             log.error("Re-route of trip {} failed", request.tripId.value, e)
         }

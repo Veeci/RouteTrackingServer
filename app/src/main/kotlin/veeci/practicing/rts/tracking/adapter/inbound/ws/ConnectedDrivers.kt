@@ -90,7 +90,10 @@ class ConnectedDrivers : LocalDriverLink {
             try {
                 it(driver)
             } catch (e: CancellationException) {
-                throw e
+                // A listener that sends to a closing socket can throw CancellationException while this socket is still
+                // being served. Rethrown, it would skip the later listeners and end this driver's session.
+                currentCoroutineContext().ensureActive()
+                log.error("A connect listener failed for driver {}; it runs again on the next connect", driver.value, e)
             } catch (e: Exception) {
                 log.error("A connect listener failed for driver {}; it runs again on the next connect", driver.value, e)
             }
