@@ -5,7 +5,9 @@ import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.jetbrains.exposed.v1.jdbc.transactions.TransactionManager
@@ -90,7 +92,11 @@ class JobScheduler(
             try {
                 lock.runIfFree(job.lockKey) { job.run() }
             } catch (e: CancellationException) {
-                throw e
+                // Rethrow only when the scheduler is stopping. A run can throw CancellationException while this loop
+                // is active (a withTimeout inside the job, a cancelled future). Rethrown, it would end this job's
+                // loop without a log line, and the job would never run again until a restart.
+                currentCoroutineContext().ensureActive()
+                log.error("Job {} failed; it runs again in {}", job.name, job.period, e)
             } catch (e: Exception) {
                 log.error("Job {} failed; it runs again in {}", job.name, job.period, e)
             }

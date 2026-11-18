@@ -5,7 +5,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.jetbrains.exposed.v1.jdbc.transactions.TransactionManager
@@ -65,7 +67,10 @@ class OutboxMetrics(
             pending.set(count)
             oldestAgeS.set(age)
         } catch (e: CancellationException) {
-            throw e
+            // Rethrow only when the metrics loop is stopping; otherwise one cancelled query would end the loop and
+            // freeze both gauges at their last values, with no log line.
+            currentCoroutineContext().ensureActive()
+            log.warn("Reading the outbox backlog failed: {}", e.toString())
         } catch (e: Exception) {
             log.warn("Reading the outbox backlog failed: {}", e.toString())
         }
