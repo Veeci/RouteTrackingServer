@@ -1,0 +1,95 @@
+# Deploys every image CI pushes from main to the staging laptop (phase 1.5, docs/ops/staging-setup.md).
+# Both jobs skip themselves until the repository variable STAGING_URL exists, that is, until the manual setup
+# (T1b.6) is done. Job-level `if` cannot read environment variables, so STAGING_URL must be a repository variable.
+name: Deploy staging
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_sha:
+        description: Full commit SHA of an image already in GHCR (manual deploy or rollback)
+        required: true
+
+# Deploys run one at a time, in order. A newer merge waits instead of cancelling a deploy halfway.
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    # Only after CI passed on a push to main. Without the event check, a pull request from a branch
+    # that happens to be named "main" would also match.
+    if: >-
+      vars.STAGING_URL != '' && (
+        github.event_name == 'workflow_dispatch' || (
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == 'main'
+        )
+      )
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 15
+    env:
+      SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.image_sha || github.event.workflow_run.head_sha }}
+    steps:
+      # The SHA ends up in a remote shell command, so only a full commit SHA is accepted.
+      - name: Check the SHA
+        run: |
+          if [[ ! "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::image_sha must be a full 40-character commit SHA"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SHA }}   # deploy files from the same commit as the image
+
+      - name: Join the tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: SSH key and known host
+        env:
+          SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.STAGING_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Copy deploy files
+        run: scp deploy/staging/compose.yml deploy/staging/deploy.sh deploy/staging/backup.sh deploy@rts-staging:/srv/rts/
+
+      - name: Deploy
+        run: ssh deploy@rts-staging "bash /srv/rts/deploy.sh $SHA"
+
+  smoke:
+    # A separate job on a fresh runner that is NOT in the tailnet, so the request takes the public Funnel path.
+    # Inside the tailnet, MagicDNS would resolve the name to the private address and skip Funnel.
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.image_sha || github.event.workflow_run.head_sha }}
+      STAGING_URL: ${{ vars.STAGING_URL }}
+    steps:
+      - name: Readiness through Funnel
+        run: curl -fsS --retry 6 --retry-delay 5 --retry-all-errors "$STAGING_URL/health/ready"
+
+      - name: Summary
+        if: always()
+        env:
+          SMOKE: ${{ job.status }}
+        run: echo "Staging $STAGING_URL runs \`$SHA\` (smoke $SMOKE)" >> "$GITHUB_STEP_SUMMARY"

@@ -10,9 +10,6 @@ import io.ktor.server.plugins.cors.routing.CORS
 import io.ktor.server.request.path
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
-import io.ktor.server.routing.RouteSelector
-import io.ktor.server.routing.RouteSelectorEvaluation
-import io.ktor.server.routing.RoutingResolveContext
 import io.ktor.server.routing.options
 import veeci.practicing.rts.platform.config.AdminConfig
 
@@ -48,7 +45,7 @@ fun Route.adminArea(
     config: AdminConfig,
     build: Route.() -> Unit,
 ) {
-    val area = createChild(AdminAreaSelector)
+    val area = createChild(PathPrefixSelector(ADMIN_PATH))
     val origins =
         config.origins
             .map { it.trim().trimEnd('/') }
@@ -73,23 +70,6 @@ fun Route.adminArea(
 }
 
 private fun String.isAdminPath(): Boolean = this == ADMIN_PATH || startsWith("$ADMIN_PATH/")
-
-/** Matches a path under [ADMIN_PATH] without consuming it. */
-private object AdminAreaSelector : RouteSelector() {
-    private val prefix = ADMIN_PATH.split("/").filter { it.isNotEmpty() }
-
-    override suspend fun evaluate(
-        context: RoutingResolveContext,
-        segmentIndex: Int,
-    ): RouteSelectorEvaluation =
-        if (context.segments.drop(segmentIndex).take(prefix.size) == prefix) {
-            RouteSelectorEvaluation.Transparent
-        } else {
-            RouteSelectorEvaluation.Failed
-        }
-
-    override fun toString() = "(admin area)"
-}
 
 private const val CONTENT_TYPE_OPTIONS = "X-Content-Type-Options"
 private const val REFERRER_POLICY = "Referrer-Policy"

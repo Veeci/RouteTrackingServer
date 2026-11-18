@@ -8,13 +8,20 @@ import javax.sql.DataSource
 object Migrations {
     private val log = LoggerFactory.getLogger(Migrations::class.java)
 
+    /** Where the migration files are. Tests pass other folders, for example one with a migration that fails. */
+    val DEFAULT_LOCATIONS = listOf("classpath:db/migration")
+
     /** Returns how many migrations were applied now; 0 when the schema was already current. */
-    fun run(dataSource: DataSource): Int {
+    @Suppress("SpreadOperator") // Flyway takes a vararg; the copy of a one-item list happens once per process
+    fun run(
+        dataSource: DataSource,
+        locations: List<String> = DEFAULT_LOCATIONS,
+    ): Int {
         val flyway =
             Flyway
                 .configure()
                 .dataSource(dataSource)
-                .locations("classpath:db/migration")
+                .locations(*locations.toTypedArray())
                 .load()
         val applied = flyway.migrate().migrationsExecuted
         // The migrate result only names a version when something was applied; ask for the current one instead.

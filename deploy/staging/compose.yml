@@ -1,0 +1,47 @@
+# Staging stack on Laptop 2 (phase 1.5, docs/ops/staging-setup.md). Each deploy copies this file to
+# /srv/rts/compose.yml, and deploy.sh runs it with project name rts-staging. Secrets come from /srv/rts/.env, never
+# from git. One app instance and no Redis: live updates stay in the process (phase 10 adds the second instance).
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: rts
+      POSTGRES_USER: rts
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set in /srv/rts/.env}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rts -d rts"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # No ports: only the app reaches the database, over the compose network.
+
+  app:
+    image: ghcr.io/veeci/route-tracking-server:${IMAGE_TAG:?deploy.sh sets IMAGE_TAG}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_ENV: staging
+      APP_VERSION: ${IMAGE_TAG}
+      DB_URL: jdbc:postgresql://db:5432/rts
+      DB_USER: rts
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?set in /srv/rts/.env}
+      # Guards /api/v1/dev/tokens (X-Staging-Token). The app refuses to start without it, or with fewer than 32 characters.
+      STAGING_ACCESS_TOKEN: ${STAGING_ACCESS_TOKEN:?set in /srv/rts/.env}
+      # Empty: one instance, no Redis. /health/ready then has no redis check (it is never critical anyway).
+      REDIS_URL: ""
+      # false until T1b.4 has checked which headers Funnel sends. Set it in /srv/rts/.env to try it.
+      HTTP_TRUSTFORWARDEDHEADERS: ${HTTP_TRUSTFORWARDEDHEADERS:-false}
+    volumes:
+      - /srv/rts/osm/hanoi.osm:/app/data/osm/hanoi.osm:ro
+    ports:
+      - "127.0.0.1:8080:8080"   # loopback only: Funnel is the one public entry
+    mem_limit: 2g               # MaxRAMPercentage=75 in the image gives a 1.5 GB heap
+
+volumes:
+  db-data:

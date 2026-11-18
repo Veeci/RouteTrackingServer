@@ -5,11 +5,14 @@ import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.install
 import io.ktor.server.plugins.bodylimit.RequestBodyLimit
+import io.ktor.server.plugins.forwardedheaders.XForwardedHeaders
+import io.ktor.server.plugins.forwardedheaders.XForwardedHeadersConfig
 import io.ktor.server.plugins.origin
 import io.ktor.server.plugins.ratelimit.RateLimit
 import io.ktor.server.plugins.requestvalidation.RequestValidation
 import io.ktor.server.plugins.requestvalidation.ValidationResult
 import veeci.practicing.rts.platform.config.HttpConfig
+import java.net.InetAddress
 import kotlin.time.Duration.Companion.minutes
 
 /** Checks every request must pass before a route runs: size, content and rate. */
@@ -31,8 +34,11 @@ fun Application.configureRequestGuards(config: HttpConfig) {
         }
     }
 
+    // Behind a proxy on this machine every request comes from loopback. With the flag on, the address the proxy
+    // writes into X-Forwarded-For becomes the client's, so the rate limit below counts each client on its own.
+    if (config.trustForwardedHeaders) install(XForwardedHeaders) { trustLoopbackProxiesOnly() }
+
     // A bucket of tokens per client IP, refilled every minute; a request costs one token.
-    // Behind a proxy every request shares the proxy's IP: phase 1.5 adds the forwarded-header plugin.
     install(RateLimit) {
         global {
             rateLimiter(limit = config.rateLimitPerMinute, refillPeriod = 1.minutes)
@@ -40,5 +46,38 @@ fun Application.configureRequestGuards(config: HttpConfig) {
         }
     }
 }
+
+/**
+ * Uses the forwarded headers only when the peer is on loopback, that is, a proxy on this machine. A client that
+ * connects directly could send any `X-Forwarded-For`, so its headers are ignored. Of a list such as `spoofed, client`,
+ * the last entry wins: the trusted proxy appended it, and the entries before it came from the client.
+ */
+private fun XForwardedHeadersConfig.trustLoopbackProxiesOnly() {
+    extractEdgeProxy { origin, headers ->
+        if (isLoopback(origin.remoteAddress)) {
+            headers.forHeader.lastEntry()?.let { client ->
+                origin.remoteHost = client
+                origin.remoteAddress = client
+            }
+            headers.protoHeader.lastEntry()?.let { origin.scheme = it }
+        }
+    }
+}
+
+private fun String?.lastEntry(): String? =
+    this
+        ?.split(',')
+        ?.map { it.trim() }
+        ?.lastOrNull { it.isNotEmpty() }
+
+/**
+ * An IPv4 literal, or an IPv6 one (the only kind with a colon). [InetAddress.getByName] parses either without a DNS
+ * lookup. A host name never matches, so it is never looked up.
+ */
+private val IP_LITERAL = Regex("""\d{1,3}(\.\d{1,3}){3}|[0-9A-Fa-f.]*:[0-9A-Fa-f:.]*""")
+
+internal fun isLoopback(address: String): Boolean =
+    address == "localhost" ||
+        (address.matches(IP_LITERAL) && runCatching { InetAddress.getByName(address).isLoopbackAddress }.getOrDefault(false))
 
 private fun ApplicationCall.isWebSocketUpgrade() = request.headers[HttpHeaders.Upgrade].equals("websocket", ignoreCase = true)

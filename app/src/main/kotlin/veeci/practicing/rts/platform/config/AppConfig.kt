@@ -25,6 +25,7 @@ data class AppConfig(
     val retention: RetentionConfig = RetentionConfig(),
     val admin: AdminConfig = AdminConfig(),
     val fleet: FleetConfig = FleetConfig(),
+    val staging: StagingConfig = StagingConfig(),
 )
 
 data class AppInfo(
@@ -42,6 +43,12 @@ data class HttpConfig(
     val shutdownGracePeriod: Duration,
     /** On stop: the most time in-flight requests get to finish. Keep it below the platform's kill timeout. */
     val shutdownTimeout: Duration,
+    /**
+     * Whether `X-Forwarded-For` and `X-Forwarded-Proto` set the client address and scheme. Only a peer on loopback is
+     * trusted to send them, so a client that connects directly cannot pick its own address. Off by default: turn it on
+     * (`HTTP_TRUSTFORWARDEDHEADERS=true`) only behind a proxy that is known to set these headers (phase 1.5, T1b.4).
+     */
+    val trustForwardedHeaders: Boolean = false,
 )
 
 data class DBConfig(
@@ -146,6 +153,25 @@ data class FleetConfig(
     /** A socket that takes longer than this to accept one message is closed with 1013. */
     val sendTimeout: Duration = 5.seconds,
 )
+
+/**
+ * The staging environment (phase 1.5). `STAGING_ACCESS_TOKEN` sets [StagingAccess.token]: Hoplite splits environment
+ * variable names at each underscore, so the variable maps to `staging.access.token`.
+ */
+data class StagingConfig(
+    val access: StagingAccess = StagingAccess(),
+)
+
+data class StagingAccess(
+    /**
+     * Testers send it in `X-Staging-Token` to reach the routes under `/api/v1/dev` on staging. Required, with at least
+     * [MIN_STAGING_TOKEN_LENGTH] characters, when `APP_ENV=staging`. Unused elsewhere.
+     */
+    val token: Secret? = null,
+)
+
+/** A staging access token shorter than this refuses to start: 32 characters of hex are 128 bits. */
+const val MIN_STAGING_TOKEN_LENGTH = 32
 
 /** Session health (phase 9). */
 data class TelemetryConfig(
