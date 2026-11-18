@@ -89,7 +89,7 @@ class RouteTrackingIT {
                 }
 
                 eventually {
-                    val last = seen.filterIsInstance<TripProgress>().last()
+                    val last = seen.lastProgress()
                     last.routeVersion shouldBe 2
                     last.remainingM shouldBeLessThan 50.0
                 }
@@ -118,7 +118,7 @@ class RouteTrackingIT {
                     d.send(fixes.filter { it.at < gapStart || it.at >= gapStart + 45.seconds }.map { fix(it.point, it.at) })
                 }
 
-                eventually { seen.filterIsInstance<TripProgress>().last().remainingM shouldBeLessThan 50.0 }
+                eventually { seen.lastProgress().remainingM shouldBeLessThan 50.0 }
                 delay(1.seconds) // a re-route, if any, would arrive this late
                 seen.filterIsInstance<TripEvent>().filter { it.event == TripEvent.OFF_ROUTE }.shouldBeEmpty()
                 seen.filterIsInstance<RouteUpdated>().filter { it.reason == RouteUpdated.OFF_ROUTE }.shouldBeEmpty()
@@ -141,7 +141,7 @@ class RouteTrackingIT {
 
                     // Progress before the ride now follows the APPROACH route.
                     d.send(listOf(fix(PICKUP.offset(northM = -140.0), d.clock)))
-                    eventually { seen.filterIsInstance<TripProgress>().last().basis shouldBe "ROUTE" }
+                    eventually { seen.lastProgress().basis shouldBe "ROUTE" }
 
                     api().moved(trip.id, driver, "arrive", "start")
                     d.awaitRoute { it.kind == "TRIP" }.reason shouldBe RouteUpdated.STATUS_CHANGED
@@ -205,6 +205,13 @@ class RouteTrackingIT {
         eventually { seen.filterIsInstance<Subscribed>().shouldNotBeEmpty() }
         return seen.filterIsInstance<Subscribed>().first()
     }
+
+    /**
+     * The latest `trip_progress` the guest got. It fails as an assertion, not with `NoSuchElementException`, while none
+     * has arrived, so that [eventually] retries it.
+     */
+    private fun ConcurrentLinkedQueue<GuestServerMessage>.lastProgress(): TripProgress =
+        filterIsInstance<TripProgress>().lastOrNull().shouldNotBeNull()
 
     private suspend fun awaitSubscribedRoute(seen: ConcurrentLinkedQueue<GuestServerMessage>) =
         awaitSubscribed(seen).trip.route.shouldNotBeNull()
