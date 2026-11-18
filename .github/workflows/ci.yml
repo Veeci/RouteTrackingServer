@@ -29,6 +29,10 @@ jobs:
       # Caches Gradle and dependencies between runs; writes the cache only from main.
       - uses: gradle/actions/setup-gradle@v6
 
+      # The staging deploy scripts (phase 1.5). shellcheck is preinstalled on GitHub's Ubuntu runners.
+      - name: Shellcheck
+        run: shellcheck deploy/staging/deploy.sh deploy/staging/backup.sh
+
       # Lint (spotless, detekt) + unit, integration (Testcontainers: runners have Docker) and e2e suites.
       - name: Check
         run: ./gradlew check koverXmlReport --continue

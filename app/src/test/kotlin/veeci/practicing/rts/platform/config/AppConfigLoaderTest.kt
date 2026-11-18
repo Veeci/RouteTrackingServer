@@ -16,6 +16,7 @@ class AppConfigLoaderTest {
             "DB_USER" to "rts_app",
             "DB_PASSWORD" to "s3cret-value",
             "JWT_SECRET" to "a-signing-key-of-at-least-32-characters",
+            "STAGING_ACCESS_TOKEN" to "a-staging-token-of-at-least-32-characters",
         )
 
     @ParameterizedTest
@@ -71,9 +72,47 @@ class AppConfigLoaderTest {
     }
 
     @Test
+    fun `TC-1b-CFG-01 the staging profile decodes with the staging settings`() {
+        val config = AppConfigLoader.load(platformEnv + ("APP_ENV" to "staging"))
+
+        config.app.env shouldBe AppEnv.STAGING
+        config.db.migrateOnStart shouldBe false
+        config.staging.access.token
+            ?.value shouldBe "a-staging-token-of-at-least-32-characters"
+        config.http.trustForwardedHeaders shouldBe false
+        config.redis.enabled shouldBe false
+    }
+
+    @Test
+    fun `TC-1b-CFG-01 staging refuses to start without a staging access token of 32 characters or more`() {
+        shouldThrow<ConfigException> { AppConfigLoader.load(platformEnv - "STAGING_ACCESS_TOKEN" + ("APP_ENV" to "staging")) }
+            .message shouldContain "STAGING_ACCESS_TOKEN"
+        shouldThrow<ConfigException> {
+            AppConfigLoader.load(platformEnv + mapOf("APP_ENV" to "staging", "STAGING_ACCESS_TOKEN" to "x".repeat(31)))
+        }.message shouldContain "32"
+        AppConfigLoader.load(platformEnv + mapOf("APP_ENV" to "staging", "STAGING_ACCESS_TOKEN" to "x".repeat(32))).app.env shouldBe
+            AppEnv.STAGING
+    }
+
+    @Test
+    fun `other profiles start without a staging access token`() {
+        val config = AppConfigLoader.load(platformEnv - "STAGING_ACCESS_TOKEN" + ("APP_ENV" to "prod"))
+
+        config.staging.access.token shouldBe null
+    }
+
+    @Test
+    fun `HTTP_TRUSTFORWARDEDHEADERS turns on the forwarded headers`() {
+        AppConfigLoader
+            .load(platformEnv + mapOf("APP_ENV" to "staging", "HTTP_TRUSTFORWARDEDHEADERS" to "true"))
+            .http.trustForwardedHeaders shouldBe true
+    }
+
+    @Test
     fun `the password never appears when the config is printed`() {
         val config = AppConfigLoader.load(platformEnv + ("APP_ENV" to "prod"))
 
         config.toString() shouldNotContain "s3cret-value"
+        config.toString() shouldNotContain "a-staging-token"
     }
 }

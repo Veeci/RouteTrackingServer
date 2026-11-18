@@ -78,7 +78,8 @@ class WsEchoIT {
 
     @Test
     fun `TC-1-WS-04 echo is mounted in staging`() =
-        socketApp(env = mapOf("APP_ENV" to "staging")) {
+        // Staging refuses to start without an access token of 32 characters or more (phase 1.5).
+        socketApp(env = mapOf("APP_ENV" to "staging", "STAGING_ACCESS_TOKEN" to "0123456789abcdef0123456789abcdef")) {
             wsClient().webSocket(ECHO) {
                 send(Frame.Text("{}"))
                 receiveText() shouldBe "{}"

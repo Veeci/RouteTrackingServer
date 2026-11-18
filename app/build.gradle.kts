@@ -31,6 +31,7 @@ dependencies {
     implementation(ktorLibs.server.cors)
     implementation(ktorLibs.server.metrics.micrometer)
     implementation(ktorLibs.server.core)
+    implementation(ktorLibs.server.forwardedHeader)
     implementation(ktorLibs.server.netty)
     implementation(ktorLibs.server.rateLimit)
     implementation(ktorLibs.server.requestValidation)
@@ -136,6 +137,24 @@ tasks.named<JavaExec>("run") {
                 environment(key.trim(), value.trim())
             }
     }
+}
+
+// A second start script, `bin/migrate`, next to `bin/app` in the distribution and the image (phase 1.5). The deploy runs
+// it before the new app starts: docker compose run --rm --no-deps --entrypoint /app/bin/migrate app
+val migrateStartScripts by tasks.registering(CreateStartScripts::class) {
+    val appScripts = tasks.startScripts.get()
+    applicationName = "migrate"
+    mainClass = "veeci.practicing.rts.MigrateKt"
+    classpath = appScripts.classpath
+    outputDir =
+        layout.buildDirectory
+            .dir("migrateScripts")
+            .get()
+            .asFile
+}
+
+distributions.main {
+    contents { from(migrateStartScripts) { into("bin") } }
 }
 
 tasks.named("check") {

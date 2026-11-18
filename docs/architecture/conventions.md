@@ -64,13 +64,23 @@
   by environment variable (`DB_URL`, `DB_PASSWORD`, `JWT_SECRET`, ...).
 - Hoplite decodes into a typed `AppConfig`; startup fails fast with a list of all invalid/missing keys.
 - `deploy/.env.example` documents every variable; real `.env` files are gitignored.
-- Environments: `dev`, `test`, `prod` (`APP_ENV`). Dev-only features (Swagger UI, dev token endpoint)
-  are mounted only when `APP_ENV=dev|test`, checked at startup.
+- Environments: `dev`, `test`, `staging`, `prod` (`APP_ENV`). Swagger UI is mounted only in `dev`. The dev token
+  endpoint is mounted in `dev` and `test`, in `staging` only behind `X-Staging-Token` (phase 1.5), and never in
+  `prod`. Staging refuses to start without a `STAGING_ACCESS_TOKEN` of 32 characters or more.
 
 ## Persistence
 
 - Flyway SQL migrations `V<n>__<snake_description>.sql`; merged migrations are immutable.
   Every migration is tested by the migration test (applies all from zero on a real Postgres).
+- **Expand and contract.** Every migration must work with the previous release, because a deploy migrates before
+  the new code starts, and a rollback runs the previous image on the already-migrated schema (phase 1.5):
+  - Add a column as nullable or with a default. Add a table or an index freely.
+  - Never rename or drop a column, table or constraint in the release that stops using it. Stop using it in one
+    release, then drop it in a later one.
+  - A rename is three releases: add the new column and write both, backfill and read the new one, drop the old one.
+  - A new `NOT NULL` or `CHECK` constraint goes in only after every row and every running version satisfies it.
+- Deploys run migrations with `/app/bin/migrate` (`Migrate.kt`) before the new app starts. `db.migrateOnStart` is
+  true only in `dev` and `test`.
 - Exposed DSL in adapters only; one repository per aggregate; repositories return domain objects.
 - Constraints live in the database: FKs, `NOT NULL`, `CHECK`s, unique indexes for idempotency and
   business rules (e.g. one active trip per driver). App checks give nice errors; DB constraints give correctness.
@@ -120,6 +130,9 @@
 - Trunk-based: short-lived branches `feat/<phase>-<topic>`, squash-merge to `main`; `main` is always deployable.
 - Conventional Commits (`feat(trip): add accept endpoint`); changelog generated from them.
 - PR checklist: tests (case IDs), OpenAPI/AsyncAPI updated, migration reviewed, docs updated, no new warnings.
-- CI on every PR: build, lint, all tests (Testcontainers), Docker image build. On `main`: push image to GHCR tagged with the git SHA
-  and **deploy to staging automatically** (phase 1.5); production is promoted from staging with approval (phase 10).
-- Migrations must be backward compatible with the previous release (expand/contract), because they run before the new code starts.
+- CI on every PR: build, lint, `shellcheck` on the deploy scripts, all tests (Testcontainers), Docker image build. On
+  `main`: push the image to GHCR tagged with the git SHA.
+- **Every merge to `main` deploys to staging.** When CI succeeds on `main`, `deploy-staging.yml` deploys that SHA to
+  the staging laptop, migrates, waits for readiness and rolls back on failure (phase 1.5). So merge only what may run
+  on staging at once, and keep `main` deployable. Production is promoted from staging with approval (phase 10).
+- Migrations follow the expand and contract rule under Persistence.

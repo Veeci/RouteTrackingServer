@@ -4,6 +4,7 @@ import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.get
+import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
@@ -112,8 +113,29 @@ class RequestGuardsIT {
             response.problem().code shouldBe "RATE_LIMITED"
         }
 
+    @Test
+    fun `T1b-4 with trusted forwarded headers each forwarded client has its own rate limit`() =
+        testApp(env = mapOf("HTTP_RATELIMITPERMINUTE" to "1", "HTTP_TRUSTFORWARDEDHEADERS" to "true")) {
+            // The test client counts as a proxy on loopback, so the last X-Forwarded-For entry is the client.
+            for (client in listOf("203.0.113.1", "203.0.113.2", "203.0.113.3")) {
+                this.client.get("/health/live") { header(X_FORWARDED_FOR, "198.51.100.9, $client") }.status shouldBe HttpStatusCode.OK
+            }
+            this.client.get("/health/live") { header(X_FORWARDED_FOR, "203.0.113.1") }.status shouldBe HttpStatusCode.TooManyRequests
+        }
+
+    @Test
+    fun `T1b-4 without the flag the forwarded headers are ignored`() =
+        testApp(env = mapOf("HTTP_RATELIMITPERMINUTE" to "1")) {
+            client.get("/health/live") { header(X_FORWARDED_FOR, "203.0.113.1") }.status shouldBe HttpStatusCode.OK
+            client.get("/health/live") { header(X_FORWARDED_FOR, "203.0.113.2") }.status shouldBe HttpStatusCode.TooManyRequests
+        }
+
     private fun HttpRequestBuilder.json(body: String) {
         contentType(ContentType.Application.Json)
         setBody(body)
+    }
+
+    private companion object {
+        const val X_FORWARDED_FOR = "X-Forwarded-For"
     }
 }

@@ -20,5 +20,21 @@ object AppConfigLoader {
             .withExplicitSealedTypes() // Hoplite prints a deprecation notice to stdout unless this is on
             .build()
             .loadConfigOrThrow<AppConfig>("/config/$profile.conf", "/config/base.conf")
+            .also(::checkStaging)
+    }
+
+    /** Staging serves the dev token route to the internet, so it must not start without a strong access token. */
+    private fun checkStaging(config: AppConfig) {
+        if (config.app.env != AppEnv.STAGING) return
+        val token =
+            config.staging.access.token
+                ?.value
+                .orEmpty()
+        if (token.length < MIN_STAGING_TOKEN_LENGTH) {
+            throw ConfigException(
+                "APP_ENV=staging needs STAGING_ACCESS_TOKEN with at least $MIN_STAGING_TOKEN_LENGTH characters" +
+                    " (for example: openssl rand -hex 24)",
+            )
+        }
     }
 }

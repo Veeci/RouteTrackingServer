@@ -8,6 +8,7 @@ import io.ktor.server.engine.connector
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.swagger.swaggerUI
+import io.ktor.server.routing.Route
 import io.ktor.server.routing.routing
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.prometheusmetrics.PrometheusConfig
@@ -51,6 +52,7 @@ import veeci.practicing.rts.platform.observability.healthRoutes
 import veeci.practicing.rts.platform.security.AUTH_JWT
 import veeci.practicing.rts.platform.security.AUTH_TICKET
 import veeci.practicing.rts.platform.security.configureAuthentication
+import veeci.practicing.rts.platform.security.stagingGate
 import veeci.practicing.rts.platform.security.wsTicketRoutes
 import veeci.practicing.rts.platform.ws.configureWebSockets
 import veeci.practicing.rts.platform.ws.echoEndpoint
@@ -126,8 +128,7 @@ fun Application.module(
 
     routing {
         healthRoutes(get())
-        // Tokens without a password: only where no real user data exists.
-        if (config.app.env in setOf(AppEnv.DEV, AppEnv.TEST)) devTokenRoutes(get())
+        devTokens(config)
         authenticate(AUTH_JWT) {
             driverSocket(get())
             guestSocket(get())
@@ -156,6 +157,18 @@ fun Application.module(
         if (config.app.env != AppEnv.PROD) echoEndpoint(get())
         // Interactive API docs generated from the contract; local development only.
         if (config.app.env == AppEnv.DEV) swaggerUI(path = "docs", swaggerFile = "openapi/rts-v1.yaml")
+    }
+}
+
+/**
+ * Tokens without a password: only where no real user data exists. Dev and test mount the route as it is. Staging
+ * mounts it behind the staging access token, because it is on the internet (phase 1.5). Prod never mounts it.
+ */
+private fun Route.devTokens(config: AppConfig) {
+    when (config.app.env) {
+        AppEnv.DEV, AppEnv.TEST -> devTokenRoutes(get())
+        AppEnv.STAGING -> stagingGate(config.staging) { devTokenRoutes(get()) }
+        AppEnv.PROD -> Unit
     }
 }
 
