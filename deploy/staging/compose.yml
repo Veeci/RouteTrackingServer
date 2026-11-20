@@ -39,6 +39,9 @@ services:
       REDIS_URL: ""
       # false until T1b.4 has checked which headers Funnel sends. Set it in /srv/rts/.env to try it.
       HTTP_TRUSTFORWARDEDHEADERS: ${HTTP_TRUSTFORWARDEDHEADERS:-false}
+      # The admin plane's own port (phase 12a): /api/v1/admin and /ws/v1/admin answer only here, and 8080 answers 404
+      # for them, so Funnel never reaches the admin API. Health, dev tokens and the trip routes answer on both ports.
+      HTTP_ADMINPORT: "8081"
     volumes:
       - /srv/rts/osm/hanoi.osm:/app/data/osm/hanoi.osm:ro
       # The binary graph cache (slice 6d): a start whose hanoi.osm matches it skips the XML parse. The OSM file stays
@@ -46,6 +49,7 @@ services:
       - osm-cache:/app/data/osm/cache
     ports:
       - "127.0.0.1:8080:8080"   # loopback only: Funnel is the one public entry
+      - "127.0.0.1:8081:8081"   # admin port, loopback only and never behind Funnel (12f adds the tailnet-only entry)
     mem_limit: 2g               # MaxRAMPercentage=75 in the image gives a 1.5 GB heap
 
 volumes:

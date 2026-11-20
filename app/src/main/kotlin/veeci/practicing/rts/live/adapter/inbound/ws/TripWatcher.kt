@@ -1,0 +1,243 @@
+package veeci.practicing.rts.live.adapter.inbound.ws
+
+import io.ktor.server.websocket.DefaultWebSocketServerSession
+import io.ktor.websocket.CloseReason
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.takeWhile
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.slf4j.LoggerFactory
+import veeci.practicing.rts.devicecontrol.application.api.GuestWatching
+import veeci.practicing.rts.live.application.api.DriverPositionUpdate
+import veeci.practicing.rts.live.application.api.LiveUpdate
+import veeci.practicing.rts.live.application.api.RouteUpdate
+import veeci.practicing.rts.live.application.api.TripMomentUpdate
+import veeci.practicing.rts.live.application.api.TripProgressUpdate
+import veeci.practicing.rts.live.application.api.TripStatusUpdate
+import veeci.practicing.rts.live.application.port.out.LiveUpdateBus
+import veeci.practicing.rts.platform.ws.WsSession
+import veeci.practicing.rts.platform.ws.WsSessionRunner
+import veeci.practicing.rts.protocol.DriverPosition
+import veeci.practicing.rts.protocol.GuestClientMessage
+import veeci.practicing.rts.protocol.GuestRoute
+import veeci.practicing.rts.protocol.GuestServerMessage
+import veeci.practicing.rts.protocol.GuestTrip
+import veeci.practicing.rts.protocol.Point
+import veeci.practicing.rts.protocol.RouteUpdated
+import veeci.practicing.rts.protocol.Subscribe
+import veeci.practicing.rts.protocol.Subscribed
+import veeci.practicing.rts.protocol.TripEvent
+import veeci.practicing.rts.protocol.TripProgress
+import veeci.practicing.rts.protocol.WsErrorCodes
+import veeci.practicing.rts.shared.Actor
+import veeci.practicing.rts.shared.DomainException
+import veeci.practicing.rts.shared.UserId
+import veeci.practicing.rts.shared.geo.GeoPoint
+import veeci.practicing.rts.trip.application.api.TripQuery
+import veeci.practicing.rts.trip.application.api.TripSnapshot
+import veeci.practicing.rts.trip.domain.event.TripStatus
+import java.util.UUID
+
+/**
+ * One trip-watch socket after its endpoint has admitted the caller: the guest socket and the staff trip socket (phase
+ * 12a) speak the same protocol. The client sends `subscribe`, gets `subscribed` with the trip as it is, then live
+ * `driver_position`, `trip_progress` and `trip_event` messages until the trip ends; then the server closes the socket
+ * with 1000. Whether the caller may watch the trip is the trip context's decision (TripQuery): a guest sees their own
+ * trips, staff see every trip.
+ */
+class TripWatcher(
+    private val runner: WsSessionRunner,
+    private val trips: TripQuery,
+    private val bus: LiveUpdateBus,
+    private val watching: GuestWatching,
+) {
+    private val log = LoggerFactory.getLogger(TripWatcher::class.java)
+
+    /** Runs the session until it closes. [endpoint] names the socket in logs and metrics. */
+    suspend fun serve(
+        socket: DefaultWebSocketServerSession,
+        actor: Actor,
+        endpoint: String,
+    ) {
+        var watching: Job? = null
+        runner.run(socket, endpoint, GuestClientMessage.serializer()) { message ->
+            when (message) {
+                is Subscribe -> {
+                    if (watching == null) {
+                        watching = subscribe(socket, message, actor)
+                    } else {
+                        sendError(WsErrorCodes.INVALID_MESSAGE, "This socket already watches a trip; open another socket for another trip.")
+                    }
+                }
+            }
+        }
+        // The watcher runs in the socket's scope, so it stops when the socket closes.
+    }
+
+    /** Sends `subscribed` and starts forwarding live updates. Null if the caller may not watch this trip. */
+    private suspend fun WsSession.subscribe(
+        socket: DefaultWebSocketServerSession,
+        message: Subscribe,
+        actor: Actor,
+    ): Job? {
+        val tripId = runCatching { UUID.fromString(message.tripId) }.getOrNull()
+        val trip =
+            if (tripId == null) {
+                sendError(WsErrorCodes.INVALID_MESSAGE, "tripId must be a UUID.")
+                null
+            } else {
+                snapshot(tripId, actor) // null after an error frame: not found, or not visible to this caller
+            }
+        if (tripId == null || trip == null) return null
+        send(Subscribed(trip.toGuestTrip()))
+        return if (trip.status.isTerminal) {
+            finish(trip)
+            null
+        } else {
+            log.info("{} {} watches trip {}", actor.role, actor.userId.value, tripId)
+            socket.launch { watch(tripId, trip, actor) }
+        }
+    }
+
+    /**
+     * Forwards the trip's updates until it ends or the socket closes. The first watcher of a trip on any instance, and
+     * the last one leaving it, tell device control, which changes the driver's tracking precision. A staff watcher
+     * counts like a guest: the bus counts every subscriber of a trip, and a live view for staff wants the same
+     * precision. Two watchers who arrive at the same moment on two instances may both count as first: device control
+     * then sends the same constraint twice, which the device applies once.
+     */
+    private suspend fun WsSession.watch(
+        tripId: UUID,
+        trip: TripSnapshot,
+        actor: Actor,
+    ) {
+        val driver = trip.driverId?.let(::UserId)
+        var status = trip.status
+        if (driver != null && !bus.isWatched(tripId)) watching.firstGuestWatching(driver)
+        try {
+            // takeWhile stops collecting (and unsubscribes) after the update that ended the trip.
+            bus
+                .subscribe(tripId)
+                .takeWhile { update ->
+                    if (update is TripStatusUpdate) status = update.status
+                    forward(update, actor)
+                }.collect {}
+        } finally {
+            // Runs also when the socket was cancelled; the call is quick and never throws.
+            withContext(NonCancellable) {
+                if (driver != null && !bus.isWatched(tripId)) watching.lastGuestLeft(driver, rideStarted = status == TripStatus.IN_PROGRESS)
+            }
+        }
+    }
+
+    /** Sends one update; false once the trip has ended (the socket is closed then). */
+    private suspend fun WsSession.forward(
+        update: LiveUpdate,
+        actor: Actor,
+    ): Boolean =
+        when (update) {
+            is DriverPositionUpdate -> {
+                send(
+                    DriverPosition(
+                        update.tripId.toString(),
+                        update.point.lat,
+                        update.point.lng,
+                        update.bearingDeg,
+                        update.speedMps,
+                        update.recordedAt,
+                    ),
+                )
+                true
+            }
+
+            is TripProgressUpdate -> {
+                send(
+                    TripProgress(
+                        update.tripId.toString(),
+                        update.target,
+                        update.remainingM,
+                        update.etaS,
+                        update.basis,
+                        update.routeVersion,
+                    ),
+                )
+                true
+            }
+
+            is RouteUpdate -> {
+                send(update.toMessage())
+                true
+            }
+
+            is TripMomentUpdate -> {
+                // The protocol names events in lower case: DRIVER_ARRIVING travels as driver_arriving.
+                send(
+                    TripEvent(
+                        update.tripId.toString(),
+                        update.kind.lowercase(),
+                        update.status.name,
+                        update.at,
+                        update.remainingM,
+                        update.levelPercent,
+                        update.lastSeenAt,
+                    ),
+                )
+                true
+            }
+
+            is TripStatusUpdate -> {
+                forwardStatus(update, actor)
+            }
+        }
+
+    /** A change of stage: read the trip again, send it, and close the socket after a final stage. False once it ended. */
+    private suspend fun WsSession.forwardStatus(
+        update: TripStatusUpdate,
+        actor: Actor,
+    ): Boolean {
+        // Read the trip again: the update may be an old one (replayed or repeated), the trip is the truth.
+        val trip = snapshot(update.tripId, actor)
+        if (trip == null) {
+            close(CloseReason(CloseReason.Codes.NORMAL, "Trip no longer visible"))
+            return false
+        }
+        // Only the update that cancelled the trip knows who did it; an older update read late has none.
+        val cancelledBy = update.cancelledBy?.takeIf { trip.status == TripStatus.CANCELLED && update.status == TripStatus.CANCELLED }
+        send(TripEvent(trip.id.toString(), TripEvent.STATUS_CHANGED, trip.status.name, trip.updatedAt, cancelledBy = cancelledBy))
+        if (trip.status.isTerminal) finish(trip)
+        return !trip.status.isTerminal
+    }
+
+    /** The trip as this caller may see it, or null after telling the caller why not. */
+    private suspend fun WsSession.snapshot(
+        tripId: UUID,
+        actor: Actor,
+    ): TripSnapshot? =
+        try {
+            trips.snapshotFor(tripId, actor)
+        } catch (e: DomainException) {
+            sendError(e.code.name, e.message ?: e.code.name)
+            null
+        }
+
+    private suspend fun WsSession.finish(trip: TripSnapshot) = close(CloseReason(CloseReason.Codes.NORMAL, "Trip ${trip.status}"))
+
+    private fun TripSnapshot.toGuestTrip() =
+        GuestTrip(
+            id.toString(),
+            status.name,
+            pickup.toPoint(),
+            destination.toPoint(),
+            driverId?.toString(),
+            updatedAt,
+            currentRoute?.let { GuestRoute(it.kind, it.version, it.polyline, it.distanceM, it.durationS) },
+        )
+
+    private fun GeoPoint.toPoint() = Point(lat, lng)
+
+    // Stored reasons are upper case (OFF_ROUTE); the protocol names them in lower case (off_route).
+    private fun RouteUpdate.toMessage() = RouteUpdated(tripId.toString(), kind, version, polyline, distanceM, durationS, reason.lowercase())
+}
+
+private suspend fun WsSession.send(message: GuestServerMessage) = send(GuestServerMessage.serializer(), message)

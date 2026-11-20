@@ -115,6 +115,9 @@ create index audit_log_target on audit_log (target_type, target_id, at desc);
 
 ### Dashboard (separate repo, for reference)
 
+Superseded by [phase 12](phase-12-admin-dashboard.md), which plans the dashboard in full and proposes a folder in this
+repository instead of a separate one. The paragraph below is the original sketch.
+
 `RouteTrackingAdmin`: React + TypeScript + Vite, MapLibre GL (map), TanStack Query (REST cache),
 a small WS client for the fleet channel, Playwright for E2E against staging. Pages: Overview · Live map ·
 Drivers (list, detail) · Trips (list, live view reusing the guest channel with operator rights) · Audit.

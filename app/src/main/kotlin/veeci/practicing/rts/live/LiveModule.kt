@@ -7,14 +7,19 @@ import org.koin.dsl.module
 import veeci.practicing.rts.live.adapter.inbound.event.TripMomentListener
 import veeci.practicing.rts.live.adapter.inbound.event.TripRouteListener
 import veeci.practicing.rts.live.adapter.inbound.event.TripStatusListener
+import veeci.practicing.rts.live.adapter.inbound.ws.AdminTripSocket
 import veeci.practicing.rts.live.adapter.inbound.ws.GuestSocket
+import veeci.practicing.rts.live.adapter.inbound.ws.TripWatcher
 import veeci.practicing.rts.live.adapter.out.bus.InMemoryLiveUpdateBus
 import veeci.practicing.rts.live.adapter.out.bus.RedisLiveUpdateBus
 import veeci.practicing.rts.live.application.api.LiveUpdates
 import veeci.practicing.rts.live.application.port.out.LiveUpdateBus
 import veeci.practicing.rts.platform.events.OutboxEventHandler
 
-/** The live context's object graph: the bus (also the public LiveUpdates API), the status listener, the guest socket. */
+/**
+ * The live context's object graph: the bus (also the public LiveUpdates API), the listeners, and the two trip-watch
+ * sockets (guest and staff) on one shared [TripWatcher].
+ */
 fun liveModule(redis: Boolean): Module =
     module {
         // With Redis, updates reach the guests of every instance (phase 10); without it, only this one's.
@@ -26,5 +31,7 @@ fun liveModule(redis: Boolean): Module =
         single { TripStatusListener(get(), get()) } bind OutboxEventHandler::class
         single { TripMomentListener(get(), get()) } bind OutboxEventHandler::class
         single { TripRouteListener(get()) } bind OutboxEventHandler::class
-        single { GuestSocket(get(), get(), get(), get()) }
+        single { TripWatcher(get(), get(), get(), get()) }
+        single { GuestSocket(get()) }
+        single { AdminTripSocket(get()) }
     }

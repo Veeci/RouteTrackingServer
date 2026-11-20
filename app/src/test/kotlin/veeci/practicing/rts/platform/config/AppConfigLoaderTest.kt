@@ -8,6 +8,7 @@ import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
+import org.junit.jupiter.params.provider.ValueSource
 
 class AppConfigLoaderTest {
     private val platformEnv =
@@ -106,6 +107,30 @@ class AppConfigLoaderTest {
         AppConfigLoader
             .load(platformEnv + mapOf("APP_ENV" to "staging", "HTTP_TRUSTFORWARDEDHEADERS" to "true"))
             .http.trustForwardedHeaders shouldBe true
+    }
+
+    @ParameterizedTest
+    @EnumSource(AppEnv::class)
+    fun `TC-12-SRV-02 no profile has an admin port of its own unless HTTP_ADMINPORT sets one`(env: AppEnv) {
+        val config = AppConfigLoader.load(platformEnv + ("APP_ENV" to env.name.lowercase()))
+
+        config.http.adminPort shouldBe 0
+        config.http.splitsAdminPort shouldBe false
+    }
+
+    @Test
+    fun `HTTP_ADMINPORT gives the admin routes a port of their own`() {
+        val http = AppConfigLoader.load(platformEnv + mapOf("APP_ENV" to "staging", "HTTP_ADMINPORT" to "8081")).http
+
+        http.adminPort shouldBe 8081
+        http.splitsAdminPort shouldBe true
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["8080", "-1", "65536"])
+    fun `an admin port equal to the public port or outside 1 to 65535 refuses to load`(port: String) {
+        shouldThrow<ConfigException> { AppConfigLoader.load(platformEnv + mapOf("APP_ENV" to "staging", "HTTP_ADMINPORT" to port)) }
+            .message shouldContain "HTTP_ADMINPORT=$port"
     }
 
     @Test

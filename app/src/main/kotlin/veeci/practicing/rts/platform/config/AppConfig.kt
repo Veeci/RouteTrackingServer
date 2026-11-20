@@ -49,7 +49,17 @@ data class HttpConfig(
      * (`HTTP_TRUSTFORWARDEDHEADERS=true`) only behind a proxy that is known to set these headers (phase 1.5, T1b.4).
      */
     val trustForwardedHeaders: Boolean = false,
-)
+    /**
+     * The port of the admin plane (phase 12a): the `/api/v1/admin` routes and the `/ws/v1/admin` sockets answer only
+     * there, and the public [port] answers 404 for them. Every other route answers on both ports. 0, the default,
+     * keeps everything on [port], as in dev and test. Staging sets it (`HTTP_ADMINPORT=8081`) and publishes that port
+     * on loopback only, so the admin API never goes through Funnel.
+     */
+    val adminPort: Int = 0,
+) {
+    /** Whether the admin plane has a port of its own. */
+    val splitsAdminPort: Boolean get() = adminPort != 0
+}
 
 data class DBConfig(
     val url: String,

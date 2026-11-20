@@ -43,8 +43,11 @@ import veeci.practicing.rts.protocol.WsCloseCodes
 import veeci.practicing.rts.protocol.WsErrorCodes
 import veeci.practicing.rts.testing.SocketTestApp
 import veeci.practicing.rts.testing.TestTokens
+import veeci.practicing.rts.testing.WS_TICKETS
+import veeci.practicing.rts.testing.plantTicket
 import veeci.practicing.rts.testing.shouldMatchContract
 import veeci.practicing.rts.testing.socketApp
+import veeci.practicing.rts.testing.ticket
 import java.util.UUID
 import kotlin.random.Random
 import kotlin.time.Clock
@@ -219,7 +222,7 @@ class FleetSocketIT {
     fun `GUEST and DRIVER get no ticket`() =
         socketApp {
             listOf(TestTokens.guest(), TestTokens.driver()).forEach { token ->
-                val response = client.post(TICKETS) { bearerAuth(token) }
+                val response = client.post(WS_TICKETS) { bearerAuth(token) }
                 response.status shouldBe HttpStatusCode.Forbidden
                 response.shouldMatchContract()
                 response.bodyAsText() shouldContain "TICKET_FORBIDDEN"
@@ -248,28 +251,8 @@ class FleetSocketIT {
         get<TransactionRunner>().inTransaction { get<FleetRepository>().save(driver, Clock.System.now()) }
     }
 
-    /** A ticket the API never issues (for another role), stored as the server stores one: by its SHA-256. */
-    private suspend fun io.ktor.server.application.Application.plantTicket(role: String): String {
-        val ticket = "planted-${UUID.randomUUID()}"
-        sql(
-            "INSERT INTO ws_tickets VALUES (sha256(convert_to('$ticket', 'UTF8')), '${UUID.randomUUID()}', '$role', now() + interval '30 seconds')",
-        )
-        return ticket
-    }
-
     private suspend fun io.ktor.server.application.Application.sql(statement: String) {
         get<TransactionRunner>().inTransaction { TransactionManager.current().exec(statement) }
-    }
-
-    private suspend fun SocketTestApp.ticket(token: String = TestTokens.operator()): String {
-        val response = client.post(TICKETS) { bearerAuth(token) }
-        response.status shouldBe HttpStatusCode.OK
-        response.shouldMatchContract()
-        return ProtocolJson
-            .parseToJsonElement(response.bodyAsText())
-            .jsonObject
-            .getValue("ticket")
-            .jsonPrimitive.content
     }
 
     private fun SocketTestApp.wsClient(): HttpClient = createClient { install(WebSockets) }
@@ -321,7 +304,6 @@ class FleetSocketIT {
 
     private companion object {
         const val FLEET = "/ws/v1/admin/fleet"
-        const val TICKETS = "/api/v1/admin/ws-tickets"
         const val SIDE = 0.01
     }
 }

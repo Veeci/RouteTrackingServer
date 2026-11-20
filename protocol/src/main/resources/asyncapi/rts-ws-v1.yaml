@@ -15,11 +15,17 @@ info:
       so that this document stays complete. A newer peer may still send more fields.
     - A client must accept error codes and rejection reasons that are not listed here.
 
+    The admin channels (`adminFleet`, `adminTrip`) are served on the admin port when the server
+    has one (`HTTP_ADMINPORT`, phase 12a), and the public port answers 404 for them. Without an
+    admin port they are on the same port as the others.
+
 servers:
   local:
     host: localhost:8080
     protocol: ws
-    description: Local development server (docker compose, or ./gradlew :app:run).
+    description: |
+      Local development server (docker compose, or ./gradlew :app:run). It serves every channel unless the server has
+      an admin port; the admin channels then move there.
 
 defaultContentType: application/json
 
@@ -100,6 +106,34 @@ channels:
         $ref: '#/components/messages/fleet_delta'
       fleet_cluster:
         $ref: '#/components/messages/fleet_cluster'
+      error:
+        $ref: '#/components/messages/error'
+
+  adminTrip:
+    address: /ws/v1/admin/trip
+    title: Staff watch one trip
+    description: |
+      Phase 12a. The live trip view of the admin dashboard. It authenticates like `adminFleet`: `?ticket=` only, a
+      single-use ticket from `POST /api/v1/admin/ws-tickets`, valid 30 s. A missing, used or expired ticket is refused
+      with HTTP 401 before the upgrade. A ticket of any role but OPERATOR or ADMIN gets close 4403.
+
+      The messages and rules are the `guest` channel's: the client sends `subscribe`, the server answers `subscribed`
+      and then sends live messages until the trip reaches a final stage, then that `trip_event` and close 1000. The one
+      difference is which trips a caller sees: staff may watch any trip. A trip that does not exist answers `error`
+      TRIP_NOT_FOUND, and the socket stays open. Reconnect with a new ticket.
+    messages:
+      subscribe:
+        $ref: '#/components/messages/subscribe'
+      subscribed:
+        $ref: '#/components/messages/subscribed'
+      driver_position:
+        $ref: '#/components/messages/driver_position'
+      trip_progress:
+        $ref: '#/components/messages/trip_progress'
+      trip_event:
+        $ref: '#/components/messages/trip_event'
+      route_updated:
+        $ref: '#/components/messages/route_updated'
       error:
         $ref: '#/components/messages/error'
 
@@ -238,6 +272,36 @@ operations:
     summary: Report a problem with one client message, such as an invalid bbox. The session stays open.
     messages:
       - $ref: '#/channels/adminFleet/messages/error'
+
+  receiveAdminTripSubscribe:
+    action: receive
+    channel:
+      $ref: '#/channels/adminTrip'
+    summary: Start watching any trip, as staff.
+    messages:
+      - $ref: '#/channels/adminTrip/messages/subscribe'
+    reply:
+      channel:
+        $ref: '#/channels/adminTrip'
+      messages:
+        - $ref: '#/channels/adminTrip/messages/subscribed'
+  sendAdminTripUpdates:
+    action: send
+    channel:
+      $ref: '#/channels/adminTrip'
+    summary: Live updates of the watched trip, the same as on the guest channel.
+    messages:
+      - $ref: '#/channels/adminTrip/messages/driver_position'
+      - $ref: '#/channels/adminTrip/messages/trip_progress'
+      - $ref: '#/channels/adminTrip/messages/trip_event'
+      - $ref: '#/channels/adminTrip/messages/route_updated'
+  sendAdminTripError:
+    action: send
+    channel:
+      $ref: '#/channels/adminTrip'
+    summary: Report a problem with one client message, such as an unknown trip. The session stays open.
+    messages:
+      - $ref: '#/channels/adminTrip/messages/error'
 
 components:
   messages:
