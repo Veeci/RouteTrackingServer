@@ -566,17 +566,18 @@ The four choices approved on 2026-11-20 are built as chosen:
   - Driver detail decides "enabled" from the account's `disabledAt`, not from `driver.enabled`. The detail reads the
     account in the same request, but `driver.enabled` comes from the fleet read model, which an outbox event updates a
     moment later. Right after a disable, the refetch said "enabled" again. TC-12-E2E-02 found it. The unit test's mock
-    now lags the same way. A server change could set `driver.enabled` from the account when there is one.
-  - The server keeps a command's reason only for SET_CONSTRAINT, inside the command. The COMMAND_ISSUED audit row has
-    no reason for any kind. The dashboard sends the reason with every kind (C4), and the server drops it for
-    REGISTER_GEOFENCES and FLUSH_QUEUE. Recording `reason` on COMMAND_ISSUED would make C4 useful for commands.
+    now lags the same way. PR #61 changed the server. The detail now takes `driver.enabled` from the account when it
+    reads one, so the two fields agree. The page and its mock still use `disabledAt`, which stays correct.
+  - The server kept a command's reason only for SET_CONSTRAINT, inside the command, and dropped it for
+    REGISTER_GEOFENCES and FLUSH_QUEUE. PR #61 records the reason on the COMMAND_ISSUED audit row for every kind, so
+    the reason the dashboard asks for (C4) now reaches the audit log.
   - The date filters of Audit and Reports are whole days in the browser's time zone, kept in the URL as `YYYY-MM-DD`.
     The API gets the instants of local midnight: the first day's, and the one after the last day. A shared link opened
     in another time zone covers other instants. The 31-day check uses the same instants as the request.
   - TC-12-E2E-03 says APPLIED, not DELIVERED. `CommandStatus` has no DELIVERED, and the simulator answers APPLIED
     (`DriverClient.kt:215`).
-  - The code answers INVALID_COMMAND with 422, which the contract does not list for `POST …/commands`. The body check
-    finds the same faults first and answers 400, so the 422 cannot happen today.
+  - The code answers INVALID_COMMAND with 422, which the contract did not list for `POST …/commands` until PR #61. The
+    body check finds the same faults first and answers 400, so the 422 cannot happen today.
   - jsdom lacks `document.fonts`, which Mantine's autosize textarea uses, and blob URLs. `src/test/setup.ts` adds both.
 
 ## As built (12d)

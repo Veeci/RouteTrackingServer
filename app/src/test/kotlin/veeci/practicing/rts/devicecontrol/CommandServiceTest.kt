@@ -10,11 +10,13 @@ import veeci.practicing.rts.devicecontrol.domain.CommandError
 import veeci.practicing.rts.devicecontrol.domain.CommandId
 import veeci.practicing.rts.devicecontrol.domain.CommandPayload
 import veeci.practicing.rts.devicecontrol.domain.CommandStatus
+import veeci.practicing.rts.devicecontrol.domain.GeofenceRegion
 import veeci.practicing.rts.devicecontrol.domain.TrackingAccuracy
 import veeci.practicing.rts.shared.Actor
 import veeci.practicing.rts.shared.DomainException
 import veeci.practicing.rts.shared.Role
 import veeci.practicing.rts.shared.UserId
+import veeci.practicing.rts.shared.geo.GeoPoint
 import veeci.practicing.rts.testing.audit.InMemoryAuditLog
 import veeci.practicing.rts.testing.devicecontrol.InMemoryCommandEventOutbox
 import veeci.practicing.rts.testing.devicecontrol.InMemoryDeviceCommandRepository
@@ -66,6 +68,26 @@ class CommandServiceTest {
                 it.targetId shouldBe driver.value.toString()
                 it.details shouldBe mapOf("kind" to "SET_CONSTRAINT", "commandId" to command.id.value.toString())
             }
+        }
+
+    @Test
+    fun `the reason reaches the audit row for every kind, and a blank or missing reason is stored as none`() =
+        runTest {
+            val geofences = CommandPayload.RegisterGeofences(listOf(GeofenceRegion("depot", GeoPoint(21.03, 105.85), 150.0)))
+            service.issue(driver, high, admin, reason = "Battery complaints")
+            service.issue(driver, geofences, admin, reason = "New depot")
+            service.issue(driver, CommandPayload.FlushQueue, admin, reason = "Missing points")
+            service.issue(driver, CommandPayload.FlushQueue, admin, reason = " ")
+            service.issue(driver, CommandPayload.FlushQueue, admin)
+
+            audit.entries.map { it.details.getValue("kind") to it.reason } shouldBe
+                listOf(
+                    "SET_CONSTRAINT" to "Battery complaints",
+                    "REGISTER_GEOFENCES" to "New depot",
+                    "FLUSH_QUEUE" to "Missing points",
+                    "FLUSH_QUEUE" to null,
+                    "FLUSH_QUEUE" to null,
+                )
         }
 
     @Test

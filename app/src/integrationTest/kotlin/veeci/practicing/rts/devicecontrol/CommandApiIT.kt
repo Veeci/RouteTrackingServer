@@ -17,10 +17,17 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Test
 import org.testcontainers.junit.jupiter.Testcontainers
+import veeci.practicing.rts.devicecontrol.application.port.out.DeviceCommandRepository
+import veeci.practicing.rts.devicecontrol.domain.CommandError
+import veeci.practicing.rts.devicecontrol.domain.DeviceCommand
+import veeci.practicing.rts.shared.DomainException
+import veeci.practicing.rts.testing.TestDatabase
 import veeci.practicing.rts.testing.TestTokens
+import veeci.practicing.rts.testing.devicecontrol.InMemoryDeviceCommandRepository
 import veeci.practicing.rts.testing.problem
 import veeci.practicing.rts.testing.shouldMatchContract
 import veeci.practicing.rts.testing.testApp
+import org.koin.dsl.module as koinModule
 
 /** The admin command API end to end, every response checked against openapi/rts-v1.yaml. */
 @Testcontainers(disabledWithoutDocker = true)
@@ -69,6 +76,62 @@ class CommandApiIT {
         }
 
     @Test
+    fun `every kind's reason reaches its COMMAND_ISSUED audit entry, and a command without one has none`() =
+        testApp {
+            val region = """{"id":"depot","lat":21.03,"lng":105.85,"radiusM":150}"""
+            val bodies =
+                listOf(
+                    Triple("SET_CONSTRAINT", "support", highAccuracy),
+                    Triple("REGISTER_GEOFENCES", "New depot", """{"kind":"REGISTER_GEOFENCES","regions":[$region],"reason":"New depot"}"""),
+                    Triple("FLUSH_QUEUE", "Missing points", """{"kind":"FLUSH_QUEUE","reason":"Missing points"}"""),
+                    Triple("FLUSH_QUEUE", null, """{"kind":"FLUSH_QUEUE"}"""),
+                )
+            val expected =
+                bodies.map { (kind, reason, body) ->
+                    val issued = client.issue(body, admin)
+                    issued.status shouldBe HttpStatusCode.Accepted
+                    AuditedCommand(
+                        kind,
+                        issued
+                            .json()
+                            .getValue("commandId")
+                            .jsonPrimitive.content,
+                        reason,
+                    )
+                }
+
+            val audit = client.get("/api/v1/admin/audit?targetId=${driverId.value}&action=COMMAND_ISSUED") { bearerAuth(admin) }
+            audit.shouldMatchContract()
+            val recorded =
+                audit
+                    .json()
+                    .getValue("items")
+                    .jsonArray
+                    .reversed() // newest first on the wire
+                    .map { item ->
+                        val details = item.jsonObject.getValue("details").jsonObject
+                        AuditedCommand(
+                            kind = details.getValue("kind").jsonPrimitive.content,
+                            commandId = details.getValue("commandId").jsonPrimitive.content,
+                            reason = item.jsonObject["reason"]?.jsonPrimitive?.content, // absent, not null, without one
+                        )
+                    }
+            recorded shouldBe expected
+        }
+
+    @Test
+    fun `a command the domain refuses is INVALID_COMMAND, a 422 the contract lists`() =
+        testApp(
+            env = TestDatabase.freshDatabaseEnv(), // the refusing repository must not see other tests' outbox events
+            overrides = listOf(koinModule { single<DeviceCommandRepository> { RefusingRepository() } }),
+        ) {
+            val response = client.issue(highAccuracy, admin) // shouldMatchContract: the 422 must be in rts-v1.yaml
+
+            response.status shouldBe HttpStatusCode.UnprocessableEntity
+            response.problem().code shouldBe "INVALID_COMMAND"
+        }
+
+    @Test
     fun `TC-5-API-01 a guest or a driver may not send commands`() =
         testApp {
             for (token in listOf(TestTokens.guest(), TestTokens.driver())) {
@@ -114,4 +177,21 @@ class CommandApiIT {
         testApp {
             client.issue(highAccuracy, token = null).status shouldBe HttpStatusCode.Unauthorized
         }
+
+    private suspend fun HttpResponse.json() = Json.parseToJsonElement(bodyAsText()).jsonObject
+
+    private data class AuditedCommand(
+        val kind: String,
+        val commandId: String,
+        val reason: String?,
+    )
+
+    /**
+     * Refuses every command the way the domain's own check does. Over HTTP the request check answers those cases with
+     * 400 first, so this is the only way to reach INVALID_COMMAND through the real route and error handling.
+     */
+    private class RefusingRepository : DeviceCommandRepository by InMemoryDeviceCommandRepository() {
+        override suspend fun insert(command: DeviceCommand): Unit =
+            throw DomainException(CommandError.INVALID_COMMAND, "refused by the test")
+    }
 }
