@@ -127,22 +127,26 @@ jobs:
 
       # APP_ENV=test mounts the dev-token route and migrates on start. CI has no road graph: the server logs that and
       # serves everything else, so the job waits for /health/live, not /health/ready. The JWT secret is new for every
-      # run and never reaches the log.
+      # run and never reaches the log. The 50 simulated drivers, the browser (through the preview proxy) and the tests
+      # all reach the server from 127.0.0.1, so they share one per-IP rate limit. Each driver asks for a token and
+      # opens a socket at start and on every reconnect, so the default 300 a minute is too tight.
       - name: Start the server
         env:
           APP_ENV: test
           DB_URL: jdbc:postgresql://localhost:5432/rts
           DB_USER: rts
           DB_PASSWORD: e2e-only
+          HTTP_RATELIMITPERMINUTE: "3000"
         run: |
           JWT_SECRET="$(openssl rand -hex 32)" nohup app/build/install/app/bin/app > server.log 2>&1 &
           curl -fsS --retry 30 --retry-delay 2 --retry-all-errors http://localhost:8080/health/live
 
-      # Three drivers that loop a Hanoi route and answer every command with `applied` (TC-12-E2E-03). They run longer
-      # than the job may, so nothing waits for them to stop. The tests wait for an online driver with expect.poll.
+      # 50 drivers that loop Hanoi routes and answer every command with `applied`. TC-12-E2E-01 waits until all 50 are
+      # online and counts them on the map; TC-12-E2E-03 sends a command to one. They run longer than the job may, so
+      # nothing waits for them to stop. The tests wait with expect.poll.
       - name: Start the simulator
         run: |
-          nohup tools/simulator/build/install/simulator/bin/simulator fleet --drivers 3 --dashboards 0 --duration 30m \
+          nohup tools/simulator/build/install/simulator/bin/simulator fleet --drivers 50 --dashboards 0 --duration 30m \
             > simulator.log 2>&1 &
 
       - uses: actions/setup-node@v7
@@ -158,7 +162,8 @@ jobs:
           npm run generate
           npx playwright install --with-deps chromium
 
-      # Builds the app, serves it with `vite preview` (production headers, proxy to :8080) and runs Playwright.
+      # Builds the app, serves it with `vite preview` (production headers, proxy to :8080) and runs Playwright. The map
+      # test answers the tile host's requests itself, so the job never depends on OpenFreeMap.
       - name: E2E
         working-directory: admin-web
         run: npm run e2e

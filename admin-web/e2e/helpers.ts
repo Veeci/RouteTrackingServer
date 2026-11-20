@@ -46,3 +46,34 @@ export function watchConsole(page: Page): string[] {
   });
   return problems;
 }
+
+/** The map's tile host (admin-web/csp.ts). */
+const TILE_HOST = 'https://tiles.openfreemap.org';
+
+/**
+ * An empty base map: a background and OpenFreeMap's glyph URL, which the cluster counts need. The real style would
+ * make the test depend on a server outside CI.
+ */
+const BLANK_STYLE = {
+  version: 8,
+  name: 'E2E blank',
+  glyphs: `${TILE_HOST}/fonts/{fontstack}/{range}.pbf`,
+  sources: {},
+  layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#eef1f4' } }],
+};
+
+/**
+ * Answers every request to the tile host in the test itself: the style with {@link BLANK_STYLE}, anything else (a
+ * glyph range) with an empty body, which MapLibre reads as no glyphs. The browser still checks each request against
+ * the page's Content Security Policy first, so a policy without the tile host fails the test.
+ */
+export async function serveBlankTiles(page: Page): Promise<void> {
+  await page.route(`${TILE_HOST}/**`, async (route) => {
+    const headers = { 'Access-Control-Allow-Origin': '*' };
+    if (new URL(route.request().url()).pathname.startsWith('/styles/')) {
+      await route.fulfill({ json: BLANK_STYLE, headers });
+    } else {
+      await route.fulfill({ body: '', contentType: 'application/x-protobuf', headers });
+    }
+  });
+}

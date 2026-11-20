@@ -1,7 +1,7 @@
 # Phase 12 — Admin Dashboard
 
 Branch: `feat/p12-admin-dashboard` · Depends on: 11 (admin API, fleet socket, tickets), 1.5 for the staging deploy only ·
-Status: **12a to 12c built** (2026-11-20), 12d to 12g planned. The decisions at the end were approved on 2026-11-20,
+Status: **12a to 12d built** (2026-11-20), 12e to 12g planned. The decisions at the end were approved on 2026-11-20,
 all as recommended
 
 ## Goal
@@ -184,8 +184,9 @@ the UI shows a message per `code`, with the server's `detail` as the fallback. A
 ### Security in the browser
 
 - **Content Security Policy.** `default-src 'self'`; `script-src 'self'`; `connect-src 'self'` plus the API and `wss:`
-  origins when they differ, plus the tile host; `img-src 'self' data: blob:` plus the tile host; `worker-src blob:`
-  (MapLibre runs its workers from blob URLs); `frame-ancestors 'none'`.
+  origins when they differ, plus the tile host `https://tiles.openfreemap.org`; `img-src 'self' data: blob:` plus the
+  tile host; `worker-src 'self'` (MapLibre's worker file is served from the app's own origin, 12d choice C1);
+  `frame-ancestors 'none'`. `admin-web/csp.ts` holds the full policy.
 - **No third-party scripts**, no analytics, no fonts from a CDN.
 - **Text from the server** (names, reasons) is rendered as text. React escapes it, and the app never uses
   `dangerouslySetInnerHTML`.
@@ -277,7 +278,7 @@ Phone with the SDK (anywhere)
       Overview page.
 - [x] T12.5 (12c) Drivers list and detail, disable and enable, commands, session health, CSV export; Audit and
       Reports pages.
-- [ ] T12.6 (12d) Live map: fleet client, marker and cluster layers, filters, side panel, hidden-tab pause.
+- [x] T12.6 (12d) Live map: fleet client, marker and cluster layers, filters, side panel, hidden-tab pause.
 - [ ] T12.7 (12e) Trips list and detail with the track on a map, exports, cancel, live trip view.
 - [ ] T12.8 (12f) `admin-web` image in CI, staging compose service, `tailscale serve` entry, deploy and rollback with
       the server, Playwright smoke test against staging, staging guide update.
@@ -577,6 +578,120 @@ The four choices approved on 2026-11-20 are built as chosen:
   - The code answers INVALID_COMMAND with 422, which the contract does not list for `POST …/commands`. The body check
     finds the same faults first and answers 400, so the 422 cannot happen today.
   - jsdom lacks `document.fonts`, which Mantine's autosize textarea uses, and blob URLs. `src/test/setup.ts` adds both.
+
+## As built (12d)
+
+The four choices approved on 2026-11-20 are built as chosen:
+
+| # | Choice |
+|---|---|
+| C1 | MapLibre's worker runs from the app's own origin. `setWorkerUrl` points at `maplibre-gl-worker.mjs`, which Vite copies into `dist/assets/` through a `?url` import (`src/map/FleetMap.tsx`). `csp.ts` says `worker-src 'self'` and adds `https://tiles.openfreemap.org` to `connect-src` and `img-src`. Checked in the browser under `vite preview`: the style, sprites, glyphs, vector tiles and raster tiles load from that one host, with no violation. Under the 12b policy the same page logs two violations, the worker and the style, so the E2E console check catches a wrong policy |
+| C2 | No clustering in the browser. Below the server's 5 000-driver threshold every driver is a dot. Only `fleet_cluster` cells draw as clusters |
+| C3 | No smooth movement. Markers jump on each delta, every 2 s |
+| C4 | The E2E test sees the map through the status line's driver count, the `?driver=` URL and the side panel's live position. It also checks that MapLibre's canvas is on the page and the WebGL message is not. No hook on `window` |
+
+The defaults the user accepted are built as well. The URL holds `online`, `onTrip`, `lat`, `lng`, `zoom` and `driver`
+(`src/routes/map/search.ts`). A map move replaces the history entry, and a filter change or a selection adds one. A
+shared link opens the same view. The 12c command form has no geofence map picker.
+
+- **The fleet client (`src/fleet/client.ts`).** A class outside React with the states `connecting`, `live`, `waiting`,
+  `paused`, `forbidden` and `stopped`. It gets a ticket, opens `/ws/v1/admin/fleet?ticket=` on the page's own origin,
+  and sends `fleet_subscribe` once the socket is open. Each new socket sends the current area and filters again. A close
+  waits with full-jitter backoff (`src/fleet/backoff.ts`, 1 s doubling to 30 s, as the simulator's `Backoff.kt`), then
+  gets a new ticket. 1013 reconnects at once, 4403 stops with "No permission", and 1006 waits like any drop. A hidden
+  tab closes the socket with 1000. Visible again, the client connects with a new ticket and gets a fresh snapshot. The
+  client takes a socket factory, a visibility source and a random function, so tests pass fakes.
+- **The ticket request (`src/fleet/ticket.ts`)** runs as a TanStack Query mutation through `MutationObserver`. The query
+  client's mutation cache then applies the 12b rules: a 401 clears the session and opens the login page, and the
+  request never retries on its own. The fleet client stops after a 401, shows "No permission" after a 403, and waits
+  at least `Retry-After` after a 429.
+- **Schemas (`src/fleet/messages.ts`).** zod schemas for `fleet_snapshot`, `fleet_delta`, `fleet_cluster` and `error`,
+  with the contract's ranges. They follow its compatibility rules: unknown fields are dropped and unknown error codes
+  pass. `driverId` is any non-empty string, because a UUID check would drop a whole snapshot over one odd id. A frame
+  that is not JSON, not text, or fails its schema is logged with `console.warn` and dropped, and the socket stays.
+- **The marker store (`src/fleet/store.ts`).** A Zustand vanilla store. A snapshot replaces every marker, a delta
+  upserts and removes, clusters replace the clusters and clear the markers, and a snapshot after clusters restores
+  them. A delta while clustered changes nothing. Every change makes a new `Map`, so readers compare by reference.
+  `syncGeoJson` (`src/fleet/geojson.ts`) converts at most once per animation frame and sets a source only when its part
+  of the store is a new object. The status line and the side panel subscribe to the few values they show.
+- **The map (`src/map/`).** MapLibre GL JS 6.19.0 with OpenFreeMap's liberty style and its attribution. Layers, bottom
+  to top: cluster circles sized by count, cluster counts, a ring for the selected driver, the driver dots (green
+  online, blue on a trip, grey offline; offline wins), and heading arrows from zoom 12 for drivers with a bearing. The
+  arrow is an SDF image drawn on a canvas, so the app needs no sprite file. The map is flat, north up and one world
+  wide, so the bbox matches what the operator sees and never crosses the antimeridian. A click within 6 px of a dot
+  selects the driver, and a cluster click zooms in 2 levels. The first subscription goes out at once, before the base
+  style loads. Later ones go out after the map has stood still for 300 ms. If the base style fails to load, the map
+  switches to a plain background and says so, and the drivers still draw. Without WebGL 2 the page shows a message,
+  and the status line and the side panel still work.
+- **The page (`src/routes/map/`).** Filters `online` and `onTrip`, a status line (connection, drivers in view or the
+  clusters' total, the time of the last update, a colour legend), the map, and a side panel for `?driver=`. The panel
+  takes the name and the account state from the 12c `driverQuery`, and the live position, heading, trip stage, battery
+  and last seen time from the store. A driver outside the area shows its last known position from the API. The Drivers
+  page and the map share the filter options in `src/routes/flags.ts`.
+- **Chunks.** The page and MapLibre load only on `/map`. MapLibre has a chunk of its own
+  (`build.rolldownOptions.output.codeSplitting`), so an app change keeps its file name and the browser's cached copy.
+  `chunkSizeWarningLimit` is 1 100 kB: MapLibre is the one chunk above 500 kB, and the warning still fires if it ever
+  lands in the entry.
+
+  | Chunk | Size | Gzipped |
+  |---|---|---|
+  | First load: entry, `client`, `route` and `roles` | 532.0 kB | 166.7 kB |
+  | Map page (`MapPage`) | 19.8 kB | 7.8 kB |
+  | MapLibre (`maplibre`) | 1 060.1 kB | 292.3 kB |
+  | MapLibre CSS | 71.3 kB | 10.3 kB |
+  | MapLibre worker (`maplibre-gl-worker`, an asset) | 550.8 kB | not reported |
+
+  The first load was 528 kB (165 kB gzipped) in 12c, so the map adds 4 kB (2 kB gzipped) to it.
+- **Tests.** 214 Vitest tests. Line coverage is 100 % in `src/api`, 98 % in `src/auth` and 99 % in `src/fleet`, which
+  now has the same 80 % gate. The socket fixtures are the protocol's golden frames
+  (`protocol/src/test/resources/golden/`), parsed with the app's own schemas in `src/test/fleet.ts`, so a contract
+  change breaks the unit tests.
+
+  | Case | Where |
+  |---|---|
+  | TC-12-FL-01 | `src/fleet/store.test.ts` |
+  | TC-12-FL-02 | `src/fleet/client.test.ts`: a close, the wait, a new ticket, and the current area on the new socket |
+  | TC-12-FL-03 | `client.test.ts` for 4403 and 1013, `src/routes/map/MapPage.test.tsx` for "No permission" on the page |
+  | TC-12-FL-04 | `client.test.ts`: hidden closes with 1000 and cancels a pending retry or ticket, visible reconnects |
+  | TC-12-FL-05 | `client.test.ts`: a bad snapshot, a frame that is not JSON, an unknown type and a binary frame |
+  | 1006 and the backoff reset | `client.test.ts`: waits of 0.5, 1 and 2 s with a fixed random, back to 0.5 s after a snapshot or clusters, capped at 30 s |
+  | Page | `MapPage.test.tsx`: the real client over MSW's WebSocket mock (`fleetSocket` in `src/test/server.ts`) and a stub map |
+  | Layers | `src/map/layers.test.ts` runs MapLibre's style validator over the layers |
+  | TC-12-E2E-01 | `e2e/map.spec.ts` |
+
+- **The E2E job** starts `simulator fleet --drivers 50` and runs the server with `HTTP_RATELIMITPERMINUTE=3000`. The
+  drivers, the browser through the preview proxy and the tests all reach the server from 127.0.0.1, so they share one
+  limit. TC-12-E2E-01 waits until the API sees all 50 drivers online, opens a shared link with `online=true`, a view of
+  Hanoi and a driver, and expects "50 drivers in view" within 5 s of the login. It then polls the panel's position until
+  it changes. `serveBlankTiles` (`e2e/helpers.ts`) answers every request to the tile host with a blank style or an empty
+  body through `page.route`. The browser checks each request against the policy first, so the test still fails on a
+  policy without the tile host. The 12c tests pass with 50 drivers.
+- **TC-12-PERF-01** ran on the Mac (Apple M4, Chromium with ANGLE on Metal) against `simulator fleet --drivers 5000
+  --dashboards 0`, with all 5 000 drivers in view and a delta every 2 s. Over 20 s the page drew 100 frames a second,
+  the slowest frame took 12 ms, and no long task ran. While panning for 10 s it drew 99.9 frames a second, and the
+  slowest frame took 22 ms. The target is 30.
+- **Differences from the plan and the brief.**
+  - MapLibre 6 has no separate CSP build. Its one ESM build starts a module worker from `maplibre-gl-worker.mjs`, found
+    next to its own file. A bundler moves that file, so `setWorkerUrl` must point at the copy. The worker holds the one
+    `eval` in MapLibre, inside `importScriptInWorkers`, which loads plugins. The app never calls it.
+  - MapLibre 6 needs WebGL 2, not WebGL 1. The page makes a test context, releases it at once, and catches the
+    constructor's `GPUInitializationError` too.
+  - No Chromium flag was needed for WebGL in CI. Playwright 1.65 already starts Chromium with
+    `--enable-unsafe-swiftshader`, and a check in the `mcr.microsoft.com/playwright:v1.65.1-noble` image got a WebGL 2
+    context with its default switches.
+  - The backoff starts over after clusters too, not only after a snapshot, because clusters also prove the subscription
+    works.
+  - `img-src` has the tile host as the plan says, though Chromium loads the raster tiles and the sprite with `fetch`,
+    which `connect-src` covers.
+  - The simulator sends no bearing, so the heading arrows were not seen against it. The layer passes the style
+    validator.
+  - Server clusters were not seen on a live map. The PERF run had exactly 5 000 drivers, which the server still sends
+    one by one. A second run with 5 100 drivers, started right after it on the same server, showed no driver online
+    in the four minutes I watched. The fleet read model most likely lagged while the server worked through the first
+    run's sessions and events, and the 50-driver E2E run right after a restart met the same lag once. The store,
+    GeoJSON and page tests cover clusters with the golden `fleet_cluster` frame, and the cluster layers pass the style
+    validator.
+  - The status line is a labelled region, not a live region: a screen reader would read it out every 2 s.
 
 ## Definition of Done
 

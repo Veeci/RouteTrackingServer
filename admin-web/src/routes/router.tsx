@@ -14,6 +14,7 @@ import { AppLayout } from '../components/AppLayout';
 import { NotFound } from '../components/NotFound';
 import { auditSearch } from './audit/search';
 import { driversSearch } from './drivers/search';
+import { mapSearch } from './map/search';
 import { reportsSearch } from './reports/search';
 
 export interface RouterContext {
@@ -59,6 +60,14 @@ const overviewRoute = createRoute({
   component: lazyRouteComponent(() => import('./overview/OverviewPage'), 'OverviewPage'),
 });
 
+const mapRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/map',
+  validateSearch: mapSearch,
+  // MapLibre loads with this page only, in the page's own chunks.
+  component: lazyRouteComponent(() => import('./map/MapPage'), 'MapPage'),
+});
+
 const driversRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/drivers',
@@ -88,7 +97,7 @@ const reportsRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
-  appRoute.addChildren([overviewRoute, driversRoute, driverRoute, auditRoute, reportsRoute]),
+  appRoute.addChildren([overviewRoute, mapRoute, driversRoute, driverRoute, auditRoute, reportsRoute]),
 ]);
 
 export interface AppRouterOptions {
