@@ -167,7 +167,7 @@ returned only to the driver and to admins. A guest who asks for `leg=approach` g
 - [x] T8.6 `DouglasPeucker`.
 - [x] T8.7 Timeline merge, `GET /track`.
 - [x] T8.8 `GpxWriter`, `GeoJsonWriter`, streaming export endpoints.
-- [ ] T8.9 OpenAPI contract and golden files for every new endpoint, written first.
+- [x] T8.9 OpenAPI contract and golden files for every new endpoint, written first.
 
 Slices: **8a** = T8.1 to T8.4, **8b** = T8.5, **8c** = T8.6 and T8.7, **8d** = T8.8. T8.9 goes with each slice.
 

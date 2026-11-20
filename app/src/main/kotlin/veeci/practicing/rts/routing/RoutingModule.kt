@@ -6,6 +6,7 @@ import org.koin.dsl.module
 import veeci.practicing.rts.platform.config.RoutingConfig
 import veeci.practicing.rts.platform.observability.HealthIndicator
 import veeci.practicing.rts.routing.adapter.inbound.health.GraphHealthIndicator
+import veeci.practicing.rts.routing.adapter.out.osm.CachedGraphSource
 import veeci.practicing.rts.routing.adapter.out.osm.OsmFileGraphSource
 import veeci.practicing.rts.routing.application.GraphRoutePlanner
 import veeci.practicing.rts.routing.application.PlannerSettings
@@ -24,7 +25,7 @@ import java.nio.file.Path
 fun routingModule(config: RoutingConfig): Module =
     module {
         single { RoadGraphHolder() }
-        single<RoadGraphSource> { OsmFileGraphSource(Path.of(config.graphPath)) }
+        single<RoadGraphSource> { graphSource(config) }
         single { RoadGraphLoader(get(), get()) }
         // A* settles about a quarter of Dijkstra's nodes on the DISTANCE metric and returns the same cost (6b).
         single<ShortestPath> { AStar() }
@@ -33,3 +34,9 @@ fun routingModule(config: RoutingConfig): Module =
         }
         single { GraphHealthIndicator(get()) } bind HealthIndicator::class
     }
+
+/** The OSM file through the binary cache, or the OSM file alone when `routing.graphCacheDir` is empty. */
+private fun graphSource(config: RoutingConfig): RoadGraphSource {
+    val osm = Path.of(config.graphPath)
+    return if (config.graphCacheDir.isBlank()) OsmFileGraphSource(osm) else CachedGraphSource(osm, Path.of(config.graphCacheDir))
+}

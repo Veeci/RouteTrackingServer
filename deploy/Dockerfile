@@ -38,6 +38,9 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=build --chown=app:app /workspace/app/build/install/app/ /app/
 COPY --from=build --chown=app:app /workspace/otel/ /app/otel/
+# The graph cache directory, owned by app. A new named volume mounted here copies this ownership, so the app can write
+# its cache. Without it, Docker would create the mount point as root.
+RUN mkdir -p /app/data/osm/cache && chown -R app:app /app/data
 
 USER app
 EXPOSE 8080

@@ -41,9 +41,13 @@ services:
       HTTP_TRUSTFORWARDEDHEADERS: ${HTTP_TRUSTFORWARDEDHEADERS:-false}
     volumes:
       - /srv/rts/osm/hanoi.osm:/app/data/osm/hanoi.osm:ro
+      # The binary graph cache (slice 6d): a start whose hanoi.osm matches it skips the XML parse. The OSM file stays
+      # read-only. Only this small volume is writable. Losing it costs one slow start, never data.
+      - osm-cache:/app/data/osm/cache
     ports:
       - "127.0.0.1:8080:8080"   # loopback only: Funnel is the one public entry
     mem_limit: 2g               # MaxRAMPercentage=75 in the image gives a 1.5 GB heap
 
 volumes:
   db-data:
+  osm-cache:

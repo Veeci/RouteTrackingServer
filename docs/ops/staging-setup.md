@@ -238,7 +238,8 @@ Layout:
 | `/srv/rts/.env` | Secrets, mode 600 |
 | `/srv/rts/compose.yml`, `deploy.sh`, `backup.sh` | Copied in by each deploy |
 | `/srv/rts/current-tag` | The SHA that is running now |
-| `/srv/rts/osm/hanoi.osm` | The road graph |
+| `/srv/rts/osm/hanoi.osm` | The road graph, mounted read-only |
+| Docker volume `rts-staging_osm-cache` | The binary graph cache, `hanoi.graph`, mounted at `/app/data/osm/cache` |
 | `/srv/rts/backups/` | Local dumps, 14 days |
 
 ### 3.3 Write the secrets file
@@ -268,17 +269,29 @@ sudo grep STAGING_ACCESS_TOKEN /srv/rts/.env
 ### 3.4 Download the Hanoi road graph
 
 ```bash
-sudo -u deploy curl --fail --show-error --output /srv/rts/osm/hanoi.osm \
+sudo -u deploy curl --fail --show-error --user-agent 'rts-osm-download/1.0' --output /srv/rts/osm/hanoi.osm \
   --data-urlencode 'data=[out:xml][timeout:180];way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service)(_link)?$"](20.95,105.75,21.10,105.90);(._;>;);out body;' \
   https://overpass-api.de/api/interpreter
 ls -lh /srv/rts/osm/hanoi.osm
 ```
 
-This is the same query as [`docs/data/osm.md`](../data/osm.md). Expect 100 to 200 MB. If Overpass answers 429 or
-504, wait a minute and retry.
+This is the same query as [`docs/data/osm.md`](../data/osm.md). Expect about 30 MB. Keep `--user-agent`: Overpass
+answered 406 without it. If it answers 429, 502 or 504, wait a minute and retry.
 
-Check: the file exists and is larger than 50 MB. Do this before the first deploy. If the file is missing when the
+Check: the file exists, is larger than 20 MB and ends with `</osm>` (`tail -c 20 /srv/rts/osm/hanoi.osm`). Do this before the first deploy. If the file is missing when the
 container starts, Docker creates an empty directory at that path and the graph load fails.
+
+The first start after a new `hanoi.osm` parses the XML, which takes tens of seconds on this laptop, and writes a
+binary cache to the `osm-cache` volume. Later starts hash the OSM file, find a matching cache and read it in well under
+a second. Check it in the app logs:
+
+```bash
+sudo docker logs rts-staging-app-1 2>&1 | grep -i "road graph"
+```
+
+The first start logs "Wrote the road graph cache". Later starts log "Read the road graph from the cache". A new
+download of `hanoi.osm` changes its hash, so the next start rebuilds the cache by itself. To force a rebuild, remove
+the volume while the app is stopped: `sudo docker volume rm rts-staging_osm-cache`.
 
 ### 3.5 Turn on Funnel
 
@@ -623,6 +636,7 @@ All commands run on Laptop 2. Reach it with `ssh <your-user>@rts-staging` from a
 | Public URL answers 502 | App not running or not on `127.0.0.1:8080` | Check `docker ps` and the app logs |
 | Public URL does not resolve | Public DNS not out yet, or Funnel off | Wait 10 minutes. Check `tailscale funnel status` |
 | `/health/ready` stays DOWN on `graph` | `hanoi.osm` missing, or a directory instead of a file | `ls -l /srv/rts/osm/`, redo step 3.4, restart the app |
+| Every start takes tens of seconds and logs "Could not write the road graph cache" | The `osm-cache` volume is not writable by the `app` user | Stop the app, `sudo docker volume rm rts-staging_osm-cache`, deploy again so the volume is created from the image |
 | Deploy job fails at "Join the tailnet" | OAuth client lacks `auth_keys` write, or `tag:ci` is not in `tagOwners` | Fix in the admin console |
 | Deploy job fails at `scp` with "Host key verification failed" | Laptop reinstalled, so its host key changed | Redo `ssh-keyscan` and update `STAGING_KNOWN_HOSTS` |
 | Deploy job fails at `scp` with a timeout | Laptop off, or the grant for `tag:ci` to `tag:staging` port 22 is missing | Check the laptop and the policy |

@@ -44,7 +44,7 @@ GitHub Actions (GitHub-hosted runner) ──tailnet SSH──> deploy@rts-stagin
 | Public URL | Tailscale Funnel, `https://rts-staging.<tailnet>.ts.net` | Free on all plans, fixed hostname, TLS included. The laptop connects out, so it works behind CGNAT with no router port open. |
 | Database | `postgres:16-alpine` in the same compose project, named volume, no published port | The outbox relay polls every 250 ms. Keeping the database on the same machine keeps that poll off the network. |
 | Image | The `:<sha>` image CI already pushes to `ghcr.io/veeci/route-tracking-server` | The laptop is x86-64, so no multi-arch build is needed. Staging runs the exact image CI built. |
-| Road graph | `/srv/rts/osm/hanoi.osm` on the laptop, mounted read-only at `/app/data/osm/hanoi.osm` | The file is 100 to 200 MB and gitignored. `routing.graphPath` already defaults to that relative path. |
+| Road graph | `/srv/rts/osm/hanoi.osm` on the laptop, mounted read-only at `/app/data/osm/hanoi.osm` | The file is about 30 MB and gitignored. The binary graph cache lives in a small writable volume (phase 6d). `routing.graphPath` already defaults to that relative path. |
 | Deploy transport | GitHub-hosted runner joins the tailnet with `tailscale/github-action@v4` (ephemeral node, `tag:ci`), then SSH to user `deploy` | The repository is public. GitHub's hardening guide says self-hosted runners "should almost never be used for public repositories", because a fork's pull request can run code on them. |
 | Backups | Nightly `pg_dump -Fc` on Laptop 2, copied to Laptop 1 over the tailnet, 14 days kept | A disk failure on Laptop 2 must not lose the data. |
 
@@ -136,8 +136,9 @@ deploy-staging.yml (new): on workflow_run of CI, conclusion success, event push,
 - The job filters on `workflow_run.event == 'push'`. Without that filter, a pull request whose branch happens to be
   named `main` could start a deploy.
 - `workflow_dispatch` with `image_sha` redeploys any earlier image. This is the manual rollback.
-- The readiness window is long because `/health/ready` waits for the Hanoi graph, and the i5-4210H parses a
-  100 to 200 MB XML file in tens of seconds. Liveness stays UP meanwhile (phase 6 design).
+- The readiness window is long because `/health/ready` waits for the Hanoi graph. The first start after a new OSM
+  file parses the 30 MB XML, which takes several times longer on the i5-4210H than on the build machine. Later starts
+  read the binary graph cache (phase 6d) and are much faster. Liveness stays UP meanwhile (phase 6 design).
 
 ### Laptop operations
 

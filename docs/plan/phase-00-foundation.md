@@ -80,14 +80,14 @@ Konsist rules defined now, trivially passing until contexts exist; they become m
 
 ## Tasks
 
-- [ ] T0.1 Create `app`, `protocol`, `tools:simulator` modules; move generated sources into `app` under `veeci.practicing.rts`.
-- [ ] T0.2 Single version catalog with all planned dependencies (Ktor, Koin, Hoplite, Exposed, Flyway, Hikari, Postgres, Logback, logstash-encoder, Micrometer, kotest, Testcontainers, Konsist, OpenAPI validator).
-- [ ] T0.3 Spotless (ktlint) + detekt (`config/detekt.yml`) + `.editorconfig`; format once in a separate commit.
-- [ ] T0.4 Test suites `integrationTest`, `e2eTest`; `testFixtures`; Kover with the coverage rule from the strategy (report only for now).
-- [ ] T0.5 Dockerfile + `.dockerignore`; compose file; `.env.example`.
-- [ ] T0.6 GitHub Actions `ci.yml`; Dependabot (`gradle`, `github-actions`, `docker`); PR template; branch protection.
-- [ ] T0.7 Konsist rule set (below) in `app/src/test/.../architecture/`.
-- [ ] T0.8 README: prerequisites (JDK 21, Docker), `docker compose up db`, run, test commands.
+- [x] T0.1 Create `app`, `protocol`, `tools:simulator` modules; move generated sources into `app` under `veeci.practicing.rts`.
+- [x] T0.2 Single version catalog with all planned dependencies (Ktor, Koin, Hoplite, Exposed, Flyway, Hikari, Postgres, Logback, logstash-encoder, Micrometer, kotest, Testcontainers, Konsist, OpenAPI validator).
+- [x] T0.3 Spotless (ktlint) + detekt (`config/detekt.yml`) + `.editorconfig`; format once in a separate commit.
+- [x] T0.4 Test suites `integrationTest`, `e2eTest`; `testFixtures`; Kover with the coverage rule from the strategy (report only for now).
+- [x] T0.5 Dockerfile + `.dockerignore`; compose file; `.env.example`.
+- [x] T0.6 GitHub Actions `ci.yml`; Dependabot (`gradle`, `github-actions`, `docker`); PR template; branch protection.
+- [x] T0.7 Konsist rule set (below) in `app/src/test/.../architecture/`.
+- [x] T0.8 README: prerequisites (JDK 21, Docker), `docker compose up db`, run, test commands.
 
 ## Test plan
 

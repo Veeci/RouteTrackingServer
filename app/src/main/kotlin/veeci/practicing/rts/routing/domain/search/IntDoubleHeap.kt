@@ -22,6 +22,15 @@ internal class IntDoubleHeap(
 
     fun isEmpty(): Boolean = size == 0
 
+    /** The smallest key, or +∞ when the heap is empty. */
+    fun minKey(): Double = if (size == 0) Double.POSITIVE_INFINITY else keys[0]
+
+    /** The node of the smallest key. Call only when the heap is not empty. */
+    fun peek(): Int {
+        check(size > 0) { "peek on an empty heap" }
+        return nodes[0]
+    }
+
     fun push(
         node: Int,
         key: Double,

@@ -89,6 +89,8 @@ testing {
                 implementation(libs.turbine)
                 implementation(project(":tools:simulator"))
             }
+            // Benchmarks on the real Hanoi extract are tagged `slow`: they need a gitignored file and minutes of CPU.
+            targets.all { testTask.configure { useJUnitPlatform { excludeTags("slow") } } }
         }
 
         val integrationTest by registering(JvmTestSuite::class) {
@@ -157,6 +159,26 @@ distributions.main {
     contents { from(migrateStartScripts) { into("bin") } }
 }
 
+// `./gradlew slowTest`: only the tests tagged `slow` (TC-6-GR-09, TC-6-SP-11 and the cache and search benchmarks of
+// slice 6d). Not part of `check`, because CI has no OSM file; each test skips itself with a message when the file is
+// missing. The 512 MB heap is the TC-6-GR-09 limit: the Hanoi load must fit in it.
+val slowTest by tasks.registering(Test::class) {
+    description = "Runs the benchmarks tagged slow against data/osm/hanoi.osm (docs/data/osm.md)."
+    group = "verification"
+    val unit = sourceSets.test.get()
+    testClassesDirs = unit.output.classesDirs
+    classpath = unit.runtimeClasspath
+    useJUnitPlatform { includeTags("slow") }
+    maxHeapSize = "512m"
+    systemProperty("rts.osm.hanoi", rootProject.file("data/osm/hanoi.osm").absolutePath)
+    testLogging {
+        showStandardStreams = true
+        events("passed", "skipped", "failed")
+    }
+    // A benchmark is worth running again even when no input changed.
+    outputs.upToDateWhen { false }
+}
+
 tasks.named("check") {
     dependsOn(testing.suites.named("integrationTest"), testing.suites.named("e2eTest"))
 }
@@ -165,6 +187,8 @@ tasks.named("check") {
 // packages of every context run in tests. Adapters are measured in the aggregated report of the root project
 // (`./gradlew koverHtmlReport`), not gated.
 kover {
+    // Coverage instrumentation would slow the benchmarks down and skew their numbers.
+    currentProject { instrumentation { disabledForTestTasks.add("slowTest") } }
     reports {
         total {
             filters {

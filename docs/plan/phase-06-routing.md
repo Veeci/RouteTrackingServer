@@ -100,16 +100,16 @@ Google Encoded Polyline (precision 5) for compact storage and transport.
 
 ## Tasks
 
-- [ ] T6.1 `docs/data/osm.md`; fixtures `tiny_grid.osm`, `one_way_trap.osm`, `two_islands.osm`, `roundabout.osm`.
-- [ ] T6.2 `RoadGraphBuilder` + `RoadGraph` (CSR) + SCC pruning.
-- [ ] T6.3 `OsmXmlGraphLoader` (StAX) in `routing/adapter/out/osm`.
-- [ ] T6.4 `GridIndex`.
-- [ ] T6.5 `Dijkstra`, then `AStar`; shared heap.
-- [ ] T6.6 `PolylineCodec`.
+- [x] T6.1 `docs/data/osm.md`; fixtures `tiny_grid.osm`, `one_way_trap.osm`, `two_islands.osm`, `roundabout.osm`.
+- [x] T6.2 `RoadGraphBuilder` + `RoadGraph` (CSR) + SCC pruning.
+- [x] T6.3 `OsmXmlGraphLoader` (StAX) in `routing/adapter/out/osm`.
+- [x] T6.4 `GridIndex`.
+- [x] T6.5 `Dijkstra`, then `AStar`; shared heap.
+- [x] T6.6 `PolylineCodec`.
 - [x] T6.7 `GraphRoutePlanner` + error codes; used by `TripService.request` / `accept`; migration V7. (6c: `request` only, migration V11; see As built.)
 - [x] T6.8 `GET /api/v1/routes` (OpenAPI), graph health indicator, planning timeout.
-- [ ] T6.9 Tests, including property cross-check and benchmark.
-- [ ] T6.10 (Stretch) Bidirectional Dijkstra; binary graph cache for fast startup.
+- [x] T6.9 Tests, including property cross-check and benchmark.
+- [x] T6.10 (Stretch) Bidirectional Dijkstra; binary graph cache for fast startup. (6d; see As built.)
 
 ## Test plan
 
@@ -233,10 +233,89 @@ Notes:
   test body runs; `testApp(awaitRoadGraph = false)` tests the time before.
 - `TripService.request` checks that the caller is a guest before it plans, so a forbidden caller costs no CPU. It
   then plans outside the transaction and stores the trip and its route in one transaction.
-- TC-6-SP-11 (Hanoi benchmark) is still deferred: no Hanoi extract was available on the build machine. The 15 MB
-  per-search allocation noted in 6b is still unmeasured on the real graph.
+- TC-6-SP-11 (Hanoi benchmark) was deferred to 6d, which measured it (below).
 - The planner has no metrics of its own yet. `/api/v1/routes` latency shows in the HTTP timers.
 
 Tests: TC-6-RS-01 to 04, NO_ROUTE_FOUND, ROUTING_NOT_READY, the TIME metric, TC-6-PERF-02 (unit and API),
 checkpoint calls, loader and health check (unit); TC-6-API-01 to 04 and 06, plus 401, metric=time and 503 before
 loading (integration, checked against the OpenAPI contract); trip_routes versions in Postgres.
+
+## As built: slice 6d (Hanoi numbers, graph cache, bidirectional Dijkstra)
+
+6d closes phase 6. It downloaded the Hanoi extract, measured the graph and the searches on it, added the binary graph
+cache and bidirectional Dijkstra (T6.10) and a routes load test. A* stays the production search.
+
+### Measurements
+
+Machine: the Apple-silicon Mac mini that builds the project, JDK 21, run on 2026-11-20. Extract: `hanoi.osm` from
+Overpass on 2026-11-20, 30,088,231 bytes. The plan expected 100 to 200 MB; the drivable-roads query for the inner
+districts gives about 30 MB. `./gradlew slowTest` (`HanoiBenchmarkTest`) runs in a JVM with a 512 MB heap.
+
+| What | Result | Limit |
+|---|---|---|
+| Graph after SCC pruning | 185,210 nodes, 376,560 edges | |
+| TC-6-GR-09: XML parse and build | 473 ms | < 10 s |
+| TC-6-GR-09: heap peak during the parse (sum of pool peaks, an upper bound) | 141 MB | < 512 MB |
+| `GridIndex` and bounds | 17 ms | |
+| SHA-256 of the OSM file | 36 ms | |
+| Cache miss: hash, parse, build and write | 338 ms | |
+| Cache file `hanoi.graph` | 9.3 MB | |
+| Cache hit: hash and read | 16 to 18 ms | |
+| Real server start from the cache | read in 9 ms, graph ready in 42 ms | |
+| Reverse CSR for bidirectional, built on first use | 6 ms | |
+
+The parse is fast on this machine. The staging laptop's i5-4210H is several times slower, which is why the cache
+exists. On every machine a cache hit costs about a twentieth of a parse, and most of it is the hash.
+
+Searches, 100 random node pairs after a warm-up, the same pairs for each search:
+
+| Metric | Search | Median | p95 | Max | Mean settled | Allocated per search |
+|---|---|---|---|---|---|---|
+| DISTANCE | A* | 1.8 ms | 8.2 ms | 11.6 ms | 22,830 | 5.1 MB |
+| DISTANCE | Dijkstra | 6.5 ms | 12.4 ms | 16.8 ms | 88,080 | 5.1 MB |
+| DISTANCE | Bidirectional | 5.8 ms | 13.1 ms | 14.7 ms | 56,882 | 10.3 MB |
+| TIME | A* | 3.5 ms | 13.7 ms | 17.4 ms | 43,536 | 5.2 MB |
+| TIME | Dijkstra | 7.2 ms | 14.8 ms | 16.6 ms | 87,571 | 5.2 MB |
+| TIME | Bidirectional | 4.6 ms | 12.8 ms | 15.7 ms | 45,451 | 10.3 MB |
+
+- TC-6-SP-11: A* median 1.8 ms on DISTANCE, limit 50 ms. The three searches return the same cost on every pair.
+- The allocation estimate of 6b was 29 bytes a node, so 15 MB on 500,000 nodes. Hanoi has 185,210 nodes, so the
+  estimate gives 5.4 MB, and the measurement is 5.1 MB. Bidirectional allocates twice that, one set of arrays a side.
+- Decision: A* stays the default. It settles a quarter of Dijkstra's nodes on DISTANCE and half on TIME, has the
+  lowest median on both metrics and allocates half of what bidirectional does. Bidirectional comes close on TIME
+  only, where the A* estimate (straight line at the motorway speed, 80 km/h) is weak. Bidirectional A* would combine the two, but it is
+  out of scope.
+
+TC-6-PERF-01, run by hand with `simulator routes --rps 50 --duration 5m --seed 20261120` against a local server
+(the installed distribution, the Hanoi graph from the cache, a throwaway Postgres in Docker and
+`HTTP_RATELIMITPERMINUTE=100000`, because the default limit is 300 requests a minute per client IP):
+
+| What | Result | Limit |
+|---|---|---|
+| Requests | 15,000 over 5 minutes, 50 a second | |
+| 200 answers | 13,770: p50 2.9 ms, p95 8.7 ms, max 114.4 ms | p95 < 150 ms |
+| 422 NO_ROAD_NEARBY | 1,230 (8 %): random points in lakes and parks, more than 300 m from a road. Counted apart, not errors | |
+| Errors (other statuses, timeouts, refused connections) | 0 | 0 |
+| Server CPU, `ps %cpu` sampled every 10 s | mean about 15 % of one core, peak 35 % | not saturated on 2 vCPU |
+
+The latencies are measured by the client over loopback, so they include HTTP and JSON. The run was on the build
+machine, not on 2 vCPU. The CPU numbers say how much of a core the server used: about 0.15 of one on average, far
+from the two cores the limit names. A run on the staging laptop is still worth doing after its setup.
+
+### What was built
+
+| Piece | Where | Notes |
+|---|---|---|
+| Binary graph cache | `CachedGraphSource`, `RoadGraphCacheFile` in `routing/adapter/out/osm` | Header with magic `RTSG`, format version and the OSM file's SHA-256. The arrays are stored after pruning, and a CRC32C ends the file. Written to a temp file, then renamed atomically. Any read failure falls back to the XML with a WARN. An unwritable directory logs a WARN and keeps the parsed graph. See docs/data/osm.md |
+| Config | `routing.graphCacheDir`, default `data/osm/cache`, env `ROUTING_GRAPHCACHEDIR` | Empty turns the cache off |
+| Staging | `deploy/staging/compose.yml` mounts the volume `osm-cache` at `/app/data/osm/cache`. The Dockerfile creates that directory owned by `app` | The OSM file stays read-only |
+| Reverse CSR | `IncomingEdges`, `RoadGraph.incoming` | A lazy, thread-safe property: built only when bidirectional runs |
+| Bidirectional Dijkstra | `domain/search/BidirectionalDijkstra` | Stops when `minKey(forward) + minKey(backward)` reaches the best meeting cost. Not wired into production |
+| `slowTest` | `app/build.gradle.kts` | Runs only `@Tag("slow")` tests with a 512 MB heap and without Kover. `test` excludes the tag, so `check` never needs the OSM file |
+| Routes load test | `simulator routes` | An open model: request `i` starts at `i / rps` whatever earlier answers do |
+
+Tests: cache round trip on all five fixture graphs, cache hit and miss, a changed OSM file, another format version,
+a truncated file, a flipped byte, a foreign file, an unwritable directory, a missing OSM file (unit). Bidirectional
+runs the known-answer tests TC-6-SP-01 to 05 and the checkpoint tests. A property checks its cost against Dijkstra
+and A* on both metrics, and TC-6-SP-08 checks its paths. Breaking the stopping rule on purpose (stop at the first
+meeting) fails the property. TC-6-GR-09, TC-6-SP-11 and the cache benchmark are tagged `slow`.

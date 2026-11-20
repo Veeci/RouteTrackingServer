@@ -189,6 +189,11 @@ data class TelemetryConfig(
 data class RoutingConfig(
     /** The OSM XML extract the road graph is built from, relative to the working directory (docs/data/osm.md). */
     val graphPath: String = "data/osm/hanoi.osm",
+    /**
+     * Where the binary graph cache goes, `<dir>/<osm file name>.graph`. A start whose OSM file matches the cache
+     * skips the XML parse. Empty turns the cache off.
+     */
+    val graphCacheDir: String = "data/osm/cache",
     /** A point farther than this from every road gets NO_ROAD_NEARBY. */
     val maxSnapDistanceM: Double = 300.0,
     /** A point farther than this outside the map's bounding box gets OUTSIDE_COVERAGE. */
