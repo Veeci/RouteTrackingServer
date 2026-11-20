@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+# Made by `npm run generate` from app/src/main/resources/openapi/rts-v1.yaml.
+generated/
+# Playwright output.
+playwright-report/
+test-results/
+blob-report/
+*.tsbuildinfo

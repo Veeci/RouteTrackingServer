@@ -1,8 +1,8 @@
 # Phase 12 — Admin Dashboard
 
 Branch: `feat/p12-admin-dashboard` · Depends on: 11 (admin API, fleet socket, tickets), 1.5 for the staging deploy only ·
-Status: **12a built** (2026-11-20), 12b to 12g planned. The decisions at the end were approved on 2026-11-20, all as
-recommended
+Status: **12a and 12b built** (2026-11-20), 12c to 12g planned. The decisions at the end were approved on 2026-11-20,
+all as recommended
 
 ## Goal
 
@@ -62,25 +62,25 @@ Facts the design must respect, each checked in the code:
 ### Repository: a folder in this repository
 
 The phase 11 plan named a separate repository, `RouteTrackingAdmin`. This plan recommends a folder in this
-repository instead, `admin-web/`, next to the existing `clients/ts/` (decision D1).
+repository instead, `admin-web/` (decision D1).
 
 | | Folder in this repository (recommended) | Separate repository |
 |---|---|---|
 | Contract changes | One PR changes `rts-v1.yaml`, the server and the app. The type check fails in the same PR when they disagree | The app pins a spec commit and upgrades on purpose. Drift shows only when someone upgrades |
 | End-to-end tests | CI builds the server and the simulator from the same commit and runs Playwright against them | CI must pull a server image and a simulator image, and the server repository must publish a simulator image |
-| Tooling | Gradle and npm side by side. CI jobs filter on paths, so a Kotlin-only change skips the web jobs | Each repository has one toolchain |
+| Tooling | Gradle and npm side by side. Every CI job runs on every PR, with no path filter, so any job can be a required check. A Kotlin-only change still runs the web jobs | Each repository has one toolchain |
 | Fits a team split | Less: one repository for both | More: a frontend team owns its repository |
 
 You are one developer, and the strongest test you can have is Playwright against a server from the same commit. The
-folder wins on both counts. `clients/ts/` becomes unnecessary once `admin-web/` generates its own types, and is
-removed in 12b.
+folder wins on both counts. The phase 11 `clients/ts/` folder became unnecessary once `admin-web/` generated its own
+types, and 12b removed it.
 
 ### Stack
 
 | Need | Choice | Why, and the alternative |
 |---|---|---|
 | Language and build | TypeScript (strict), Vite, React | The most common stack for an admin single-page app, with the most answers online. Vue or Svelte would work as well |
-| API types | `openapi-typescript` (7.13.0, as in `clients/ts`) plus `openapi-fetch` | Types come straight from `rts-v1.yaml`, and `openapi-fetch` checks each call's path, query and body against them at compile time. A hand-written client would drift from the spec |
+| API types | `openapi-typescript` (7.13.0) plus `openapi-fetch` | Types come straight from `rts-v1.yaml`, and `openapi-fetch` checks each call's path, query and body against them at compile time. A hand-written client would drift from the spec |
 | Server state | TanStack Query | Caching, background refresh, retries and invalidation after a mutation. It is the web version of a repository that exposes a cached `Flow` and refreshes it from the network |
 | Live state | A small store (Zustand) fed by the fleet socket | The map needs one mutable map of markers updated every 2 s, outside React's render cycle |
 | Routing | TanStack Router | Search params are typed and validated, so list filters and the cursor live in the URL and survive a reload or a shared link. React Router is the more common alternative, with untyped search params |
@@ -271,9 +271,9 @@ Phone with the SDK (anywhere)
 - [x] T12.1 Approve the decisions below, then record the choices in `docs/product/decisions.md` (rows 95 to 100).
 - [x] T12.2 (12a) Admin port with `localPort`, admin trip-watch socket with tickets, AsyncAPI and OpenAPI updates,
       authorization matrix rows for the admin port.
-- [ ] T12.3 (12b) Scaffold `admin-web/`: Vite, React, strict TypeScript, ESLint, Prettier, Vitest, MSW, Playwright;
+- [x] T12.3 (12b) Scaffold `admin-web/`: Vite, React, strict TypeScript, ESLint, Prettier, Vitest, MSW, Playwright;
       generated types; remove `clients/ts/` and move its CI job.
-- [ ] T12.4 (12b) API layer (openapi-fetch, Problem Details, 401), dev login with re-mint, app shell, role gate,
+- [x] T12.4 (12b) API layer (openapi-fetch, Problem Details, 401), dev login with re-mint, app shell, role gate,
       Overview page.
 - [ ] T12.5 (12c) Drivers list and detail, disable and enable, commands, session health, CSV export; Audit and
       Reports pages.
@@ -396,6 +396,92 @@ Phone with the SDK (anywhere)
     between a higher limit on the admin port and trusting the proxy's address.
   - The simulator cannot open dashboards against a split server, because `--url` names one base URL for drivers and
     dashboards. An `--admin-url` option fixes that when a load run needs dashboards against staging.
+
+## As built (12b)
+
+The four choices approved on 2026-11-20 are built as chosen:
+
+| # | Choice |
+|---|---|
+| C1 | The token is re-minted by a timer 60 s before `expiresAt`, and at once when the tab becomes visible within 60 s of expiry or past it |
+| C2 | One `Admin web` CI job on every PR and every push to `main`, with no path filter. The main session makes it a required check after this PR merges |
+| C3 | The Playwright job `Admin web E2E` lands now and stays optional for about a week |
+| C4 | Node 24, in `admin-web/.nvmrc` |
+
+- **Tooling.** `admin-web/` pins every version exactly (`.npmrc` has `save-exact=true`, and `package-lock.json` is
+  committed): Vite 8.3.8, React 19.3.1, Mantine 9.8.1, TanStack Query 5.108.1, TanStack Router 1.170.46 with routes in
+  code, Zustand 5.1.0, zod 4.6.7, openapi-fetch 0.17.0 and openapi-typescript 7.13.0. Tests use Vitest 5.1.1 on
+  jsdom 31, Testing Library, MSW 3.0.7 and Playwright 1.65.1. ESLint 10 runs the type-checked `strictTypeChecked` and
+  `stylisticTypeChecked` sets of typescript-eslint, which include `no-floating-promises`, plus the React hooks rules.
+  Prettier formats with 2 spaces, and the root `.editorconfig` has an `admin-web/**` section that says the same.
+- **TypeScript is 5.9.3, not the newest 7.0.2.** typescript-eslint 8.73 accepts TypeScript below 6.1, and
+  openapi-typescript 7.13 accepts only 5.x, so 5.9.3 is the newest version both accept. Dependabot proposes the move
+  when both widen their ranges.
+- **The dev proxy.** `vite.config.ts` sends `/api` and `/ws` (with `ws: true`) to `RTS_API_URL`, by default
+  `http://localhost:8080`. `vite preview` uses the same proxy and sends the production headers.
+- **The Content Security Policy lives in `admin-web/csp.ts`.** `vite preview` sends it, and `node csp.ts` prints it for
+  the 12f nginx image. It differs from "Security in the browser" in five places. `style-src 'self' 'unsafe-inline'`
+  is needed because Mantine writes its CSS variables in a `<style>` tag and sets inline style attributes. Inline styles
+  cannot run code. `object-src 'none'`, `base-uri 'self'`, `form-action 'self'` and `font-src 'self'` close the gaps
+  that `default-src` leaves. `connect-src 'self'` already covers same-origin WebSockets.
+- **The API layer (`src/api`).** One `openapi-fetch` client typed by the generated `paths`. A middleware adds
+  `Authorization: Bearer` from the session store on every request, outside React. `unwrap` turns a non-2xx answer into
+  an `ApiError` with `status`, `code`, `title`, `detail`, `retryAfter` and `traceId`. It checks `response.ok`, because
+  openapi-fetch returns `error: undefined` for an error with an empty body. A body without a string `code` becomes
+  code `unexpected`, and a failed fetch becomes status 0 with code `network`. Codes the app makes are lower case, so
+  they never clash with the server's upper-case codes. `Retry-After` is read as seconds or as an HTTP date.
+- **Query defaults.** Reads retry twice, on a network error or a 5xx only. Mutations never retry, because the server
+  audits each action. A 401 from any query or mutation clears the session and opens
+  `/login?redirect=<path and search>`. The login form's own mutation opts out with `meta.skipAuthRedirect`, because
+  its 401 comes from the staging gate and means a wrong staging token.
+- **The dev login (`src/auth`).** The token, role, display name and expiry live in a Zustand vanilla store, in memory
+  only. The `userId` goes to `localStorage` and the staging token to `sessionStorage`, and every storage access is
+  wrapped in try and catch. The response of `POST /api/v1/dev/tokens` gives everything, so the app never decodes the
+  JWT. After a 401 the login form shows the staging token from the tab, so the user only presses "Log in". Logging
+  out clears the session, the staging token and the query cache, and keeps the `userId`.
+- **Re-minting (C1).** `startRemint` returns a stop function that clears the timer, the store listener and the
+  visibility listener. A re-mint still in flight when it stops, or when the user logs out, does not write its answer.
+  A re-mint refused with 401 or 403 sends the user to the login page. Any other failure tries again 15 s later. A
+  re-mint needs only the `userId` and the staging token, not the old token, so it also works after expiry. The timer
+  keeps running in a hidden tab, which costs one request every 14 minutes per open tab.
+- **The redirect check.** `safeRedirect` resolves the target against the app's origin and keeps it only when the
+  origin stays the same. A plain string check would miss `/\evil.example`, which the URL parser reads as
+  `//evil.example`, and `/<tab>/evil.example`, from which it drops the tab. A redirect to `/login` becomes `/`.
+- **Shell, role gate and Overview.** A Mantine AppShell with the name, the role and "Log out", and a nav that lists
+  only Overview. `RequireRole` hides UI from roles that may not use it. A 403 shows "No permission" and keeps the
+  session. The Overview page shows four counts and the computed time, and asks again every 10 s while the tab is
+  visible. TanStack Query pauses the interval in a hidden tab. It has a loading state, an error state with "Server
+  unreachable" for a network error, and a notice above the last numbers when a later refresh fails.
+- **Tests.** 71 Vitest tests. Line coverage is 98 % in `src/api` and 98 % in `src/auth`, against the 80 % gate.
+
+  | Case | Where |
+  |---|---|
+  | TC-12-API-01 | `src/api/errors.test.ts`, and `client.test.ts` for the client's network error and 429 |
+  | TC-12-API-02 | `src/app.test.tsx`, "a 401 on a query" |
+  | TC-12-AUTH-01 | `src/auth/remint.test.ts`, with the C1 visibility re-mint and the cleanup cases |
+  | TC-12-AUTH-02 | `src/auth/roles.test.tsx` for the hidden element, `src/app.test.tsx` for the 403 |
+  | TC-12-CON-01 | The `Admin web` job: generate, then typecheck. `src/test/contract.ts` holds three handlers the contract forbids, each under `@ts-expect-error`, so the typecheck fails if the mocks stop being checked |
+  | Redirect check | `src/auth/redirect.test.ts` |
+  | E2E smoke | `e2e/overview.spec.ts` |
+
+- **The E2E job.** It builds `installDist`, starts Postgres 16 as a service container and runs the server with
+  `APP_ENV=test` and a JWT secret made for the run. CI has no road graph, so the job waits for `/health/live`, not
+  `/health/ready`. Playwright runs Chromium against `vite preview`. The smoke test logs in as OPERATOR, waits for the
+  four counts, and compares them and `computedAt` with the API's own answer until both come from one computation. It
+  also fails on any console error, so a Content Security Policy violation fails it. That is a first part of
+  TC-12-SEC-01. The report, the traces and the server log are uploaded on failure.
+- **`clients/ts/` is gone,** with its `ts-client` job and the `rts-client-<sha>` artifact. Dependabot has an `npm`
+  entry for `/admin-web`, weekly, with minor and patch updates grouped.
+- **Differences from the plan.**
+  - MSW handlers are typed with `openapi-msw`, a small wrapper made for openapi-typescript's `paths`. Writing the same
+    types by hand would be more code to keep in step with MSW.
+  - The contract does not list two answers the login meets: the staging gate's 401 and the plain 404 where the route is
+    not mounted. Their mocks use `response.untyped`. Adding the `X-Staging-Token` header and the 401 to
+    `/api/v1/dev/tokens` in `rts-v1.yaml` is a small follow-up.
+  - No page has an ADMIN-only element yet, so the first half of TC-12-AUTH-02 tests `RequireRole` on its own. The 12c
+    action buttons use it.
+  - The build is one 563 kB chunk (172 kB gzipped), and Vite warns above 500 kB. Splitting by route fits once 12c to
+    12e add pages, and 12d should load MapLibre only on the map page.
 
 ## Definition of Done
 

@@ -16,6 +16,7 @@ Kotlin · Ktor 3 · PostgreSQL 16 · Docker · GitHub Actions. Modular monolith 
 | JDK | 21 | Gradle downloads it automatically if missing (foojay toolchains) |
 | Docker | any recent | [OrbStack](https://orbstack.dev) or Docker Desktop. Needed for the local database, integration tests and the image |
 | IDE | Android Studio or IntelliJ IDEA | Open the repo root; Gradle sync picks up all modules |
+| Node.js | 24 (`admin-web/.nvmrc`) | Only for the admin dashboard in `admin-web/` (phase 12) |
 
 ## Getting started
 
@@ -74,6 +75,7 @@ Connect to the database: `docker compose -f deploy/docker-compose.yml exec db ps
 | `app/` | The service: bounded contexts, platform, migrations, config, all test suites |
 | `protocol/` | WebSocket message classes, shared with the Android SDK |
 | `tools/simulator/` | CLI fake driver/guest used for manual testing and e2e tests |
+| `admin-web/` | The admin dashboard, a React single-page app on the admin API (phase 12). How to run it: `admin-web/README.md` |
 | `deploy/` | Dockerfile, docker-compose, `.env.example` |
 | `load-tests/` | k6 load test scripts (run instructions in each script) |
 | `config/detekt/` | Static analysis overrides |

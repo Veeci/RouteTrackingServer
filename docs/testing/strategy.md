@@ -30,6 +30,17 @@
 
 Rough distribution by count: 60% unit/property/service, 30% integration/API, 10% E2E. Load tests are few and long.
 
+### The admin dashboard (`admin-web/`, phase 12)
+
+The web app has its own layers. They run with npm in `admin-web/`, not with Gradle.
+
+| Type | What it proves | Tools | Where |
+|---|---|---|---|
+| **Web unit** | Error parsing, retry rules, the redirect check, the session store and the re-mint timer | Vitest, fake timers | `src/**/*.test.ts` |
+| **Web component** | Pages and the app shell with the real router and query client: login, the 401 round trip, role gating, error states | Vitest, Testing Library, MSW | `src/**/*.test.tsx` |
+| **Web contract** | The app and its mocks match `rts-v1.yaml`: MSW handlers are typed by the generated `paths`, so a body the spec forbids fails to compile | openapi-typescript, openapi-msw, `tsc` | `npm run generate`, then `npm run typecheck` |
+| **Web E2E** | The production build under its Content Security Policy against a real server and Postgres | Playwright (Chromium), `vite preview` | `e2e/` |
+
 ## Test infrastructure
 
 ### Postgres
@@ -109,6 +120,8 @@ merge the phase; P1 should; P2 nice to have). Deferred cases are listed with a r
 | E2E | 100% pass on `main` and on PRs labelled `e2e` |
 | Load (nightly, from phase 2) | SLO thresholds in each phase doc (k6 `thresholds` fail the run) |
 | Mutation testing (Pitest, optional from phase 6) | ≥ 70% mutation score on `routing.domain` and `tracking.domain` |
+| Admin web (job `Admin web`, every PR) | typecheck, ESLint and Prettier clean, every Vitest test passes, ≥ 80% line coverage in `src/api` and `src/auth`, the build passes, `npm audit` finds nothing high or critical |
+| Admin web E2E (job `Admin web E2E`, every PR) | 100% pass. Optional for its first week (phase 12b) |
 
 ## Commands
 
@@ -119,6 +132,8 @@ merge the phase; P1 should; P2 nice to have). Deferred cases are listed with a r
 | `./gradlew e2eTest` | scenarios | yes |
 | `./gradlew check` | all of the above + lint + coverage verification | yes |
 | `k6 run load-tests/<script>.js` | load test against `docker compose up` stack (without a local k6: the `grafana/k6` image, see the phase 2 plan) | yes |
+| `npm run coverage` in `admin-web/` | web unit and component tests, with the coverage gate | no |
+| `npm run e2e` in `admin-web/` | Playwright against `vite preview`, with a server on `localhost:8080` (`admin-web/README.md`) | db and server |
 
 ## Rules of thumb
 

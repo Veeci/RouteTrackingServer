@@ -22,3 +22,12 @@ updates:
     directory: "/deploy"
     schedule:
       interval: weekly
+
+  # The admin dashboard (phase 12b). Exact pins in package-lock.json; Dependabot proposes each bump.
+  - package-ecosystem: npm
+    directory: "/admin-web"
+    schedule:
+      interval: weekly
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
