@@ -14,7 +14,15 @@ export interface ApiErrorInit {
   detail?: string | undefined;
   retryAfter?: number | undefined;
   traceId?: string | undefined;
+  /** One entry per invalid field, from a VALIDATION_FAILED answer. */
+  fieldErrors?: readonly FieldError[] | undefined;
   cause?: unknown;
+}
+
+/** A field the server refused, as `Problem.errors` lists it: `stops[2].lat`, "must be between -90 and 90". */
+export interface FieldError {
+  field: string;
+  message: string;
 }
 
 /** Every failed API call ends as this one type: a Problem Details answer, an unreadable answer, or no answer. */
@@ -30,6 +38,8 @@ export class ApiError extends Error {
   readonly retryAfter: number | undefined;
   /** The response's `X-Request-Id`, for a bug report. */
   readonly traceId: string | undefined;
+  /** Empty unless the server listed the invalid fields (code VALIDATION_FAILED). */
+  readonly fieldErrors: readonly FieldError[];
 
   constructor(init: ApiErrorInit) {
     super(init.detail ?? init.title, { cause: init.cause });
@@ -39,6 +49,7 @@ export class ApiError extends Error {
     this.detail = init.detail;
     this.retryAfter = init.retryAfter;
     this.traceId = init.traceId;
+    this.fieldErrors = init.fieldErrors ?? [];
   }
 }
 
@@ -48,6 +59,11 @@ const problemSchema = z.object({
   title: z.string().optional(),
   detail: z.string().optional(),
   traceId: z.string().optional(),
+  // A malformed list loses only itself, not the code: the code is what the UI branches on.
+  errors: z
+    .array(z.object({ field: z.string(), message: z.string() }))
+    .optional()
+    .catch(undefined),
 });
 
 /**
@@ -78,6 +94,7 @@ export function toApiError(response: Response, body: unknown): ApiError {
       detail: problem.data.detail,
       retryAfter,
       traceId: problem.data.traceId ?? requestId,
+      fieldErrors: problem.data.errors,
     });
   }
   // A proxy's HTML error page, an empty body, or JSON from something that is not this API.

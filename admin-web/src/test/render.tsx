@@ -18,3 +18,10 @@ export function renderApp({ path = '/', session }: RenderAppOptions = {}) {
   const user = userEvent.setup();
   return { ...render(<App {...parts} />), ...parts, user };
 }
+
+/** The item at `index`, or a test failure that names it. Index access on an array may give undefined. */
+export function nth<T>(items: readonly T[], index: number): T {
+  const item = items[index];
+  if (item === undefined) throw new Error(`No item at index ${String(index)} of ${String(items.length)}`);
+  return item;
+}

@@ -35,6 +35,20 @@ server.
 RTS_API_URL=http://localhost:8081 npm run dev
 ```
 
+## The pages
+
+| Page          | Path                 | Roles           | What it does                                                                              |
+| ------------- | -------------------- | --------------- | ----------------------------------------------------------------------------------------- |
+| Overview      | `/`                  | OPERATOR, ADMIN | Four fleet counts, asked again every 10 s                                                 |
+| Drivers       | `/drivers`           | OPERATOR, ADMIN | Filters and the cursor in the URL, "As of" and Refresh, CSV export for ADMIN              |
+| Driver detail | `/drivers/$driverId` | OPERATOR, ADMIN | Account, position, device, trip, health. ADMIN: disable, enable, commands, session health |
+| Audit         | `/audit`             | ADMIN           | The audit log with filters, newest first. A driver target links to the driver             |
+| Reports       | `/reports`           | ADMIN           | The provider report for whole days, the last 7 by default and at most 31, with CSV export |
+
+Every disable, enable and command asks for a reason in a dialog. The audit log keeps the reason of a disable or an
+enable, and a SET_CONSTRAINT command keeps its own. Lists page with "First page", "Previous" and "Next". The cursors of
+earlier pages live in the browser's history entry, so a reload and the Back button keep them.
+
 ## Check it
 
 | Command                | What it does                                                                                    |
@@ -50,10 +64,11 @@ RTS_API_URL=http://localhost:8081 npm run dev
 
 CI runs all of them in the `Admin web` and `Admin web E2E` jobs (`.github/workflows/ci.yml`).
 
-## Run the E2E test
+## Run the E2E tests
 
-The E2E test logs in through the real server and reads its numbers, so start a server first. The dev profile mounts
-the dev login and migrates the database on start. CI uses the test profile, which does the same.
+The E2E tests log in through the real server, read its data and act on simulated drivers, so start a server and the
+simulator first. The dev profile mounts the dev login and migrates the database on start. CI uses the test profile,
+which does the same.
 
 1. Start Postgres:
 
@@ -68,7 +83,19 @@ the dev login and migrates the database on start. CI uses the test profile, whic
    ./gradlew :app:run
    ```
 
-3. Install Chromium for Playwright once, then run the test:
+3. Build the simulator and start three drivers from the repository root. They loop a Hanoi route and answer every
+   command with `applied`, which TC-12-E2E-03 needs. The start script runs Java 21 or newer, from `JAVA_HOME` or the
+   `PATH`:
+
+   ```bash
+   ./gradlew :tools:simulator:installDist
+   ```
+
+   ```bash
+   tools/simulator/build/install/simulator/bin/simulator fleet --drivers 3 --dashboards 0 --duration 30m
+   ```
+
+4. Install Chromium for Playwright once, then run the tests:
 
    ```bash
    npx playwright install chromium
@@ -78,17 +105,20 @@ the dev login and migrates the database on start. CI uses the test profile, whic
    npm run e2e
    ```
 
+TC-12-E2E-02 disables a driver it creates itself, never a simulated one, so the tests can run again on the same
+database.
+
 Playwright reuses a preview that already runs on port 4173. On a failure it keeps a trace in `test-results/`. Open
 it with `npx playwright show-trace <file>`.
 
 ## Layout
 
-| Path              | Contents                                                                                                              |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `src/api/`        | The `openapi-fetch` client, `ApiError` and Problem Details parsing, the query client and its retry rules, error texts |
-| `src/auth/`       | The dev login, the session store, re-minting, the redirect check, roles                                               |
-| `src/routes/`     | The router, and one folder per page                                                                                   |
-| `src/components/` | The app shell, the role gate, shared error and not-found views                                                        |
-| `src/test/`       | Test setup, typed MSW handlers, and the contract check `contract.ts`                                                  |
-| `e2e/`            | Playwright tests                                                                                                      |
-| `csp.ts`          | The Content Security Policy. `vite preview` sends it, and `node csp.ts` prints it                                     |
+| Path              | Contents                                                                                                            |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `src/api/`        | The `openapi-fetch` client, `ApiError` and Problem Details parsing, the query client, error texts, the CSV download |
+| `src/auth/`       | The dev login, the session store, re-minting, the redirect check, roles                                             |
+| `src/routes/`     | The router, one folder per page, the cursor paging, the search param and day helpers                                |
+| `src/components/` | The app shell, the role gate, the reason dialog, the pager, the CSV button, shared error and not-found views        |
+| `src/test/`       | Test setup, typed MSW handlers and fixtures, and the contract check `contract.ts`                                   |
+| `e2e/`            | Playwright tests                                                                                                    |
+| `csp.ts`          | The Content Security Policy. `vite preview` sends it, and `node csp.ts` prints it                                   |

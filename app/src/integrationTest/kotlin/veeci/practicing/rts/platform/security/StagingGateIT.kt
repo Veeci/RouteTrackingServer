@@ -19,6 +19,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Test
 import org.testcontainers.junit.jupiter.Testcontainers
 import veeci.practicing.rts.testing.problem
+import veeci.practicing.rts.testing.shouldMatchContract
 import veeci.practicing.rts.testing.testApp
 
 /** The staging access gate on the dev token route (phase 1.5, T1b.3). */
@@ -32,6 +33,7 @@ class StagingGateIT {
             val missing = requestToken()
             missing.status shouldBe HttpStatusCode.Unauthorized
             missing.problem().code shouldBe "UNAUTHORIZED"
+            missing.shouldMatchContract()
 
             val wrong = requestToken { header(STAGING_TOKEN_HEADER, TOKEN.dropLast(1) + "x") }
             wrong.status shouldBe HttpStatusCode.Unauthorized
@@ -40,6 +42,7 @@ class StagingGateIT {
             val right = requestToken { header(STAGING_TOKEN_HEADER, TOKEN) }
             right.status shouldBe HttpStatusCode.OK
             right.tokenField().shouldNotBeBlank()
+            right.shouldMatchContract()
         }
 
     @Test
