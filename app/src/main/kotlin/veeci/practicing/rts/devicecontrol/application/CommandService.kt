@@ -40,11 +40,16 @@ class CommandService(
 ) {
     private val log = LoggerFactory.getLogger(CommandService::class.java)
 
-    /** An admin sends [payload] to [driver]'s device. */
+    /**
+     * An admin sends [payload] to [driver]'s device. [reason] goes to the audit row for every kind. It is optional
+     * so that older clients keep working, and a blank one counts as none. A SET_CONSTRAINT also carries its own
+     * reason to the device, and the web adapter fills both from the same request field.
+     */
     suspend fun issue(
         driver: UserId,
         payload: CommandPayload,
         actor: Actor,
+        reason: String? = null,
     ): DeviceCommand {
         requireAdmin(actor)
         // The command and its audit row commit together; the server's own commands (issueAsServer) are not audited.
@@ -56,6 +61,7 @@ class CommandService(
                         "COMMAND_ISSUED",
                         "DRIVER",
                         driver.value.toString(),
+                        reason = reason?.takeIf { it.isNotBlank() },
                         details =
                             mapOf(
                                 "kind" to payload.kind(),

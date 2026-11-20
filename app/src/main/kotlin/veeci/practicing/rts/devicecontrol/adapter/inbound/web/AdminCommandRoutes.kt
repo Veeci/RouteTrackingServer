@@ -24,7 +24,7 @@ fun Route.adminCommandRoutes(service: CommandService) {
         // Stored at once; the device gets it when it is (or next gets) connected. 202: not applied yet.
         post {
             val body = call.receive<IssueCommandBody>() // validated (400) before this line returns
-            val command = service.issue(call.driverId(), body.toPayload(), call.actor())
+            val command = service.issue(call.driverId(), body.toPayload(), call.actor(), body.reason)
             call.respond(HttpStatusCode.Accepted, IssuedCommandResponse(command.id.value.toString()))
         }
 

@@ -28,6 +28,7 @@ data class IssueCommandBody(
     val kind: String,
     val maxAccuracy: String? = null,
     val minIntervalMs: Long? = null,
+    /** Why, for the audit log, for every kind. SET_CONSTRAINT needs it and also sends it to the device. */
     val reason: String? = null,
     val regions: List<GeofenceDto>? = null,
 ) : Validatable {
