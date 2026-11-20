@@ -24,6 +24,11 @@ class NoResizeObserver {
 }
 window.ResizeObserver = NoResizeObserver;
 window.HTMLElement.prototype.scrollIntoView = () => undefined;
+// Mantine's autosize textarea listens for web fonts that finish loading. jsdom has no font loading.
+Object.defineProperty(document, 'fonts', { value: new EventTarget(), configurable: true });
+// jsdom has no blob URLs. Tests of the CSV download spy on these.
+URL.createObjectURL = () => 'blob:http://localhost/test';
+URL.revokeObjectURL = () => undefined;
 window.scrollTo = () => undefined;
 
 // Listen before any test module loads. An unhandled request fails the test: every call must have a handler.
@@ -37,6 +42,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   server.resetHandlers();
+  server.events.removeAllListeners();
   sessionStore.getState().signOut();
 });
 

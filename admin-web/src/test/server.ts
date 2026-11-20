@@ -3,6 +3,7 @@ import { setupServer } from 'msw/node';
 import { createOpenApiHttp } from 'openapi-msw';
 import type { Session } from '../auth/session';
 import type { paths, Problem, Role } from '../api/types';
+import { auditPage, driverDetail, fleetDriver, fleetPage, providerReport } from './fixtures';
 
 /**
  * MSW typed by the generated contract (TC-12-CON-01): a handler for a path the spec lacks, or a body the spec does
@@ -51,7 +52,30 @@ export const defaultHandlers = [
     });
   }),
   http.get('/api/v1/admin/overview', ({ response }) => response(200).json(overviewBody)),
+  // 12c: one page of two drivers, a driver, no command, no session health, an empty audit log and report.
+  http.get('/api/v1/admin/drivers', ({ response }) => response(200).json(fleetPage([fleetDriver(1), fleetDriver(2)]))),
+  http.get('/api/v1/admin/drivers/{driverId}', ({ params, response }) =>
+    response(200).json(driverDetail({ driver: fleetDriver(1, { driverId: params.driverId }) })),
+  ),
+  http.get('/api/v1/admin/drivers/{driverId}/commands', ({ response }) => response(200).json({ items: [] })),
+  http.get('/api/v1/admin/sessions/{id}/health', ({ response }) =>
+    response(404).json(problem(404, 'SESSION_HEALTH_NOT_FOUND')),
+  ),
+  http.get('/api/v1/admin/audit', ({ response }) => response(200).json(auditPage([]))),
+  http.get('/api/v1/admin/reports/providers', ({ query, response }) =>
+    response(200).json(providerReport([], query.get('from'), query.get('to'))),
+  ),
 ];
+
+/** Every request the app sends from now on, as `METHOD /path?search`, in order. */
+export function recordRequests(): string[] {
+  const seen: string[] = [];
+  server.events.on('request:start', ({ request }) => {
+    const url = new URL(request.url);
+    seen.push(`${request.method} ${url.pathname}${url.search}`);
+  });
+  return seen;
+}
 
 export const server = setupServer(...defaultHandlers);
 

@@ -41,10 +41,8 @@ describe('without a session', () => {
   });
 
   it('says so when the staging token is wrong, and stays on the login page', async () => {
-    // The staging gate answers 401 before the route. rts-v1.yaml does not list it, so the mock says it is off-contract.
-    server.use(
-      http.post('/api/v1/dev/tokens', ({ response }) => response.untyped(problemResponse(401, 'UNAUTHORIZED'))),
-    );
+    // The staging gate answers 401 before the route.
+    server.use(http.post('/api/v1/dev/tokens', ({ response }) => response(401).json(problem(401, 'UNAUTHORIZED'))));
     const { user, router } = renderApp({ path: '/login' });
 
     await logInAs(user, 'Lan', 'Operator');
@@ -103,15 +101,31 @@ describe('TC-12-AUTH-02: a 403 from the server', () => {
 });
 
 describe('the app shell', () => {
-  it('lists only the pages that exist', async () => {
+  async function navLinks() {
+    const nav = await screen.findByRole('navigation', { name: 'Pages' });
+    return within(nav)
+      .getAllByRole('link')
+      .map((link) => link.textContent);
+  }
+
+  it('lists every page for an admin', async () => {
     renderApp({ session: testSession('ADMIN') });
 
+    expect(await navLinks()).toEqual(['Overview', 'Drivers', 'Audit', 'Reports']);
+  });
+
+  it('TC-12-AUTH-02: hides Audit and Reports from an operator', async () => {
+    renderApp({ session: testSession('OPERATOR') });
+
+    expect(await navLinks()).toEqual(['Overview', 'Drivers']);
+  });
+
+  it('keeps Drivers marked on a driver page', async () => {
+    renderApp({ path: '/drivers/7f1c2a9e-5b3d-4c1e-8a2f-000000000001', session: testSession('OPERATOR') });
+
     const nav = await screen.findByRole('navigation', { name: 'Pages' });
-    expect(
-      within(nav)
-        .getAllByRole('link')
-        .map((link) => link.textContent),
-    ).toEqual(['Overview']);
+    expect(within(nav).getByRole('link', { name: 'Drivers' })).toHaveAttribute('data-active', 'true');
+    expect(within(nav).getByRole('link', { name: 'Overview' })).not.toHaveAttribute('data-active');
   });
 
   it('logs out to the login page', async () => {

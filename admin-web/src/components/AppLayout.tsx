@@ -4,18 +4,28 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import type { Role } from '../api/types';
 import { logOut } from '../auth/devLogin';
-import { STAFF_ROLES } from '../auth/roles';
+import { ADMIN_ONLY, STAFF_ROLES } from '../auth/roles';
 import { sessionStore, useSession } from '../auth/session';
 import { RequireRole } from './RequireRole';
 
 interface NavItem {
-  to: '/';
+  to: '/' | '/drivers' | '/audit' | '/reports';
   label: string;
   roles: readonly Role[];
 }
 
-/** Only pages that exist. 12c to 12e add theirs here. */
-const NAV: readonly NavItem[] = [{ to: '/', label: 'Overview', roles: STAFF_ROLES }];
+/** Only pages that exist, each shown to the roles that may use it. 12d and 12e add theirs here. */
+const NAV: readonly NavItem[] = [
+  { to: '/', label: 'Overview', roles: STAFF_ROLES },
+  { to: '/drivers', label: 'Drivers', roles: STAFF_ROLES },
+  { to: '/audit', label: 'Audit', roles: ADMIN_ONLY },
+  { to: '/reports', label: 'Reports', roles: ADMIN_ONLY },
+];
+
+/** A section stays marked on its sub-pages: Drivers on a driver's page. */
+export function isActive(pathname: string, to: NavItem['to']): boolean {
+  return to === '/' ? pathname === '/' : pathname === to || pathname.startsWith(`${to}/`);
+}
 
 export function AppLayout() {
   const session = useSession();
@@ -62,7 +72,13 @@ export function AppLayout() {
       <AppShell.Navbar p="xs" aria-label="Pages">
         {NAV.map((item) => (
           <RequireRole key={item.to} roles={item.roles}>
-            <NavLink component={Link} to={item.to} label={item.label} active={pathname === item.to} onClick={close} />
+            <NavLink
+              component={Link}
+              to={item.to}
+              label={item.label}
+              active={isActive(pathname, item.to)}
+              onClick={close}
+            />
           </RequireRole>
         ))}
       </AppShell.Navbar>

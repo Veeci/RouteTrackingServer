@@ -7,7 +7,7 @@ import { type Session, type SessionStore, toSession } from './session';
 import { savedStagingToken, savedUserId } from './storage';
 
 /** The header the staging server checks before it serves `/api/v1/dev/tokens` (phase 1.5, `StagingGate.kt`). */
-export const STAGING_TOKEN_HEADER = 'X-Staging-Token';
+export const STAGING_TOKEN_HEADER = 'X-Staging-Token' as const;
 
 export interface LoginInput {
   displayName: string;
@@ -18,8 +18,9 @@ export interface LoginInput {
 
 /** `POST /api/v1/dev/tokens`. The response gives everything the app needs, so the app never decodes the JWT. */
 export function mintToken(api: ApiClient, request: DevTokenRequest, stagingToken?: string): Promise<DevTokenResponse> {
-  const headers = stagingToken === undefined || stagingToken === '' ? {} : { [STAGING_TOKEN_HEADER]: stagingToken };
-  return api.POST('/api/v1/dev/tokens', { body: request, headers }).then(unwrap);
+  // The header is a parameter in the contract, so a typo in its name fails the typecheck.
+  const header = stagingToken === undefined || stagingToken === '' ? {} : { [STAGING_TOKEN_HEADER]: stagingToken };
+  return api.POST('/api/v1/dev/tokens', { body: request, params: { header } }).then(unwrap);
 }
 
 const uuid = z.uuid();

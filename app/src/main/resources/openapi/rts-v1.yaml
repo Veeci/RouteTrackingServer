@@ -45,11 +45,18 @@ paths:
     post:
       tags: [identity]
       operationId: issueDevToken
-      summary: Create a user and an access token (dev and test only)
+      summary: Create a user and an access token (dev, test and staging only)
       description: |
         Creates a user with the given role, or reuses `userId`, and returns an access token for that user without
-        any password. This route exists only when APP_ENV is dev or test; elsewhere it answers 404.
+        any password. This route exists only when APP_ENV is dev, test or staging; elsewhere it answers 404.
+        Staging also needs the staging access token in `X-Staging-Token` (phase 1.5).
         Send the token as `Authorization: Bearer <token>` (WebSockets: the same header, or `?token=`).
+      parameters:
+        - name: X-Staging-Token
+          in: header
+          required: false
+          description: The staging access token. Staging answers 401 without it; dev and test ignore it.
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -62,6 +69,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DevTokenResponse' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '401':
+          description: Staging only. `X-Staging-Token` is missing or wrong (UNAUTHORIZED).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /api/v1/trips:
     post:
