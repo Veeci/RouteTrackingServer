@@ -135,9 +135,7 @@ function CommandDialog({ driverId, onClose }: { driverId: string; onClose: () =>
       title="Send a command"
       description="The server keeps the command and sends it when the device is connected. It expires after 10 minutes without an answer."
       confirmLabel="Send"
-      // The server keeps the reason only inside a SET_CONSTRAINT command, and not in the audit row. C4 asks for it
-      // with every kind all the same.
-      reasonDescription="A constraint keeps it with the command. The server keeps no reason for the other kinds yet."
+      reasonDescription="The audit log keeps it. A constraint also sends it to the device."
       onClose={onClose}
       pending={issue.isPending}
       error={issue.error}
