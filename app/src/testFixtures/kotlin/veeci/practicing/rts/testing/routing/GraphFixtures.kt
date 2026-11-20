@@ -31,3 +31,14 @@ fun RoadGraph.edgePairs(): Set<Pair<Long, Long>> = edgeViews().map { it.fromOsmI
 fun RoadGraph.osmIds(): Set<Long> = (0 until nodeCount).map { osmId(it) }.toSet()
 
 fun RoadGraph.nodeOf(osmId: Long): Int = (0 until nodeCount).first { osmId(it) == osmId }
+
+/** The same dense node ids, OSM ids, positions and edges in the same slots: what a binary cache must round-trip. */
+fun RoadGraph.sameAs(other: RoadGraph): Boolean =
+    nodeCount == other.nodeCount &&
+        edgeCount == other.edgeCount &&
+        (0 until nodeCount).all { v ->
+            osmId(v) == other.osmId(v) && point(v) == other.point(v) && outEdges(v) == other.outEdges(v)
+        }
+
+private fun RoadGraph.outEdges(from: Int): List<Triple<Int, Float, Float>> =
+    buildList { forEachEdge(from) { to, lengthM, speedMps -> add(Triple(to, lengthM, speedMps)) } }

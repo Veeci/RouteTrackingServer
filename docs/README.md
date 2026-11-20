@@ -27,7 +27,7 @@ and observability from day one.
 |---|---|---|---|---|
 | 0 | [Foundation](plan/phase-00-foundation.md) | `feat/p0-foundation` | Modules, lint, test suites, Dockerfile, compose, CI + image | – |
 | 1 | [Platform](plan/phase-01-platform.md) | `feat/p1-platform` | Config, DI, DB + transactions, Problem Details, validation, observability, WS framework, OpenAPI | 0 |
-| 1.5 | [Staging deploy](plan/phase-01b-staging.md) | `feat/p1b-staging` | **Deferred** (free tooling only). Public HTTPS/WSS staging, CD on merge, migrations as release step, smoke test, rollback, access gate | 1 |
+| 1.5 | [Staging deploy](plan/phase-01b-staging.md) | `feat/p1b-staging` | Staging on a home laptop behind Tailscale Funnel: CD on merge, migrations as a release step, smoke test, rollback, access gate. The repository half is merged (#52, #53). The laptop setup and drills are manual | 1 |
 | 2 | [Ingest + ACK](plan/phase-02-ingest.md) | `feat/p2-ingest` | `tracking` context, fix pipeline, idempotent ingest, outbox, simulator, first load test | 1 |
 | 3 | [Trips & live tracking](plan/phase-03-live-trip.md) | `feat/p3-live-trip` | `identity`, `trip`, `live` contexts; REST with idempotency/ETags; guest socket; authz matrix | 2 |
 | 4 | [Trip events](plan/phase-04-events.md) | `feat/p4-events` | Hysteresis rules, auto-arrive, stale detection job (cluster-safe), device status | 3 |
@@ -37,10 +37,10 @@ and observability from day one.
 | 8 | [History & export](plan/phase-08-history.md) | `feat/p8-history` | Summaries, keyset-paginated history, replay, GPX/GeoJSON | 3 |
 | 9 | [Telemetry](plan/phase-09-telemetry.md) | `feat/p9-telemetry` | Session health, GMS vs AOSP report | 2, 4 |
 | 10 | [Production & scale](plan/phase-10-production.md) | `feat/p10-production` | Redis adapters, multi-instance, deploy pipeline, ops, capacity | 3–5 (ideally all) |
-| 11 | [Admin API & live fleet](plan/phase-11-admin.md) | `feat/p11-admin` | `fleet` read model (PostGIS), admin REST, live fleet map channel, audit log, browser auth; feeds the separate `RouteTrackingAdmin` web app | 3, 4 (5, 9 enrich) |
+| 11 | [Admin API & live fleet](plan/phase-11-admin.md) | `feat/p11-admin` | `fleet` read model (plain `lat` and `lng` columns, no PostGIS), admin REST, live fleet map channel, audit log, browser auth; feeds the separate `RouteTrackingAdmin` web app | 3, 4 (5, 9 enrich) |
 
-Phase 1.5 is deferred, so merges to `main` do not deploy anywhere. To test from a phone, run the server on a
-laptop and open a Cloudflare Quick Tunnel: `cloudflared tunnel --url http://localhost:8080`.
+To test from a phone without staging, run the server on a laptop and open a Cloudflare Quick Tunnel:
+`cloudflared tunnel --url http://localhost:8080`.
 Phase 11 can be done before phase 10.
 After phase 3, phases 4, 5, 6, 8 are independent; 7 needs 4 and 6; 9 needs 4 for device status.
 

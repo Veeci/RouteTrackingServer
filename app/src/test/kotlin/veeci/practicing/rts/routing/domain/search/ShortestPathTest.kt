@@ -19,7 +19,7 @@ import veeci.practicing.rts.testing.routing.nodeOf
 
 /**
  * Known answers on the hand-written fixtures. Every expected cost here was computed outside this code and is
- * written in the fixture's comment block. Each test runs once with Dijkstra and once with A*.
+ * written in the fixture's comment block. Each test runs with Dijkstra, A* and bidirectional Dijkstra.
  */
 class ShortestPathTest {
     @ParameterizedTest
@@ -58,7 +58,9 @@ class ShortestPathTest {
 
         val result = search.search(graph, five, five, Metric.TIME).shouldNotBeNull()
 
-        result shouldBe SearchResult(intArrayOf(five), costM = 0.0, costS = 0.0, settled = 1)
+        result.nodes.toList() shouldContainExactly listOf(five)
+        result.costM shouldBe 0.0
+        result.costS shouldBe 0.0
     }
 
     @ParameterizedTest
@@ -115,6 +117,6 @@ class ShortestPathTest {
 
     companion object {
         @JvmStatic
-        fun algorithms(): List<ShortestPath> = listOf(Dijkstra(), AStar())
+        fun algorithms(): List<ShortestPath> = listOf(Dijkstra(), AStar(), BidirectionalDijkstra())
     }
 }

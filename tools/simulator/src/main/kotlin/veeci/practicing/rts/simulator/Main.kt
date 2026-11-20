@@ -3,15 +3,7 @@ package veeci.practicing.rts.simulator
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.websocket.WebSockets
-import io.ktor.client.request.post
-import io.ktor.client.request.setBody
-import io.ktor.client.statement.bodyAsText
-import io.ktor.http.ContentType
-import io.ktor.http.contentType
-import io.ktor.http.isSuccess
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import veeci.practicing.rts.protocol.Ack
 import veeci.practicing.rts.protocol.Command
 import veeci.practicing.rts.protocol.CommandAck
@@ -20,7 +12,6 @@ import veeci.practicing.rts.protocol.DriverPosition
 import veeci.practicing.rts.protocol.FixBatch
 import veeci.practicing.rts.protocol.GuestServerMessage
 import veeci.practicing.rts.protocol.LocationProviderDto
-import veeci.practicing.rts.protocol.ProtocolJson
 import veeci.practicing.rts.protocol.RouteUpdated
 import veeci.practicing.rts.protocol.Subscribed
 import veeci.practicing.rts.protocol.TripEvent
@@ -83,9 +74,22 @@ simulator fleet --drivers N [options]
   --batch-size N            fixes per batch        (default 5): one batch per driver every fix-every x N
   --expect-gap D            the server's fleet tick (default 2s)
   --tolerance D             allowed p95 distance from it (default 500ms)
-  Exits with 1 when dashboards ran and the p95 gap is outside expect-gap ± tolerance."""
+  Exits with 1 when dashboards ran and the p95 gap is outside expect-gap ± tolerance.
 
-/** Entry point of the simulator CLI: `token`, `driver`, `guest` or `fleet`. */
+simulator routes [options]
+  Load test of GET /api/v1/routes between random points (TC-6-PERF-01). Start the server with the Hanoi graph and
+  HTTP_RATELIMITPERMINUTE=100000, since the default limit is 300 requests a minute per client IP.
+  --url URL                 server                 (default http://localhost:8080)
+  --token TOKEN             access token           (default: a new GUEST from /api/v1/dev/tokens)
+  --rps N                   requests per second    (default 50)
+  --duration D              how long to run        (default 5m)
+  --bbox A,B,C,D            minLng,minLat,maxLng,maxLat (default 105.78,20.97,105.88,21.07)
+  --p95-limit D             fail at or above this  (default 150ms)
+  --seed N                  random seed            (default: the clock)
+  Prints p50, p95 and max of the 200 answers, the 422 answers by code, and the errors.
+  Exits with 1 when there are errors or p95 is at or above the limit."""
+
+/** Entry point of the simulator CLI: `token`, `driver`, `guest`, `fleet` or `routes`. */
 fun main(args: Array<String>) {
     val options =
         args
@@ -99,30 +103,20 @@ fun main(args: Array<String>) {
             "driver" -> runBlocking { replay(DriverOptions.of(options)) }
             "guest" -> runBlocking { watch(options) }
             "fleet" -> runBlocking { fleet(options) }
+            "routes" -> runBlocking { routes(options) }
             else -> false.also { println(USAGE) }
         }
     exitProcess(if (succeeded) 0 else 1)
 }
 
 private suspend fun token(options: Map<String, String>): Boolean {
-    val role = options["role"]
-    if (role == null) return false.also { println(USAGE) }
-    val name = options["name"]?.let { ""","displayName":"$it"""" } ?: ""
-    HttpClient(CIO).use { http ->
-        val response =
-            http.post("${options["url"] ?: "http://localhost:8080"}/api/v1/dev/tokens") {
-                contentType(ContentType.Application.Json)
-                setBody("""{"role":"$role"$name}""")
-            }
-        if (response.status.isSuccess()) {
-            val body = ProtocolJson.parseToJsonElement(response.bodyAsText()).jsonObject
-            println("userId: ${body.getValue("userId").jsonPrimitive.content}")
-            println("token:  ${body.getValue("token").jsonPrimitive.content}")
-        } else {
-            println("${response.status}: ${response.bodyAsText()}")
-        }
-        return response.status.isSuccess()
+    val role = options["role"] ?: return false.also { println(USAGE) }
+    val created = devToken(options["url"] ?: "http://localhost:8080", role, options["name"])
+    created?.let { (userId, token) ->
+        println("userId: $userId")
+        println("token:  $token")
     }
+    return created != null
 }
 
 private suspend fun fleet(values: Map<String, String>): Boolean {
@@ -149,7 +143,7 @@ private suspend fun fleet(values: Map<String, String>): Boolean {
 }
 
 /** `60s`, `5m`, `500ms` (Kotlin's duration format), or a plain number of seconds. */
-private fun duration(text: String): Duration = text.toLongOrNull()?.seconds ?: Duration.parse(text)
+internal fun duration(text: String): Duration = text.toLongOrNull()?.seconds ?: Duration.parse(text)
 
 private suspend fun watch(options: Map<String, String>): Boolean {
     val token = options["token"]

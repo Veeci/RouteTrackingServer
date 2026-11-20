@@ -24,6 +24,7 @@ import kotlin.random.Random
 class ShortestPathPropertiesTest {
     private val dijkstra = Dijkstra()
     private val aStar = AStar()
+    private val bidirectional = BidirectionalDijkstra()
     private val config = PropTestConfig(seed = 20_261_113L)
 
     @Test
@@ -40,12 +41,31 @@ class ShortestPathPropertiesTest {
             }
         }
 
+    /**
+     * T6.10: the bidirectional stopping rule. Stopping when the two balls first touch would pass most pairs and
+     * fail some; the property runs enough pairs on one-way-heavy grids to catch that.
+     */
+    @Test
+    fun `bidirectional Dijkstra costs the same as Dijkstra and A-star on both metrics`() =
+        runTest {
+            checkAll(config, Arb.roadGraph(), Arb.enum<Metric>(), Arb.long()) { graph, metric, seed ->
+                randomPairs(graph, seed, count = 30).forEach { (from, to) ->
+                    val oracle = dijkstra.search(graph, from, to, metric).shouldNotBeNull()
+                    val result = bidirectional.search(graph, from, to, metric).shouldNotBeNull()
+                    val aStarResult = aStar.search(graph, from, to, metric).shouldNotBeNull()
+
+                    result.cost(metric) shouldBe (oracle.cost(metric) plusOrMinus 1e-6)
+                    result.cost(metric) shouldBe (aStarResult.cost(metric) plusOrMinus 1e-6)
+                }
+            }
+        }
+
     @Test
     fun `TC-6-SP-08 the path is a chain of real edges whose lengths and times add up to the reported costs`() =
         runTest {
             checkAll(config, Arb.roadGraph(), Arb.enum<Metric>(), Arb.long()) { graph, metric, seed ->
                 randomPairs(graph, seed).forEach { (from, to) ->
-                    listOf(dijkstra, aStar).forEach { search ->
+                    listOf(dijkstra, aStar, bidirectional).forEach { search ->
                         val result = search.search(graph, from, to, metric).shouldNotBeNull()
 
                         result.nodes.first() shouldBe from

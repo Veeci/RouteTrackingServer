@@ -2,7 +2,9 @@
 
 The `routing` context builds its road graph from an OpenStreetMap (OSM) XML file for one city.
 The city is Hanoi. The file is not in git: it is large, and it changes whenever we download it again.
-Tests never read it. They use small hand-written files under `app/src/testFixtures/resources/graphs/`.
+Ordinary tests never read it. They use small hand-written files under `app/src/testFixtures/resources/graphs/`.
+The benchmarks tagged `slow` read it: run `./gradlew slowTest` after the download. They skip with a message when the
+file is missing, and `check` never runs them.
 
 ## Download the Hanoi extract
 
@@ -14,7 +16,7 @@ mkdir -p data/osm
 ```
 
 ```bash
-curl --fail --show-error --output data/osm/hanoi.osm \
+curl --fail --show-error --user-agent 'rts-osm-download/1.0' --output data/osm/hanoi.osm \
   --data-urlencode 'data=[out:xml][timeout:180];way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service)(_link)?$"](20.95,105.75,21.10,105.90);(._;>;);out body;' \
   https://overpass-api.de/api/interpreter
 ```
@@ -28,7 +30,8 @@ The query has three parts:
    the file has no coordinates.
 3. `out body` prints the elements with their tags. Overpass prints nodes before ways.
 
-Expect a file of roughly 100 to 200 MB. If Overpass answers 429 or 504, wait a minute and run the
+Expect a file of about 30 MB: the download on 2026-11-20 was 30,088,231 bytes. Overpass answered 406 to a
+request without `--user-agent`, so keep that flag. If it answers 429, 502 or 504, wait a minute and run the
 command again, or use another public instance such as `https://overpass.kumi.systems/api/interpreter`.
 
 ## What the loader reads
@@ -72,6 +75,47 @@ process's working directory, so run the server from the repository root or give 
 The graph loads in the background after startup. Until it has loaded, `/health/ready` answers 503 with the
 `graph` check DOWN, and route requests answer 503 ROUTING_NOT_READY. A missing or unreadable file is logged at
 ERROR and leaves `graph` DOWN; the process keeps running.
+
+## The binary graph cache
+
+Parsing the XML takes seconds on a fast machine and tens of seconds on the staging laptop. So the server keeps the
+built graph in a binary file and reads that on later starts. `CachedGraphSource` (`routing/adapter/out/osm`) does
+this on every load:
+
+1. Hash the OSM file with SHA-256.
+2. Open `<routing.graphCacheDir>/<name>.graph`, so `data/osm/cache/hanoi.graph` for `hanoi.osm`. When its header has
+   the same hash and format version, read the arrays from it and return the graph.
+3. Otherwise parse the XML and build the graph as before, then write the cache.
+
+The file holds the final `RoadGraph` arrays, after SCC pruning, so a read needs no builder and no pruning. The
+header is a magic number (`RTSG`), the format version, the SHA-256 of the OSM file and the node and edge counts.
+A CRC32C of the arrays ends the file. `RoadGraphCacheFile` writes each array in one bulk copy through a `FileChannel`
+and reads it back into a plain array, without memory mapping. The grid index is rebuilt after every load, which
+takes a few tens of milliseconds.
+
+The cache is only an optimisation, so nothing about it can stop the graph from loading:
+
+| Case | What happens |
+|---|---|
+| No cache file yet | Parse the XML, write the cache. Logged at INFO. |
+| New OSM file, or a cache of another format version | Parse the XML, write a new cache. Logged at INFO. |
+| Truncated or corrupt cache, or a file that is not a cache | Parse the XML, write a new cache. Logged at WARN. |
+| The cache directory cannot be created or written | Parse the XML and use the graph. Logged at WARN. Every start parses again. |
+
+The server writes the cache to a temporary file in the same directory, then renames it over the old one in one
+step. A crash during the write leaves the old cache or none, never half a file.
+
+The hash only proves that the input file is the same. When a code change would build a different graph from the
+same file, such as new default speeds or new build rules, raise `RoadGraphCacheFile.FORMAT_VERSION`. Every server
+then rebuilds its cache on the next start.
+
+`routing.graphCacheDir` is `data/osm/cache` by default, inside the gitignored `data/osm/`. Set the
+`ROUTING_GRAPHCACHEDIR` environment variable to move it. An empty value turns the cache off. Staging mounts a
+small Docker volume there and keeps the OSM file read-only (`deploy/staging/compose.yml`).
+
+The log says which path a load took: "Read the road graph from the cache" or "Parsed the road graph from the OSM
+XML", each with the time it took. The measured times are in "As built (6d)" of
+[phase-06-routing.md](../plan/phase-06-routing.md).
 
 ## Known limits
 

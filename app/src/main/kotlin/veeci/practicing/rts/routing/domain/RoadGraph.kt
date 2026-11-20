@@ -10,11 +10,12 @@ import veeci.practicing.rts.shared.geo.GeoPoint
  * take several times less memory and a search reads them in order, which the CPU cache rewards.
  *
  * The graph is immutable after [RoadGraphBuilder.build], so any number of threads may read it without locks.
- * The arrays are `internal` so that nothing outside this module can change them. They are
- * [PublishedApi] only so that the inline [forEachEdge] can read them.
+ * The arrays are `internal` so that nothing outside this module can change them. Most are [PublishedApi]
+ * only so that the inline [forEachEdge] can read them. The binary cache (`RoadGraphCacheFile`) reads and
+ * writes them in bulk.
  */
 class RoadGraph internal constructor(
-    private val nodeOsmIds: LongArray,
+    internal val nodeOsmIds: LongArray,
     @PublishedApi internal val nodeLat: DoubleArray,
     @PublishedApi internal val nodeLng: DoubleArray,
     /** Size `nodeCount + 1`. Non-decreasing, starts at 0 and ends at [edgeCount]. */
@@ -40,6 +41,13 @@ class RoadGraph internal constructor(
      * it to get a travel time that no real path can beat. Computed once here so that no search scans the edges.
      */
     val maxSpeedMps: Float = edgeSpeedMps.maxOrNull() ?: 0f
+
+    /**
+     * The edges entering each node, for searches that also run backward from the target. Built on first use
+     * and kept with the graph: only [veeci.practicing.rts.routing.domain.search.BidirectionalDijkstra] needs
+     * it, so a server that routes with A* never pays its memory.
+     */
+    internal val incoming: IncomingEdges by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { IncomingEdges(this) }
 
     fun point(node: Int): GeoPoint = GeoPoint(nodeLat[node], nodeLng[node])
 

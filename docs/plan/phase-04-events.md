@@ -189,7 +189,7 @@ events counter after arriving, and `DeviceScriptTest`. Check: 246 unit, 183 inte
 ## Tasks
 
 - [x] T4.1 (4a: arriving and arrived rules) `TripEvent` hierarchy, rule functions, `EventRulesConfig`.
-- [ ] T4.2 `TripEventService` + listeners for `FixesAccepted` / `DeviceStatusReported`.
+- [x] T4.2 `TripEventService` + listeners for `FixesAccepted` / `DeviceStatusReported`.
 - [x] T4.3 (as `autoArrive`) System actor + auto-arrive inside the aggregate.
 - [x] T4.4 `device_status` message in `tracking` (socket branch, mapping, event).
 - [x] T4.5 `platform/jobs` scheduler with advisory lock; `StaleDriverJob`; `PresenceStore`.

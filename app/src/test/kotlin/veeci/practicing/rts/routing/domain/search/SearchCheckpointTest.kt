@@ -36,6 +36,18 @@ class SearchCheckpointTest {
         shouldThrow<Stop> { Dijkstra().search(grid, corner, farCorner, Metric.TIME) { throw Stop() } }
     }
 
+    @Test
+    fun `bidirectional Dijkstra calls the checkpoint too, and a throw from it reaches the caller`() {
+        var calls = 0
+
+        class Stop : RuntimeException()
+
+        val result = BidirectionalDijkstra().search(grid, corner, farCorner, Metric.DISTANCE) { calls++ }
+
+        calls shouldBe result.shouldNotBeNull().settled / ShortestPath.CHECKPOINT_INTERVAL
+        shouldThrow<Stop> { BidirectionalDijkstra().search(grid, corner, farCorner, Metric.TIME) { throw Stop() } }
+    }
+
     private fun squareGrid(side: Int): RoadGraph {
         val builder = RoadGraphBuilder()
         for (r in 0 until side) {
