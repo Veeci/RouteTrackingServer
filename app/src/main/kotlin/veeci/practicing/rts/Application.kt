@@ -28,6 +28,7 @@ import veeci.practicing.rts.fleet.fleetModule
 import veeci.practicing.rts.identity.adapter.inbound.web.devTokenRoutes
 import veeci.practicing.rts.identity.adapter.inbound.web.driverAdminRoutes
 import veeci.practicing.rts.identity.identityModule
+import veeci.practicing.rts.live.adapter.inbound.ws.adminTripSocket
 import veeci.practicing.rts.live.adapter.inbound.ws.guestSocket
 import veeci.practicing.rts.live.liveModule
 import veeci.practicing.rts.platform.audit.auditRoutes
@@ -38,6 +39,7 @@ import veeci.practicing.rts.platform.db.Migrations
 import veeci.practicing.rts.platform.di.platformModule
 import veeci.practicing.rts.platform.events.OutboxRelay
 import veeci.practicing.rts.platform.http.adminArea
+import veeci.practicing.rts.platform.http.adminPlane
 import veeci.practicing.rts.platform.http.configureErrorHandling
 import veeci.practicing.rts.platform.http.configureRequestGuards
 import veeci.practicing.rts.platform.http.configureSecurityHeaders
@@ -89,6 +91,8 @@ fun main(args: Array<String>) {
         Netty,
         configure = {
             connector { port = config.http.port }
+            // The admin routes' own port (phase 12a). Without it they answer on the public port.
+            if (config.http.splitsAdminPort) connector { port = config.http.adminPort }
             shutdownGracePeriod = config.http.shutdownGracePeriod.inWholeMilliseconds
             shutdownTimeout = config.http.shutdownTimeout.inWholeMilliseconds
         },
@@ -138,20 +142,27 @@ fun Application.module(
             tripTrackRoutes(get())
             routeRoutes(get())
         }
-        // The fleet socket takes a ticket, never a token: a browser opens it (phase 11c).
-        authenticate(AUTH_TICKET) { fleetSocket(get()) }
-        // Every /api/v1/admin route, the only ones a browser on another origin may call.
-        adminArea(config.admin) {
-            authenticate(AUTH_JWT) {
-                adminTripSummaryRoutes(get())
-                adminTripRoutes(get())
-                adminCommandRoutes(get())
-                sessionHealthRoutes(get())
-                providerReportRoutes(get())
-                auditRoutes(get(), get())
-                driverAdminRoutes(get())
-                fleetRoutes(get(), get())
-                wsTicketRoutes(get())
+        // Only on the admin port when it is set (phase 12a). Health, metrics, dev tokens and the routes above answer on
+        // both ports.
+        adminPlane(config.http) {
+            // The admin sockets take a ticket, never a token: a browser opens them (phases 11c and 12a).
+            authenticate(AUTH_TICKET) {
+                fleetSocket(get())
+                adminTripSocket(get())
+            }
+            // Every /api/v1/admin route, the only ones a browser on another origin may call.
+            adminArea(config.admin) {
+                authenticate(AUTH_JWT) {
+                    adminTripSummaryRoutes(get())
+                    adminTripRoutes(get())
+                    adminCommandRoutes(get())
+                    sessionHealthRoutes(get())
+                    providerReportRoutes(get())
+                    auditRoutes(get(), get())
+                    driverAdminRoutes(get())
+                    fleetRoutes(get(), get())
+                    wsTicketRoutes(get())
+                }
             }
         }
         if (config.app.env != AppEnv.PROD) echoEndpoint(get())

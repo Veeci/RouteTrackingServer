@@ -306,6 +306,9 @@ target is `http://127.0.0.1:8080`. Funnel allows only public ports 443, 8443 and
 Check: `tailscale funnel status` shows `https://rts-staging.<tailnet>.ts.net` with `proxy http://127.0.0.1:8080`
 and says the address is available on the internet. Public DNS for the name can take up to 10 minutes to appear.
 
+Funnel points at 8080 only. The app's admin port, 8081 (phase 12a), must never be behind Funnel. On 8080 every
+`/api/v1/admin` route and `/ws/v1/admin` socket answers 404, so the internet never reaches the admin API.
+
 Until the app runs, the URL answers 502. That is expected.
 
 ### 3.6 Create the deploy key
@@ -339,7 +342,7 @@ These files are in the repository. Nothing to type in. Each deploy copies the fi
 
 | File | What it does |
 |---|---|
-| [`deploy/staging/compose.yml`](../../deploy/staging/compose.yml) | The stack: `db` (Postgres 16, no published port) and `app` (the image `:<sha>`, port `127.0.0.1:8080`, 2 GB limit, the road graph mounted read-only). One instance and no Redis: `REDIS_URL` is empty |
+| [`deploy/staging/compose.yml`](../../deploy/staging/compose.yml) | The stack: `db` (Postgres 16, no published port) and `app` (the image `:<sha>`, public port `127.0.0.1:8080`, admin port `127.0.0.1:8081`, 2 GB limit, the road graph mounted read-only). One instance and no Redis: `REDIS_URL` is empty |
 | [`deploy/staging/deploy.sh`](../../deploy/staging/deploy.sh) | `bash /srv/rts/deploy.sh <full-sha>`: pull, run `/app/bin/migrate`, start the app, wait up to 180 s for `/health/ready`, and start the previous tag again if the new one never gets ready |
 | [`deploy/staging/backup.sh`](../../deploy/staging/backup.sh) | Nightly `pg_dump`, copy to `rts-backup`, keep 14 days on both laptops |
 | [`.github/workflows/deploy-staging.yml`](../../.github/workflows/deploy-staging.yml) | After CI succeeds on a push to `main`: join the tailnet, copy the files, run `deploy.sh`, then a smoke test through Funnel from a second runner and a job summary. `workflow_dispatch` with `image_sha` redeploys any earlier image |
@@ -348,6 +351,10 @@ Points worth knowing:
 
 - Binding the app to `127.0.0.1` matters. Docker publishes ports by writing its own iptables rules, which bypass
   `ufw`. A plain `"8080:8080"` would expose the app to everyone on your home network.
+- The app listens on two ports (phase 12a). 8080 is the public port behind Funnel: drivers, guests, trips, routes, dev
+  tokens, health and metrics. 8081 is the admin port (`HTTP_ADMINPORT`). The `/api/v1/admin` routes and the
+  `/ws/v1/admin` sockets answer only there, and the routes of 8080 answer there too. Both are on loopback. The admin
+  dashboard reaches 8081 through the tailnet only, which slice 12f sets up.
 - `deploy.sh` runs the migrations with `docker compose run --rm --no-deps --entrypoint /app/bin/migrate app`. The
   `--entrypoint` flag matters, because the image's `ENTRYPOINT` is `/app/bin/app`. If a migration fails, the script
   stops and the old version keeps serving.
@@ -439,6 +446,8 @@ ssh <your-user>@rts-staging
 cd /srv/rts && cat current-tag
 sudo -u deploy IMAGE_TAG=$(cat current-tag) docker compose -p rts-staging -f compose.yml ps
 curl -s 127.0.0.1:8080/health/ready
+curl -s -o /dev/null -w '%{http_code}\n' 127.0.0.1:8080/api/v1/admin/overview   # 404: no admin API on the public port
+curl -s -o /dev/null -w '%{http_code}\n' 127.0.0.1:8081/api/v1/admin/overview   # 401: the admin port asks for a token
 sudo docker stats --no-stream
 ```
 
@@ -616,6 +625,7 @@ All commands run on Laptop 2. Reach it with `ssh <your-user>@rts-staging` from a
 | Follow app logs | `sudo -u deploy IMAGE_TAG=$(cat /srv/rts/current-tag) docker compose -p rts-staging -f /srv/rts/compose.yml logs -f app` |
 | Open `psql` | `sudo docker exec -it rts-staging-db-1 psql -U rts -d rts` |
 | Read metrics | `curl -s 127.0.0.1:8080/metrics` |
+| Call the admin API on the laptop | `curl -s -H "Authorization: Bearer <staff token>" 127.0.0.1:8081/api/v1/admin/overview` (port 8080 answers 404) |
 | Roll back | GitHub, then Actions, then **Deploy staging**, then **Run workflow** with an older SHA |
 | Restart the app | `sudo -u deploy IMAGE_TAG=$(cat /srv/rts/current-tag) docker compose -p rts-staging -f /srv/rts/compose.yml restart app` |
 | Funnel state | `tailscale funnel status` |
@@ -634,6 +644,7 @@ All commands run on Laptop 2. Reach it with `ssh <your-user>@rts-staging` from a
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | Public URL answers 502 | App not running or not on `127.0.0.1:8080` | Check `docker ps` and the app logs |
+| An admin route answers 404 | It was called on 8080 or through Funnel. Admin routes answer only on the admin port | Call `127.0.0.1:8081` on the laptop |
 | Public URL does not resolve | Public DNS not out yet, or Funnel off | Wait 10 minutes. Check `tailscale funnel status` |
 | `/health/ready` stays DOWN on `graph` | `hanoi.osm` missing, or a directory instead of a file | `ls -l /srv/rts/osm/`, redo step 3.4, restart the app |
 | Every start takes tens of seconds and logs "Could not write the road graph cache" | The `osm-cache` volume is not writable by the `app` user | Stop the app, `sudo docker volume rm rts-staging_osm-cache`, deploy again so the volume is created from the image |

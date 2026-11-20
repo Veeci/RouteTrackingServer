@@ -14,11 +14,15 @@ info:
       `/api/v1/admin` also carry `Cache-Control: no-store`.
     - Only `/api/v1/admin` answers browsers on other origins (CORS), and only the origins the server is configured
       with (`ADMIN_ORIGINS`). Credentials are off: send the token in the Authorization header.
+    - The admin paths (`/api/v1/admin`, and the `/ws/v1/admin` sockets) are served on the admin port when the server
+      has one (`HTTP_ADMINPORT`, phase 12a), and the public port answers 404 for them. Every other path answers on
+      both ports. Without an admin port everything is on one port. Staging puts the admin port on its private network
+      only.
 
     This file is the contract: it is written before the code, and API tests fail when a response does not match it.
 servers:
   - url: http://localhost:8080
-    description: Local development
+    description: Local development. It serves the admin paths too unless the server has an admin port.
 tags:
   - name: operations
     description: Probes and metrics for the hosting platform, not for app users.
@@ -789,12 +793,13 @@ paths:
     post:
       tags: [admin]
       operationId: issueWsTicket
-      summary: A single-use ticket for the fleet socket (OPERATOR, ADMIN)
+      summary: A single-use ticket for an admin socket (OPERATOR, ADMIN)
       description: |
         A browser cannot set an Authorization header on a WebSocket. It asks for a ticket here, with its access token,
-        and opens `/ws/v1/admin/fleet?ticket=...` within 30 seconds (AsyncAPI channel `adminFleet`). The ticket works
-        once, on any server instance, and the socket runs as the user who asked for it. The access token never
-        appears in a URL. The server stores only the ticket's SHA-256.
+        and opens `/ws/v1/admin/fleet?ticket=...` (AsyncAPI channel `adminFleet`) or `/ws/v1/admin/trip?ticket=...`
+        (channel `adminTrip`, phase 12a) within 30 seconds. The ticket works once, on either socket and on any server
+        instance, and the socket runs as the user who asked for it. The access token never appears in a URL. The
+        server stores only the ticket's SHA-256.
       security: [{ bearerAuth: [] }]
       responses:
         '200':

@@ -182,6 +182,17 @@ is closed, and sign-up and login for real users.
 | 93 | Which websites may call the admin API | Only the dashboard origins the server is configured with. No cookies: the dashboard sends its token itself, so another website cannot act as a logged-in operator | Built P11 (11c) |
 | 94 | How the dashboard opens the live map | With a ticket that works once and lasts 30 seconds, so the operator's token never appears in a URL or a log | Built P11 (11c) |
 
+## Phase 12 (planned, decided 2026-11-20)
+
+| # | Problem | What will happen | Source |
+|---|---|---|---|
+| 95 | Where the dashboard's code lives | In this repository, in `admin-web/`, so one change can cover the API and the screens that use it | Decided P12 (D1) |
+| 96 | Who can reach the dashboard in staging | Only devices in our Tailscale network. The dashboard and the admin API are not on the public internet; the drivers' and guests' API still is | Decided P12 (D2) |
+| 97 | How operators log in before a real login exists | A staging-only login with the staging access token. It renews the operator's 15-minute token by itself while the tab is open. Production never has it | Decided P12 (D3) |
+| 98 | Which map the dashboard shows | OpenFreeMap street tiles, free and without a key | Decided P12 (D6) |
+| 99 | Who gives staff their accounts in production | An identity provider with a standard login (OpenID Connect). Which one is decided when that work starts | Decided P12 (D7, open) |
+| 100 | How staff watch one trip live | On a separate staff channel. The guest's channel stays for guests only | Decided P12 (D8) |
+
 ## Open questions, most important first
 
 1. Login: who issues tokens in production, and how do guests and drivers sign up (row 27)?

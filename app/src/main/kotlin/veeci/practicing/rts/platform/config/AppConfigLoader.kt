@@ -21,7 +21,24 @@ object AppConfigLoader {
             .build()
             .loadConfigOrThrow<AppConfig>("/config/$profile.conf", "/config/base.conf")
             .also(::checkStaging)
+            .also { checkAdminPort(it.http) }
     }
+
+    /**
+     * The admin port is 0 or a port of its own. Equal to the public port it would hide nothing: the public port would
+     * then serve the admin routes too.
+     */
+    private fun checkAdminPort(http: HttpConfig) {
+        val admin = http.adminPort
+        if (admin != 0 && (admin !in 1..MAX_PORT || admin == http.port)) {
+            throw ConfigException(
+                "HTTP_ADMINPORT=$admin must be 0 (admin routes on the public port) or a port from 1 to $MAX_PORT" +
+                    " other than HTTP_PORT=${http.port}",
+            )
+        }
+    }
+
+    private const val MAX_PORT = 65_535
 
     /** Staging serves the dev token route to the internet, so it must not start without a strong access token. */
     private fun checkStaging(config: AppConfig) {

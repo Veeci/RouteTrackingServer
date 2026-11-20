@@ -32,7 +32,7 @@ import kotlin.time.toKotlinInstant
 enum class TicketError(
     override val category: ErrorCategory,
 ) : ErrorCode {
-    /** Tickets open the admin fleet socket, so only staff get one. */
+    /** Tickets open the admin sockets (fleet and trip), so only staff get one. */
     TICKET_FORBIDDEN(ErrorCategory.FORBIDDEN),
 }
 
@@ -121,7 +121,10 @@ data class WsTicketResponse(
     val expiresAt: Instant,
 )
 
-/** `POST /api/v1/admin/ws-tickets` (phase 11c, OPERATOR and ADMIN). Mount inside `authenticate(AUTH_JWT)`. */
+/**
+ * `POST /api/v1/admin/ws-tickets` (phase 11c, OPERATOR and ADMIN). A ticket opens either admin socket, the fleet or the
+ * trip one (phase 12a). Mount inside `authenticate(AUTH_JWT)`.
+ */
 fun Route.wsTicketRoutes(tickets: WsTickets) {
     post("/api/v1/admin/ws-tickets") {
         val issued = tickets.issue(call.actor())

@@ -14,6 +14,7 @@ the AsyncAPI schema accepts the file. The Kotlin classes, error codes (`WsErrorC
 | `/ws/v1/driver` | Driver SDK | `Authorization: Bearer <token>` (header) or `?token=` (fallback for clients that can't set headers) | Upload fixes and device status; receive ACKs and commands |
 | `/ws/v1/guest` | Guest app | same | Subscribe to one trip; receive driver position, progress and events |
 | `/ws/v1/admin/fleet` | Admin dashboard (browser) | `?ticket=` only, from `POST /api/v1/admin/ws-tickets` (phase 11c) | Watch the drivers in a map area: a snapshot, then a delta or cluster counts every 2 s |
+| `/ws/v1/admin/trip` | Admin dashboard (browser) | same as the fleet socket (phase 12a) | Watch any one trip live, with the guest's messages |
 
 Since phase 3 both endpoints need an access token (a JWT; in dev and test, get one from
 `POST /api/v1/dev/tokens`). The server checks the token on the upgrade request: without a valid token the
@@ -21,10 +22,14 @@ upgrade fails with HTTP 401 and no socket opens. A valid token with the wrong ro
 endpoint, a DRIVER on the guest endpoint) opens the socket and closes it at once with 4403. The driver is
 identified by the token; `deviceId` in `hello` only names the device.
 
-The admin fleet socket takes no token. A browser cannot set headers on a WebSocket, and a token in a URL ends up in
-proxy and access logs. The dashboard trades its token for a ticket over REST instead. A ticket is valid 30 s and works
-once. Without a valid ticket the upgrade fails with HTTP 401. A ticket of a GUEST or DRIVER closes the socket with
-4403.
+The admin sockets (fleet and trip) take no token. A browser cannot set headers on a WebSocket, and a token in a URL
+ends up in proxy and access logs. The dashboard trades its token for a ticket over REST instead. A ticket is valid 30 s,
+works once and opens either admin socket. Without a valid ticket the upgrade fails with HTTP 401. A ticket of a GUEST
+or DRIVER closes the socket with 4403.
+
+When the server has an admin port (`HTTP_ADMINPORT`, phase 12a), the admin sockets answer only there, and the public
+port answers their upgrade with 404. The driver and guest sockets answer on both ports. Staging publishes the admin port
+on its private network only, so a phone on the internet never reaches the admin sockets.
 
 ## Envelope
 
@@ -41,7 +46,7 @@ Messages are grouped into sealed hierarchies in the `protocol` module, one pair 
 @Serializable sealed interface ClientMessage        // sent by driver devices
 @Serializable sealed interface ServerMessage        // sent by the server on the driver socket; `error` on both sockets
 @Serializable sealed interface GuestClientMessage   // sent by guest apps
-@Serializable sealed interface GuestServerMessage   // sent by the server on the guest socket
+@Serializable sealed interface GuestServerMessage   // sent by the server on the guest and staff trip sockets
 ```
 
 Unknown `type` values are rejected with `error{code=UNKNOWN_MESSAGE}` and the session stays open
@@ -250,6 +255,20 @@ server → route_updated    { tripId, kind: TRIP | APPROACH, routeVersion, polyl
   a deploy disconnected retries at the same moments. The simulator's `Backoff` is the reference.
   A `subscribe` to a trip that has already ended gets `subscribed` and then the same close.
 
+## Staff trip session (phase 12a)
+
+`/ws/v1/admin/trip` is the guest session for staff: the same messages, in the same order, with the same rules as
+above. Two things differ:
+
+- It authenticates with a ticket, like the fleet socket. Only OPERATOR and ADMIN may stay.
+- Staff may watch any trip. `TRIP_NOT_FOUND` then means only that the trip does not exist.
+
+A staff watcher counts as a watcher of the trip, like a guest. The first watcher makes device control raise the
+driver's tracking precision, and the last one to leave lowers it again (outside a ride). The dashboard's live trip view
+therefore gets the same fix rate a guest sees.
+
+The guest socket stays for guests only, with the token in the header (decision D8 in the phase 12 plan).
+
 ## Errors and close codes
 
 `server → error { code, message, correlatesTo? }` for recoverable problems; the session stays open.
@@ -262,7 +281,7 @@ server → route_updated    { tripId, kind: TRIP | APPROACH, routeVersion, polyl
 | `RATE_LIMITED` | More messages per second than `limits.maxMessagesPerSecond`; this message was dropped |
 | `EMPTY_BATCH`, `BATCH_TOO_LARGE`, `INVALID_SEQ` | The batch was not stored and gets no ack; `correlatesTo` is its seq |
 | `SESSION_DEVICE_MISMATCH` | The `hello` names a session that another device or driver started. Start a new session and send `hello` again |
-| `TRIP_NOT_FOUND` | Guest socket: no such trip, or one this guest may not see |
+| `TRIP_NOT_FOUND` | Guest socket: no such trip, or one this guest may not see. Staff trip socket: no such trip |
 
 The constants are in `WsErrorCodes` (protocol errors) and `TrackingError` (business errors) in code, and in
 the `Error` schema of the AsyncAPI document.

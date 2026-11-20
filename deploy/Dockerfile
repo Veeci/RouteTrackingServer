@@ -43,7 +43,8 @@ COPY --from=build --chown=app:app /workspace/otel/ /app/otel/
 RUN mkdir -p /app/data/osm/cache && chown -R app:app /app/data
 
 USER app
-EXPOSE 8080
+# 8080 is the public port. 8081 is the admin port when HTTP_ADMINPORT=8081 (phase 12a), as on staging.
+EXPOSE 8080 8081
 
 # Container-aware heap sizing, fail fast on OOM, production mode for Ktor.
 ENV JAVA_OPTS="-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError -Dio.ktor.development=false"

@@ -43,6 +43,10 @@ services:
       REDIS_URL: ${REDIS_URL:-}
       # Requests a minute per client address (base.conf: 300). The fleet load run (docs/testing/load-11.md) needs more.
       HTTP_RATELIMITPERMINUTE: ${HTTP_RATELIMITPERMINUTE:-300}
+      # 0 by default: the admin routes answer on 8080, where the simulator's dashboards expect them. Set
+      # HTTP_ADMINPORT=8081 in deploy/.env to split them off as staging does (phase 12a). They then answer only on the
+      # admin port published below, and 8080 answers 404 for them.
+      HTTP_ADMINPORT: ${HTTP_ADMINPORT:-0}
       # Tracing is off unless the observability profile's settings are provided (see .env.example).
       # Extra JVM flags for the start script (empty by default; the JVM would announce an empty JAVA_TOOL_OPTIONS).
       APP_OPTS: ${OTEL_JAVA_TOOL_OPTIONS:-}
@@ -51,6 +55,9 @@ services:
     ports:
       # A range, so --scale app=2 gives each instance its own port (8080, 8081). Phase 10b puts a load balancer in front.
       - "8080-8081:8080"
+      # The admin port (container 8081), on loopback only. Host 9080-9081, because host 8081 is the second instance's
+      # public port above. Nothing answers here while HTTP_ADMINPORT is 0.
+      - "127.0.0.1:9080-9081:8081"
 
   redis:
     image: redis:7-alpine

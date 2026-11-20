@@ -20,7 +20,7 @@ import veeci.practicing.rts.shared.Actor
 /** The name of the token check; wrap a route in `authenticate(AUTH_JWT) { ... }` to require a valid token. */
 const val AUTH_JWT = "jwt"
 
-/** The name of the ticket check (phase 11c): only the admin fleet socket uses it. */
+/** The name of the ticket check (phase 11c): only the admin sockets use it, the fleet and the trip one (12a). */
 const val AUTH_TICKET = "ws-ticket"
 
 /** The authenticated caller, as the Authentication plugin keeps it for the rest of the call. */
@@ -52,7 +52,7 @@ fun Application.configureAuthentication(
 }
 
 /**
- * Checks `?ticket=` from [WsTickets] and nothing else: no header, no `?token=`. A browser's fleet socket uses it, so the
+ * Checks `?ticket=` from [WsTickets] and nothing else: no header, no `?token=`. A browser's admin sockets use it, so the
  * access token never appears in a URL. A missing, used or expired ticket is answered 401 before the upgrade, like a
  * missing token on the other sockets.
  */

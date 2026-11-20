@@ -37,7 +37,8 @@ and observability from day one.
 | 8 | [History & export](plan/phase-08-history.md) | `feat/p8-history` | Summaries, keyset-paginated history, replay, GPX/GeoJSON | 3 |
 | 9 | [Telemetry](plan/phase-09-telemetry.md) | `feat/p9-telemetry` | Session health, GMS vs AOSP report | 2, 4 |
 | 10 | [Production & scale](plan/phase-10-production.md) | `feat/p10-production` | Redis adapters, multi-instance, deploy pipeline, ops, capacity | 3–5 (ideally all) |
-| 11 | [Admin API & live fleet](plan/phase-11-admin.md) | `feat/p11-admin` | `fleet` read model (plain `lat` and `lng` columns, no PostGIS), admin REST, live fleet map channel, audit log, browser auth; feeds the separate `RouteTrackingAdmin` web app | 3, 4 (5, 9 enrich) |
+| 11 | [Admin API & live fleet](plan/phase-11-admin.md) | `feat/p11-admin` | `fleet` read model (plain `lat` and `lng` columns, no PostGIS), admin REST, live fleet map channel, audit log, browser auth; feeds the admin dashboard (phase 12) | 3, 4 (5, 9 enrich) |
+| 12 | [Admin dashboard](plan/phase-12-admin-dashboard.md) | `feat/p12-admin-dashboard` | **12a built** (admin port, staff trip socket), the rest planned. React single-page app on the admin API: overview, live fleet map, drivers, trips, audit; tailnet-only hosting on the staging laptop; real login (OIDC) last | 11 (1.5 for hosting) |
 
 To test from a phone without staging, run the server on a laptop and open a Cloudflare Quick Tunnel:
 `cloudflared tunnel --url http://localhost:8080`.

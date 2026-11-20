@@ -7,7 +7,6 @@ import io.ktor.client.statement.HttpResponse
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.routing.Routing
 import io.ktor.server.routing.RoutingNode
-import io.ktor.server.routing.getAllRoutes
 import io.ktor.server.testing.ApplicationTestBuilder
 import kotlinx.coroutines.delay
 import org.junit.jupiter.api.DynamicTest
@@ -15,6 +14,7 @@ import org.junit.jupiter.api.DynamicTest.dynamicTest
 import org.junit.jupiter.api.TestFactory
 import org.testcontainers.junit.jupiter.Testcontainers
 import veeci.practicing.rts.testing.TestTokens
+import veeci.practicing.rts.testing.routeSignatures
 import veeci.practicing.rts.testing.testApp
 import veeci.practicing.rts.testing.trip.TripApi
 import veeci.practicing.rts.trip.AuthorizationMatrixIT.Caller.ADMIN
@@ -76,8 +76,7 @@ class AuthorizationMatrixIT {
         }
         val served =
             (routing as RoutingNode)
-                .getAllRoutes()
-                .mapNotNull { it.signature() }
+                .routeSignatures()
                 .filter { "/api/v1/trips" in it }
                 .toSet()
 
@@ -134,13 +133,5 @@ class AuthorizationMatrixIT {
         const val SUMMARY = "/summary"
         const val SUMMARY_WAIT_MS = 10_000L
         const val POLL_MS = 50L
-    }
-
-    /** `GET /api/v1/trips/{id}` for a route that ends in an HTTP method selector; null for other nodes. */
-    private fun RoutingNode.signature(): String? {
-        val text = toString()
-        val method = Regex("""\(method:(\w+)\)""").find(text)?.groupValues?.get(1) ?: return null
-        val path = text.replace(Regex("""/?\([^)]*\)"""), "").trimEnd('/')
-        return "$method $path"
     }
 }
