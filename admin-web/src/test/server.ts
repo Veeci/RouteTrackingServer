@@ -1,4 +1,4 @@
-import { HttpResponse } from 'msw';
+import { HttpResponse, ws } from 'msw';
 import { setupServer } from 'msw/node';
 import { createOpenApiHttp } from 'openapi-msw';
 import type { Session } from '../auth/session';
@@ -40,6 +40,14 @@ export function problemResponse(status: number, code: string, detail?: string) {
 
 export const MINTED_USER_ID = '0b9c6a7e-4a52-4b4f-9a1e-3f1f2a8f6d10';
 
+export const TICKET = 'ticket-test';
+
+/**
+ * The fleet socket on any host. MSW intercepts the browser's WebSocket, so a page test runs the real fleet client:
+ * `server.use(fleetSocket.addEventListener('connection', ({ client }) => …))`.
+ */
+export const fleetSocket = ws.link('ws://*/ws/v1/admin/fleet');
+
 export const defaultHandlers = [
   http.post('/api/v1/dev/tokens', async ({ request, response }) => {
     const body = await request.json();
@@ -62,6 +70,10 @@ export const defaultHandlers = [
     response(404).json(problem(404, 'SESSION_HEALTH_NOT_FOUND')),
   ),
   http.get('/api/v1/admin/audit', ({ response }) => response(200).json(auditPage([]))),
+  // 12d: a ticket for the fleet socket. A test that opens the socket adds a handler on `fleetSocket`.
+  http.post('/api/v1/admin/ws-tickets', ({ response }) =>
+    response(200).json({ ticket: TICKET, expiresAt: new Date(Date.now() + 30_000).toISOString() }),
+  ),
   http.get('/api/v1/admin/reports/providers', ({ query, response }) =>
     response(200).json(providerReport([], query.get('from'), query.get('to'))),
   ),

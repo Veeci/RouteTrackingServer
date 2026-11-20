@@ -4,18 +4,23 @@
 // - Scripts come only from the app's own origin: no inline script, no eval, no third-party script.
 // - Styles allow 'unsafe-inline' because Mantine writes its CSS variables in a <style> tag and sets inline style
 //   attributes. Inline styles cannot run code.
-// - connect-src 'self' covers same-origin WebSockets too (CSP Level 3). 12d adds the map tile host here and in
-//   img-src.
-// - worker-src blob: is for MapLibre (12d), which starts its workers from blob URLs.
+// - connect-src 'self' covers same-origin WebSockets too (CSP Level 3). The map's style, tiles, sprites and glyphs
+//   come from OpenFreeMap (decision D6). MapLibre fetches them, so the host is in connect-src. It is in img-src too,
+//   for a browser where MapLibre falls back to an <img> for the raster tiles and the sprite.
+// - worker-src 'self': MapLibre 6 starts its worker from maplibre-gl-worker.mjs, which the build copies next to the
+//   app's scripts (src/map/FleetMap.tsx). No blob: worker and no eval (12d, choice C1).
+
+/** The only host outside the app's origin that the browser may reach. */
+export const TILE_HOST = 'https://tiles.openfreemap.org';
 
 const directives: Record<string, string[]> = {
   'default-src': ["'self'"],
   'script-src': ["'self'"],
   'style-src': ["'self'", "'unsafe-inline'"],
-  'img-src': ["'self'", 'data:', 'blob:'],
+  'img-src': ["'self'", 'data:', 'blob:', TILE_HOST],
   'font-src': ["'self'"],
-  'connect-src': ["'self'"],
-  'worker-src': ['blob:'],
+  'connect-src': ["'self'", TILE_HOST],
+  'worker-src': ["'self'"],
   'object-src': ["'none'"],
   'base-uri': ["'self'"],
   'form-action': ["'self'"],

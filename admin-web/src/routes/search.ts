@@ -22,5 +22,10 @@ export const cursorParam = textParam(1_000);
 
 export const uuidParam = z.uuid().optional().catch(undefined);
 
+/** A number from `min` to `max`, both included. */
+export function numberParam(min: number, max: number) {
+  return z.number().min(min).max(max).optional().catch(undefined);
+}
+
 /** A day as `YYYY-MM-DD`. */
 export const dayParam = z.string().refine(isDay).optional().catch(undefined);

@@ -12,6 +12,7 @@ import { AnchorLink } from '../../components/AnchorLink';
 import { ErrorAlert } from '../../components/ErrorAlert';
 import { formatDateTime, formatTime, NONE } from '../../components/format';
 import { RequireRole } from '../../components/RequireRole';
+import { flagValue, ONLINE_OPTIONS, toFlag, TRIP_OPTIONS } from '../flags';
 import { type PageMove, useCursorPaging } from '../paging';
 import { driversQuery } from './queries';
 import type { DriversSearch } from './search';
@@ -81,26 +82,6 @@ export function DriversPage() {
       )}
     </Stack>
   );
-}
-
-const ONLINE_OPTIONS = [
-  { value: '', label: 'Any' },
-  { value: 'true', label: 'Online' },
-  { value: 'false', label: 'Offline' },
-];
-
-const TRIP_OPTIONS = [
-  { value: '', label: 'Any' },
-  { value: 'true', label: 'On a trip' },
-  { value: 'false', label: 'Not on a trip' },
-];
-
-function flagValue(flag: boolean | undefined): string {
-  return flag === undefined ? '' : String(flag);
-}
-
-function toFlag(value: string): boolean | undefined {
-  return value === '' ? undefined : value === 'true';
 }
 
 interface DriverFiltersProps {

@@ -111,13 +111,13 @@ describe('the app shell', () => {
   it('lists every page for an admin', async () => {
     renderApp({ session: testSession('ADMIN') });
 
-    expect(await navLinks()).toEqual(['Overview', 'Drivers', 'Audit', 'Reports']);
+    expect(await navLinks()).toEqual(['Overview', 'Live map', 'Drivers', 'Audit', 'Reports']);
   });
 
   it('TC-12-AUTH-02: hides Audit and Reports from an operator', async () => {
     renderApp({ session: testSession('OPERATOR') });
 
-    expect(await navLinks()).toEqual(['Overview', 'Drivers']);
+    expect(await navLinks()).toEqual(['Overview', 'Live map', 'Drivers']);
   });
 
   it('keeps Drivers marked on a driver page', async () => {

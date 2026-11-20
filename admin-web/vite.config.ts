@@ -14,6 +14,18 @@ const proxy: Record<string, ProxyOptions> = {
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rolldownOptions: {
+      output: {
+        // MapLibre in a chunk of its own, loaded by the map page only. An app change then leaves the library's file
+        // name, and the browser's cached copy, as they were.
+        codeSplitting: { groups: [{ name: 'maplibre', test: /node_modules[\\/]maplibre-gl[\\/]/ }] },
+      },
+    },
+    // MapLibre alone is about 1 050 kB minified (290 kB gzipped). Every other chunk is far below 500 kB, and the entry
+    // is about 300 kB, so the warning still fires if MapLibre ever lands in the entry.
+    chunkSizeWarningLimit: 1_100,
+  },
   server: { port: 5173, strictPort: true, proxy },
   // `vite preview` serves the production build with the production headers, so the E2E test runs under the real
   // Content Security Policy. The dev server cannot: React's fast refresh needs an inline script.
@@ -28,10 +40,12 @@ export default defineConfig({
       include: ['src/**/*.{ts,tsx}'],
       exclude: ['src/**/*.test.{ts,tsx}', 'src/test/**', 'src/main.tsx'],
       reporter: ['text', 'html'],
-      // The gate covers the code with the most logic per line: errors, retries, the session and re-minting.
+      // The gate covers the code with the most logic per line: errors, retries, the session and re-minting, and the
+      // fleet socket's client, schemas and marker store (12d).
       thresholds: {
         'src/api/**': { lines: 80 },
         'src/auth/**': { lines: 80 },
+        'src/fleet/**': { lines: 80 },
       },
     },
   },
