@@ -1,7 +1,7 @@
 # Phase 12 — Admin Dashboard
 
 Branch: `feat/p12-admin-dashboard` · Depends on: 11 (admin API, fleet socket, tickets), 1.5 for the staging deploy only ·
-Status: **12a and 12b built** (2026-11-20), 12c to 12g planned. The decisions at the end were approved on 2026-11-20,
+Status: **12a to 12c built** (2026-11-20), 12d to 12g planned. The decisions at the end were approved on 2026-11-20,
 all as recommended
 
 ## Goal
@@ -275,7 +275,7 @@ Phone with the SDK (anywhere)
       generated types; remove `clients/ts/` and move its CI job.
 - [x] T12.4 (12b) API layer (openapi-fetch, Problem Details, 401), dev login with re-mint, app shell, role gate,
       Overview page.
-- [ ] T12.5 (12c) Drivers list and detail, disable and enable, commands, session health, CSV export; Audit and
+- [x] T12.5 (12c) Drivers list and detail, disable and enable, commands, session health, CSV export; Audit and
       Reports pages.
 - [ ] T12.6 (12d) Live map: fleet client, marker and cluster layers, filters, side panel, hidden-tab pause.
 - [ ] T12.7 (12e) Trips list and detail with the track on a map, exports, cancel, live trip view.
@@ -319,7 +319,7 @@ Phone with the SDK (anywhere)
 | TC-12-UI-04 | Component | CSV export downloads a file with the `Authorization` header (MSW) | P2 |
 | TC-12-E2E-01 | E2E | Local server and simulator with 50 drivers: login as OPERATOR, the map shows 50 markers within 5 s, a driver moves between two ticks | P0 |
 | TC-12-E2E-02 | E2E | ADMIN disables a driver from the detail page; the audit page shows `DRIVER_DISABLED` with the reason | P0 |
-| TC-12-E2E-03 | E2E | ADMIN sends a command; its status reaches DELIVERED while the simulated driver is connected | P1 |
+| TC-12-E2E-03 | E2E | ADMIN sends a command; its status reaches APPLIED while the simulated driver is connected | P1 |
 | TC-12-E2E-04 | E2E | OPERATOR cancels a trip; the trip shows CANCELLED and the live view ends | P1 |
 | TC-12-PERF-01 | Manual | 5 000 simulated drivers in view: the map stays above 30 frames a second on the Mac while deltas arrive | P1 |
 | TC-12-SEC-01 | E2E | Production build: the Content Security Policy blocks an inline script; no request goes to a host outside the allowed list | P1 |
@@ -482,6 +482,101 @@ The four choices approved on 2026-11-20 are built as chosen:
     action buttons use it.
   - The build is one 563 kB chunk (172 kB gzipped), and Vite warns above 500 kB. Splitting by route fits once 12c to
     12e add pages, and 12d should load MapLibre only on the map page.
+
+## As built (12c)
+
+The four choices approved on 2026-11-20 are built as chosen:
+
+| # | Choice |
+|---|---|
+| C1 | Drivers and Audit page by keyset with "First page", "Previous" and "Next", never page numbers. The URL holds the filters and the current `cursor`. The cursors of the earlier pages, the trail, live in the history entry's state (`cursorTrail`, `src/routes/paging.ts`), so a reload and the Back button keep them and the URL stays short. "Previous" shows only with a trail. A shared link has none, so it shows "First page". A filter change opens a new history entry without a cursor and without a trail |
+| C2 | All three command kinds. SET_CONSTRAINT takes the highest accuracy and the shortest interval. REGISTER_GEOFENCES has rows of id, latitude, longitude and radius that can be added and removed, checked against the `Geofence` limits. FLUSH_QUEUE takes nothing else |
+| C3 | The driver list never refreshes on its own: `staleTime: Infinity`, no refetch on focus or reconnect. It shows "As of" from `FleetPage.at` and a Refresh button. A change to a driver invalidates the list, which then reads again when it is shown. Driver detail asks again every 10 s while the tab is visible, and stops after a 400, 403 or 404, which asking again would not change |
+| C4 | Every action dialog needs a reason that is not blank before it sends anything: disable, enable and each command kind |
+
+- **The pages.** Drivers (`/drivers`) shows name, online, account, last seen, battery and trip stage, with the filters
+  `online`, `onTrip` and `q` in the URL. A row opens the driver. ADMIN gets "Export CSV". Driver detail
+  (`/drivers/$driverId`) shows the account, position, device, trip, latest health, and the 10 recent sessions and
+  trips. ADMIN also gets "Disable driver" or "Enable driver", the command list with "Send a command", and a "Health"
+  button per session. Audit (`/audit`, ADMIN) filters by action, target type, target id, actor id and days, shows the
+  actor as a short id with the role, and links a DRIVER target to the driver. Reports (`/reports`, ADMIN) shows the
+  provider groups for whole days, the last 7 by default, with CSV export. An OPERATOR who opens Audit or Reports by
+  URL gets "No permission", and the page sends no request.
+- **Actions.** `ReasonDialog` (`src/components`) is the one confirm-with-reason dialog. While the mutation runs, its
+  submit button shows a loader and ignores clicks, and the dialog cannot be closed, because `POST …/commands` has no
+  `Idempotency-Key` and a second click would store a second command. Mutations never retry (the 12b default). After a
+  disable or enable, the page writes the returned `DriverAccount` into the cached detail, then invalidates the detail
+  and the lists. After a command, the command list reads again and asks every 3 s while any command is PENDING or
+  SENT and the tab is visible (`refetchInterval` as a function of the data), and stops once all are final.
+- **Session health.** The "Health" button opens the session's stored health. A 404 SESSION_HEALTH_NOT_FOUND shows
+  "Not computed yet" with "Compute now", which posts to the same path and shows the answer. "Compute now" has no
+  reason dialog: the route takes no body, and C4 names disable, enable and the commands.
+- **CSV.** `downloadCsv` (`src/api/download.ts`) takes an `api.GET(…, { parseAs: 'blob' })` call, so the client's
+  middleware adds the token and turns a failed fetch into an `ApiError`. A non-2xx answer becomes an `ApiError` too.
+  It names the file from `Content-Disposition`, clicks a hidden link to a blob URL, and revokes the URL 40 s later.
+  Revoking at once can cancel the download in some browsers. FileSaver.js waits 40 s for the same reason.
+- **Errors.** `describeError` has text for every code the 12c routes can return, taken from the Kotlin enums behind
+  them: the five FORBIDDEN codes (all "No permission"), DRIVER_NOT_FOUND, REASON_REQUIRED, SESSION_HEALTH_NOT_FOUND,
+  INVALID_COMMAND, VALIDATION_FAILED, MALFORMED_REQUEST, PAYLOAD_TOO_LARGE, NOT_FOUND and INTERNAL_ERROR. `ApiError`
+  now keeps the `errors` list of a VALIDATION_FAILED answer as `fieldErrors`, and the text lists the fields.
+- **Lazy pages.** Every page, the login and Overview too, loads as its own chunk with `lazyRouteComponent`. The search
+  schemas stay in the main chunk, because the router checks a link's search before the page's code arrives. No chunk
+  is over 500 kB now, so the 12b warning is gone.
+
+  | Chunk | Size | Gzipped |
+  |---|---|---|
+  | Entry (React, router, TanStack Query, the shell) | 303.6 kB | 94.1 kB |
+  | Shared, loaded with the entry (`client`, `roles` in the build output) | 224.0 kB | 71.3 kB |
+  | Driver detail | 57.0 kB | 19.3 kB |
+  | Audit | 40.9 kB | 13.0 kB |
+  | Login | 7.2 kB | 3.0 kB |
+  | Reports | 4.9 kB | 2.0 kB |
+  | Drivers | 4.3 kB | 1.7 kB |
+  | Overview | 1.9 kB | 0.9 kB |
+
+  The first page still loads the entry and the two shared chunks, 528 kB (165 kB gzipped) against 563 kB (172 kB) in
+  12b. Library code is nearly all of it: React DOM, zod, TanStack Router and Query, and Mantine (measured from the
+  source map). Each page adds its own chunk and the Mantine parts only it uses. 12d should still load MapLibre only on
+  the map page.
+- **Contract fix.** `POST /api/v1/dev/tokens` lists the optional `X-Staging-Token` header and the staging gate's 401
+  (`UNAUTHORIZED`, Problem Details). `StagingGateIT` now checks its 401 and its 200 against the contract. The login
+  sends the header as a typed `params.header`, and the two 12b mocks of that 401 are typed. The mock of the plain 404
+  where the route is not mounted stays untyped, because the contract does not list it.
+- **Tests.** 147 Vitest tests. Line coverage is 100 % in `src/api` and 98 % in `src/auth`. MSW handlers for every 12c
+  route are in `src/test/server.ts`, the typed bodies in `src/test/fixtures.ts`, and `recordRequests()` lists every
+  request a test made, so a test can show that an OPERATOR sends no ADMIN request.
+
+  | Case | Where |
+  |---|---|
+  | TC-12-UI-01 | `src/routes/drivers/DriversPage.test.tsx`: filters from the URL, "Next" with the response cursor, "Previous", Back, a filter change, a shared link |
+  | TC-12-UI-02 | `src/routes/drivers/DriverDetailPage.test.tsx`: the reason is required, one request per action, the driver read again, the 403 |
+  | TC-12-UI-04 | `src/routes/drivers/DriversPage.test.tsx` and `src/api/download.test.ts` |
+  | TC-12-AUTH-02, second half | `src/app.test.tsx` for the nav, `DriverDetailPage.test.tsx` for the buttons and the requests, `AuditPage.test.tsx` and `ReportsPage.test.tsx` for the pages |
+  | Command form | `DriverDetailPage.test.tsx` per kind, and `src/routes/drivers/commandForm.test.ts` |
+  | Command polling | `src/routes/drivers/CommandsPanel.test.tsx`, with fake timers |
+  | TC-12-E2E-02, TC-12-E2E-03 | `e2e/drivers.spec.ts` |
+
+- **The E2E job** builds the simulator's `installDist` next to the server's and starts `simulator fleet --drivers 3
+  --dashboards 0 --duration 30m` before Playwright. The tests wait for the fleet read model with `expect.poll` on the
+  API, never with sleeps. TC-12-E2E-02 creates its own driver through the dev login, so it never disables a simulated
+  driver. TC-12-E2E-03 sends FLUSH_QUEUE to an online simulated driver and waits for APPLIED. Both fail on any console
+  error. The simulator's log is uploaded on failure.
+- **Differences from the plan and the brief.**
+  - Driver detail decides "enabled" from the account's `disabledAt`, not from `driver.enabled`. The detail reads the
+    account in the same request, but `driver.enabled` comes from the fleet read model, which an outbox event updates a
+    moment later. Right after a disable, the refetch said "enabled" again. TC-12-E2E-02 found it. The unit test's mock
+    now lags the same way. A server change could set `driver.enabled` from the account when there is one.
+  - The server keeps a command's reason only for SET_CONSTRAINT, inside the command. The COMMAND_ISSUED audit row has
+    no reason for any kind. The dashboard sends the reason with every kind (C4), and the server drops it for
+    REGISTER_GEOFENCES and FLUSH_QUEUE. Recording `reason` on COMMAND_ISSUED would make C4 useful for commands.
+  - The date filters of Audit and Reports are whole days in the browser's time zone, kept in the URL as `YYYY-MM-DD`.
+    The API gets the instants of local midnight: the first day's, and the one after the last day. A shared link opened
+    in another time zone covers other instants. The 31-day check uses the same instants as the request.
+  - TC-12-E2E-03 says APPLIED, not DELIVERED. `CommandStatus` has no DELIVERED, and the simulator answers APPLIED
+    (`DriverClient.kt:215`).
+  - The code answers INVALID_COMMAND with 422, which the contract does not list for `POST …/commands`. The body check
+    finds the same faults first and answers 400, so the 422 cannot happen today.
+  - jsdom lacks `document.fonts`, which Mantine's autosize textarea uses, and blob URLs. `src/test/setup.ts` adds both.
 
 ## Definition of Done
 

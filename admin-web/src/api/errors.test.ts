@@ -44,6 +44,20 @@ describe('toApiError', () => {
     expect(toApiError(new Response(null, { status: 400 }), { message: 'nope' }).code).toBe(UNEXPECTED);
   });
 
+  it('keeps the field errors of a VALIDATION_FAILED answer', () => {
+    const errors = [{ field: 'regions[0].lat', message: 'must be between -90 and 90' }];
+    const error = toApiError(new Response(null, { status: 400 }), { code: 'VALIDATION_FAILED', errors });
+
+    expect(error.fieldErrors).toEqual(errors);
+    expect(toApiError(new Response(null, { status: 409 }), { code: 'X' }).fieldErrors).toEqual([]);
+  });
+
+  it('keeps the code when the field errors are malformed', () => {
+    const error = toApiError(new Response(null, { status: 400 }), { code: 'VALIDATION_FAILED', errors: 'oops' });
+
+    expect(error).toMatchObject({ code: 'VALIDATION_FAILED', fieldErrors: [] });
+  });
+
   it('parses Retry-After and falls back to X-Request-Id for the trace id', () => {
     const response = new Response(null, { status: 429, headers: { 'Retry-After': '30', 'X-Request-Id': 'req-9' } });
     const error = toApiError(response, { code: 'RATE_LIMITED', title: 'Too many requests' });
@@ -113,6 +127,41 @@ describe('describeError', () => {
       message: 'Already ended.',
     });
     expect(describeError(api(409, 'X'))).toEqual({ title: 'X', message: 'X' });
+  });
+
+  it('has its own words for the codes of the driver, command, health, audit and report routes', () => {
+    expect(describeError(api(422, 'REASON_REQUIRED')).title).toBe('Reason needed');
+    expect(describeError(api(404, 'SESSION_HEALTH_NOT_FOUND')).title).toBe('Health not computed yet');
+    expect(describeError(api(404, 'DRIVER_NOT_FOUND')).title).toBe('Driver not found');
+    for (const code of [
+      'ACCOUNT_ACTION_FORBIDDEN',
+      'COMMAND_FORBIDDEN',
+      'SESSION_HEALTH_FORBIDDEN',
+      'AUDIT_FORBIDDEN',
+    ]) {
+      expect(describeError(api(403, code)).title).toBe('No permission');
+    }
+  });
+
+  it('shows the device problem of an invalid command', () => {
+    expect(describeError(api(422, 'INVALID_COMMAND', { detail: 'regions must not be empty' })).message).toBe(
+      'regions must not be empty',
+    );
+    expect(describeError(api(422, 'INVALID_COMMAND')).message).toBe('The device could not use this command.');
+  });
+
+  it('lists the refused fields of a VALIDATION_FAILED answer', () => {
+    const fieldErrors = [
+      { field: 'from', message: 'must be an ISO-8601 time' },
+      { field: 'to', message: 'must be after from' },
+    ];
+
+    expect(describeError(api(400, 'VALIDATION_FAILED', { fieldErrors }))).toEqual({
+      title: 'Invalid input',
+      message: 'from must be an ISO-8601 time. to must be after from',
+    });
+    expect(describeError(api(400, 'VALIDATION_FAILED', { detail: 'Bad.' })).message).toBe('Bad.');
+    expect(describeError(api(400, 'VALIDATION_FAILED')).message).toBe('The server refused a field.');
   });
 
   it('names an unexpected answer, a 401 and an error from the app itself', () => {

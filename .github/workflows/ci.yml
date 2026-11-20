@@ -122,8 +122,8 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
 
-      - name: Build the server
-        run: ./gradlew :app:installDist
+      - name: Build the server and the simulator
+        run: ./gradlew :app:installDist :tools:simulator:installDist
 
       # APP_ENV=test mounts the dev-token route and migrates on start. CI has no road graph: the server logs that and
       # serves everything else, so the job waits for /health/live, not /health/ready. The JWT secret is new for every
@@ -137,6 +137,13 @@ jobs:
         run: |
           JWT_SECRET="$(openssl rand -hex 32)" nohup app/build/install/app/bin/app > server.log 2>&1 &
           curl -fsS --retry 30 --retry-delay 2 --retry-all-errors http://localhost:8080/health/live
+
+      # Three drivers that loop a Hanoi route and answer every command with `applied` (TC-12-E2E-03). They run longer
+      # than the job may, so nothing waits for them to stop. The tests wait for an online driver with expect.poll.
+      - name: Start the simulator
+        run: |
+          nohup tools/simulator/build/install/simulator/bin/simulator fleet --drivers 3 --dashboards 0 --duration 30m \
+            > simulator.log 2>&1 &
 
       - uses: actions/setup-node@v7
         with:
@@ -165,6 +172,7 @@ jobs:
             admin-web/playwright-report/
             admin-web/test-results/
             server.log
+            simulator.log
           retention-days: 7
 
   image:

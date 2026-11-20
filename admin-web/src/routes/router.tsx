@@ -3,6 +3,7 @@ import {
   createRootRouteWithContext,
   createRoute,
   createRouter,
+  lazyRouteComponent,
   Outlet,
   redirect,
   type RouterHistory,
@@ -11,14 +12,17 @@ import { z } from 'zod';
 import { sessionStore } from '../auth/session';
 import { AppLayout } from '../components/AppLayout';
 import { NotFound } from '../components/NotFound';
-import { LoginPage } from './login/LoginPage';
-import { OverviewPage } from './overview/OverviewPage';
+import { auditSearch } from './audit/search';
+import { driversSearch } from './drivers/search';
+import { reportsSearch } from './reports/search';
 
 export interface RouterContext {
   queryClient: QueryClient;
 }
 
-// Routes are defined in code. A route's search params are validated here, so a page reads typed values.
+// Routes are defined in code. A route's search params are validated here, so a page reads typed values. Each page
+// loads lazily, as its own chunk, when the router first opens it. The search schemas stay in the main chunk, because
+// the router validates a link's search before the page's code arrives.
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: Outlet,
@@ -34,7 +38,7 @@ const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/login',
   validateSearch: loginSearch,
-  component: LoginPage,
+  component: lazyRouteComponent(() => import('./login/LoginPage'), 'LoginPage'),
 });
 
 /** Every page behind the login. Without a session the user goes to the login page and comes back after it. */
@@ -52,10 +56,40 @@ const appRoute = createRoute({
 const overviewRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/',
-  component: OverviewPage,
+  component: lazyRouteComponent(() => import('./overview/OverviewPage'), 'OverviewPage'),
 });
 
-const routeTree = rootRoute.addChildren([loginRoute, appRoute.addChildren([overviewRoute])]);
+const driversRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/drivers',
+  validateSearch: driversSearch,
+  component: lazyRouteComponent(() => import('./drivers/DriversPage'), 'DriversPage'),
+});
+
+const driverRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/drivers/$driverId',
+  component: lazyRouteComponent(() => import('./drivers/DriverDetailPage'), 'DriverDetailPage'),
+});
+
+const auditRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/audit',
+  validateSearch: auditSearch,
+  component: lazyRouteComponent(() => import('./audit/AuditPage'), 'AuditPage'),
+});
+
+const reportsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/reports',
+  validateSearch: reportsSearch,
+  component: lazyRouteComponent(() => import('./reports/ReportsPage'), 'ReportsPage'),
+});
+
+const routeTree = rootRoute.addChildren([
+  loginRoute,
+  appRoute.addChildren([overviewRoute, driversRoute, driverRoute, auditRoute, reportsRoute]),
+]);
 
 export interface AppRouterOptions {
   queryClient: QueryClient;

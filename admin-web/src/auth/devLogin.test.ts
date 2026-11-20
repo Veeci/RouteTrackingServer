@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createApiClient } from '../api/client';
 import { ApiError } from '../api/errors';
 import type { DevTokenRequest } from '../api/types';
-import { http, MINTED_USER_ID, problemResponse, server, testSession } from '../test/server';
+import { http, MINTED_USER_ID, problem, server, testSession } from '../test/server';
 import { logIn, logOut, remintSession, STAGING_TOKEN_HEADER } from './devLogin';
 import { createSessionStore } from './session';
 import { savedStagingToken, savedUserId } from './storage';
@@ -70,9 +70,7 @@ describe('logIn', () => {
 
   it('keeps the session empty when the server refuses', async () => {
     // The staging gate's 401 is not in rts-v1.yaml, so the mock marks it off-contract.
-    server.use(
-      http.post('/api/v1/dev/tokens', ({ response }) => response.untyped(problemResponse(401, 'UNAUTHORIZED'))),
-    );
+    server.use(http.post('/api/v1/dev/tokens', ({ response }) => response(401).json(problem(401, 'UNAUTHORIZED'))));
     const store = createSessionStore();
 
     await expect(logIn(api, store, { displayName: 'Lan', role: 'OPERATOR', stagingToken: 'wrong' })).rejects.toThrow(
