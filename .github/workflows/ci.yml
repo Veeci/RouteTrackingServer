@@ -47,43 +47,125 @@ jobs:
             **/build/test-results/
           retention-days: 7
 
-  # TC-11-CI-01: TypeScript types for the admin dashboard, generated from the OpenAPI contract with a pinned
-  # openapi-typescript, then compiled with tsc together with clients/ts/usage.ts, which uses a few endpoint types.
-  # The result is a build artifact named after the commit; the dashboard repo pins one. Nothing goes to npm.
-  ts-client:
-    name: TypeScript client
+  # The admin dashboard (phase 12b, choice C2). It runs on every PR with no path filter, so it can be a required
+  # check: a skipped required job would block a Kotlin-only PR.
+  admin-web:
+    name: Admin web
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     defaults:
       run:
-        working-directory: clients/ts
+        working-directory: admin-web
     steps:
       - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version-file: admin-web/.nvmrc
           cache: npm
-          cache-dependency-path: clients/ts/package-lock.json
+          cache-dependency-path: admin-web/package-lock.json
 
-      # Exact versions from package-lock.json: openapi-typescript 7.13.0, typescript 5.9.3.
+      # Exact versions from package-lock.json.
       - name: Install
         run: npm ci --no-audit --no-fund
 
-      - name: Generate
+      # TC-12-CON-01: types from this commit's rts-v1.yaml. The typecheck below fails when the app, or a typed MSW
+      # mock, no longer matches the contract.
+      - name: Generate API types
         run: npm run generate
 
-      - name: Compile
-        run: npm run check
+      - name: Typecheck
+        run: npm run typecheck
 
-      - name: Upload client
+      - name: Lint
+        run: npm run lint
+
+      - name: Format
+        run: npm run format:check
+
+      # Unit and component tests, with the 80 % line gate on src/api and src/auth.
+      - name: Test
+        run: npm run coverage
+
+      - name: Build
+        run: npm run build
+
+      - name: Audit
+        run: npm audit --audit-level=high
+
+  # The dashboard against a real server from this commit (phase 12b, choice C3). Not a required check yet: it stays
+  # optional for about a week while it proves stable.
+  admin-web-e2e:
+    name: Admin web E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: rts
+          POSTGRES_USER: rts
+          POSTGRES_PASSWORD: e2e-only   # a throwaway database that lives as long as this job
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U rts -d rts"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Build the server
+        run: ./gradlew :app:installDist
+
+      # APP_ENV=test mounts the dev-token route and migrates on start. CI has no road graph: the server logs that and
+      # serves everything else, so the job waits for /health/live, not /health/ready. The JWT secret is new for every
+      # run and never reaches the log.
+      - name: Start the server
+        env:
+          APP_ENV: test
+          DB_URL: jdbc:postgresql://localhost:5432/rts
+          DB_USER: rts
+          DB_PASSWORD: e2e-only
+        run: |
+          JWT_SECRET="$(openssl rand -hex 32)" nohup app/build/install/app/bin/app > server.log 2>&1 &
+          curl -fsS --retry 30 --retry-delay 2 --retry-all-errors http://localhost:8080/health/live
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: admin-web/.nvmrc
+          cache: npm
+          cache-dependency-path: admin-web/package-lock.json
+
+      - name: Install
+        working-directory: admin-web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run generate
+          npx playwright install --with-deps chromium
+
+      # Builds the app, serves it with `vite preview` (production headers, proxy to :8080) and runs Playwright.
+      - name: E2E
+        working-directory: admin-web
+        run: npm run e2e
+
+      - name: Upload the report
+        if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: rts-client-${{ github.sha }}
+          name: admin-web-e2e
           path: |
-            clients/ts/generated/rts-v1.ts
-            app/src/main/resources/openapi/rts-v1.yaml
-          retention-days: 90
+            admin-web/playwright-report/
+            admin-web/test-results/
+            server.log
+          retention-days: 7
 
   image:
     name: Docker image

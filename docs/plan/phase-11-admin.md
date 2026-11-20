@@ -110,7 +110,7 @@ create index audit_log_target on audit_log (target_type, target_id, at desc);
 | Cross-origin calls from the dashboard | CORS plugin: allow only configured origins (`ADMIN_ORIGINS`), credentials off, methods/headers explicit |
 | Browsers can't set headers on WebSocket | `POST /api/v1/admin/ws-tickets` → single-use ticket valid 30 s, bound to the user; socket connects with `?ticket=`. The JWT never appears in a URL or access log. |
 | Token storage | Dashboard keeps the access token in memory; short expiry (15 min) for admin roles. Real login via an OIDC provider (Keycloak / Auth0 / Clerk) is a follow-up; the verifier interface already supports RS256/JWKS |
-| API client | CI generates a TypeScript client from `rts-v1.yaml` (`openapi-typescript`) and publishes it as an artifact; the dashboard repo pins a version |
+| API client | CI generates a TypeScript client from `rts-v1.yaml` (`openapi-typescript`) and publishes it as an artifact; the dashboard repo pins a version. Replaced in 12b: `admin-web/` generates its own types from the spec |
 | Security headers | `X-Content-Type-Options`, `Referrer-Policy`, no caching of admin responses (`Cache-Control: no-store`) |
 
 ### Dashboard (separate repo, for reference)
@@ -150,7 +150,8 @@ The plan was written before phases 4 to 10. These replace the parts they name:
 - [x] T11.5 Admin REST endpoints + OpenAPI; CSV export. Driver list, detail, overview, CSV and rebuild in 11b; the trip list and the operator cancel in 11d.
 - [x] T11.6 Audit log (table, writer used inside services, query endpoint, DB grants).
 - [x] T11.7 CORS, WebSocket tickets, admin token expiry, security headers. Token expiry in 11a, the rest in 11c.
-- [x] T11.8 CI job generating and publishing the TypeScript client. Published as a build artifact, not to npm (11d).
+- [x] T11.8 CI job generating and publishing the TypeScript client. Published as a build artifact, not to npm (11d). Removed in
+      12b, when `admin-web/` started to generate its own types (TC-12-CON-01).
 - [x] T11.9 Seed script: 500 simulated drivers across the city for dashboard development (`simulator fleet --drivers 500`).
 
 ## Test plan
@@ -184,7 +185,7 @@ The plan was written before phases 4 to 10. These replace the parts they name:
 | TC-11-SEC-03 | API | WS ticket: works once; reuse → rejected; after 30 s → rejected; ticket of user A can't be used by B's connection | P0 |
 | TC-11-SEC-04 | API | Admin responses carry `Cache-Control: no-store` | P2 |
 | TC-11-CON-01 | Contract | Admin endpoints conform to OpenAPI; fleet messages validate against AsyncAPI | P0 |
-| TC-11-CI-01 | CI | TypeScript client generated from the spec compiles (`tsc --noEmit`) | P1 |
+| TC-11-CI-01 | CI | TypeScript client generated from the spec compiles (`tsc --noEmit`). Replaced by TC-12-CON-01 in 12b | P1 |
 | TC-11-LOAD-01 | Load | 1 000 simulated drivers + 20 dashboards on the live map → each dashboard receives a delta every 2 s ± 0.5 s, ingest SLO unchanged | P1 |
 
 ## Test implementation notes
@@ -334,7 +335,8 @@ The plan was written before phases 4 to 10. These replace the parts they name:
   `tsc --noEmit` (TypeScript 5.9.3, the generator's peer range) over the output and `clients/ts/usage.ts`, which uses
   the trip list, the cancel body, the driver list and the ticket types. Versions are pinned in
   `clients/ts/package-lock.json`. It uploads the artifact `rts-client-<sha>` with the generated file and the spec,
-  kept 90 days. Nothing goes to npm.
+  kept 90 days. Nothing goes to npm. Phase 12b removed the job, the artifact and `clients/ts/`: the dashboard in
+  `admin-web/` generates the same types, and the `Admin web` job type-checks them on every PR (TC-12-CON-01).
 - `simulator fleet --drivers N [--dashboards M] [--duration D]` (T11.9) runs every driver as a coroutine with its own
   `DriverClient`. Driver n is `sim-driver-NNN` with a user id derived from the name. The dev token endpoint does not
   look users up by name, it creates a new user unless the request has a `userId`, so the simulator sends that stable
@@ -370,5 +372,5 @@ Status after 11d (2026-11-17):
 - Server side done: every admin route of the plan, the fleet socket, and `simulator fleet --drivers 500` to feed a
   dashboard. The dashboard itself is the `RouteTrackingAdmin` repo and is not built yet, so the first point is open.
 - All P0 cases pass in `./gradlew check`. OpenAPI and AsyncAPI are updated. CI builds the TypeScript client as the
-  artifact `rts-client-<sha>` (the first run is on this PR).
+  artifact `rts-client-<sha>` (the first run is on this PR). Phase 12b removed that job.
 - Open: TC-11-LOAD-01 (P1) at 1 000 drivers, see `docs/testing/load-11.md`.
