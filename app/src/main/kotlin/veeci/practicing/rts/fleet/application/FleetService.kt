@@ -104,7 +104,10 @@ class FleetService(
         val account = accounts.driver(UserId(driverId))
         if (driver == null && account == null) throw DomainException(FleetError.DRIVER_NOT_FOUND, "No driver $driverId")
         // An account whose events have not reached the read model yet still has a detail page.
-        val row = driver ?: FleetDriver(driverId, account?.displayName, account?.enabled ?: true)
+        val stored = driver ?: FleetDriver(driverId, account?.displayName)
+        // The row learns of a disable one outbox event later. The account read above is current, so its flag wins and
+        // agrees with the account's disabledAt in the same answer. The driver list keeps the row's value.
+        val row = account?.let { stored.copy(enabled = it.enabled) } ?: stored
         val now = now()
         return DriverDetail(
             driver = FleetRow(row, row.isOnline(now, staleAfter)),

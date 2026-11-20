@@ -31,6 +31,7 @@ import veeci.practicing.rts.fleet.adapter.inbound.web.FleetOverviewResponse
 import veeci.practicing.rts.fleet.adapter.inbound.web.FleetPageResponse
 import veeci.practicing.rts.fleet.domain.DriverPosition
 import veeci.practicing.rts.fleet.domain.FleetDriver
+import veeci.practicing.rts.platform.events.OutboxRelay
 import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.testing.TestDatabase
 import veeci.practicing.rts.testing.TestTokens
@@ -200,6 +201,32 @@ class FleetApiIT {
                 status shouldBe HttpStatusCode.BadRequest
                 shouldMatchContract()
             }
+        }
+
+    @Test
+    fun `right after a disable the detail says disabled from the account, while the list waits for the outbox`() =
+        testApp(env = TestDatabase.freshDatabaseEnv()) {
+            val id = UUID.randomUUID()
+            devDriver(id, "Lan")
+            application.awaitOutboxDrained()
+            application.fleetRow(id)!!.enabled shouldBe true
+            application.get<OutboxRelay>().stop() // from here the read model hears of no account change
+
+            client
+                .post("/api/v1/admin/drivers/$id/disable") {
+                    bearerAuth(admin)
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"reason":"Unsafe driving"}""")
+                }.status shouldBe HttpStatusCode.OK
+            application.fleetRow(id)!!.enabled shouldBe true // the row still lags, so the detail below must not use it
+
+            val response = client.get("/api/v1/admin/drivers/$id") { bearerAuth(operator) }
+            response.shouldMatchContract()
+            val detail = json.decodeFromString(DriverDetailResponse.serializer(), response.bodyAsText())
+            detail.driver.enabled shouldBe false
+            detail.disabledAt.shouldNotBeNull()
+            detail.disabledReason shouldBe "Unsafe driving"
+            list("").items.single().enabled shouldBe true // the list reads only the read model; its lag is expected
         }
 
     @Test

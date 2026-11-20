@@ -457,6 +457,13 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: |
+            INVALID_COMMAND, the command breaks a rule of its kind, such as a geofence with no regions. Request
+            validation catches most of these first and answers 400. This 422 comes from the domain's own check.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
     get:
       tags: [admin]
@@ -1386,12 +1393,14 @@ components:
       additionalProperties: false
       description: |
         SET_CONSTRAINT needs maxAccuracy, minIntervalMs and reason. REGISTER_GEOFENCES needs regions.
-        FLUSH_QUEUE needs nothing else.
+        FLUSH_QUEUE needs nothing else. Every kind accepts a reason, and the server records it in the
+        COMMAND_ISSUED audit entry (its `reason` field). Only SET_CONSTRAINT requires one and also sends it to the
+        device. The other kinds keep it optional so older clients still work.
       properties:
         kind: { type: string, enum: [SET_CONSTRAINT, REGISTER_GEOFENCES, FLUSH_QUEUE] }
         maxAccuracy: { $ref: '#/components/schemas/TrackingAccuracy' }
         minIntervalMs: { type: integer, minimum: 0 }
-        reason: { type: string, minLength: 1 }
+        reason: { type: string, minLength: 1, description: 'Why the admin sends the command. Kept in the audit log.' }
         regions:
           type: array
           minItems: 1
