@@ -24,8 +24,10 @@ export function authMiddleware(getToken: () => string | undefined): Middleware {
 /** Turns a failed fetch into an {@link ApiError} with code `network`. A cancelled request stays an AbortError. */
 export const networkErrorMiddleware: Middleware = {
   onError({ error }) {
-    // Returning nothing keeps the original error. TanStack Query cancels a query with an AbortError.
-    if (error instanceof DOMException && error.name === 'AbortError') return undefined;
+    // Returning nothing keeps the original error. TanStack Query cancels a query with an AbortError. The check reads
+    // the name, not `instanceof DOMException`: under jsdom the aborted fetch throws a DOMException of Node's realm,
+    // which jsdom's DOMException class does not match, so a cancel became a "network" error in the tests.
+    if (error instanceof Error && error.name === 'AbortError') return undefined;
     return networkError(error);
   },
 };

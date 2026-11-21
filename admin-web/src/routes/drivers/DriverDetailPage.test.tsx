@@ -7,6 +7,7 @@ import {
   AT,
   command,
   DRIVER_ID,
+  idOf,
   driverDetail,
   fleetDriver,
   fleetPage,
@@ -84,6 +85,17 @@ describe('the driver detail', () => {
     expect(section('Latest session health').getByText('GMS_FUSED')).toBeInTheDocument();
     expect(section('Recent sessions').getByText('Google Pixel 7, SDK 35')).toBeInTheDocument();
     expect(section('Recent trips').getByText('IN_PROGRESS')).toBeInTheDocument();
+    // 12e: each trip, the current one and the driver's whole list link to the trip pages.
+    const tripId = idOf(DRIVER_ID, 900);
+    expect(section('Recent trips').getByRole('link', { name: tripId.slice(0, 8) })).toHaveAttribute(
+      'href',
+      `/trips/${tripId}`,
+    );
+    expect(section('Trip').getByRole('link', { name: tripId.slice(0, 8) })).toHaveAttribute('href', `/trips/${tripId}`);
+    expect(section('Recent trips').getByRole('link', { name: 'All trips of this driver' })).toHaveAttribute(
+      'href',
+      expect.stringContaining(`/trips?driverId=`),
+    );
     expect(screen.getByText(/^As of/)).toHaveTextContent('The page asks again every 10 s.');
   });
 

@@ -125,9 +125,11 @@ jobs:
       - name: Build the server and the simulator
         run: ./gradlew :app:installDist :tools:simulator:installDist
 
-      # APP_ENV=test mounts the dev-token route and migrates on start. CI has no road graph: the server logs that and
-      # serves everything else, so the job waits for /health/live, not /health/ready. The JWT secret is new for every
-      # run and never reaches the log. The 50 simulated drivers, the browser (through the preview proxy) and the tests
+      # APP_ENV=test mounts the dev-token route and migrates on start. CI has no map of Hanoi, so the server loads the
+      # test fixture graph that the app's own tests use (a grid in Ho Chi Minh City, 68 nodes). Booking a trip plans a
+      # road route, and TC-12-E2E-04 books one inside that grid. The graph loads in milliseconds and the binary cache is
+      # off, so the job waits for /health/ready, which also checks the graph. The JWT secret is new for every run and
+      # never reaches the log. The 50 simulated drivers, the browser (through the preview proxy) and the tests
       # all reach the server from 127.0.0.1, so they share one per-IP rate limit. Each driver asks for a token and
       # opens a socket at start and on every reconnect, so the default 300 a minute is too tight.
       - name: Start the server
@@ -137,9 +139,11 @@ jobs:
           DB_USER: rts
           DB_PASSWORD: e2e-only
           HTTP_RATELIMITPERMINUTE: "3000"
+          ROUTING_GRAPHPATH: app/src/testFixtures/resources/graphs/saigon_test_grid.osm
+          ROUTING_GRAPHCACHEDIR: ""
         run: |
           JWT_SECRET="$(openssl rand -hex 32)" nohup app/build/install/app/bin/app > server.log 2>&1 &
-          curl -fsS --retry 30 --retry-delay 2 --retry-all-errors http://localhost:8080/health/live
+          curl -fsS --retry 30 --retry-delay 2 --retry-all-errors http://localhost:8080/health/ready
 
       # 50 drivers that loop Hanoi routes and answer every command with `applied`. TC-12-E2E-01 waits until all 50 are
       # online and counts them on the map; TC-12-E2E-03 sends a command to one. They run longer than the job may, so

@@ -1,7 +1,7 @@
 # Phase 12 — Admin Dashboard
 
 Branch: `feat/p12-admin-dashboard` · Depends on: 11 (admin API, fleet socket, tickets), 1.5 for the staging deploy only ·
-Status: **12a to 12d built** (2026-11-20), 12e to 12g planned. The decisions at the end were approved on 2026-11-20,
+Status: **12a to 12d built** (2026-11-20), **12e built** (2026-11-21), 12f and 12g planned. The decisions at the end were approved on 2026-11-20,
 all as recommended
 
 ## Goal
@@ -279,7 +279,7 @@ Phone with the SDK (anywhere)
 - [x] T12.5 (12c) Drivers list and detail, disable and enable, commands, session health, CSV export; Audit and
       Reports pages.
 - [x] T12.6 (12d) Live map: fleet client, marker and cluster layers, filters, side panel, hidden-tab pause.
-- [ ] T12.7 (12e) Trips list and detail with the track on a map, exports, cancel, live trip view.
+- [x] T12.7 (12e) Trips list and detail with the track on a map, exports, cancel, live trip view.
 - [ ] T12.8 (12f) `admin-web` image in CI, staging compose service, `tailscale serve` entry, deploy and rollback with
       the server, Playwright smoke test against staging, staging guide update.
 - [ ] T12.9 (12g) OpenID Connect login with PKCE; RS256 and JWKS verification on the server; role claim mapping.
@@ -693,6 +693,105 @@ shared link opens the same view. The 12c command form has no geofence map picker
     GeoJSON and page tests cover clusters with the golden `fleet_cluster` frame, and the cluster layers pass the style
     validator.
   - The status line is a labelled region, not a live region: a screen reader would read it out every 2 s.
+
+## As built (12e)
+
+The four choices approved on 2026-11-21 are built as chosen:
+
+| # | Choice |
+|---|---|
+| C1 | The ticket socket's life cycle is one class, `SocketConnection` (`src/socket/connection.ts`): the ticket, the connect, the full-jitter backoff, close 1013 at once, 4403 for good, 1006 as a drop, and the hidden-tab pause. The backoff and the ticket request moved to `src/socket/` with their tests. `FleetClient` and `TripClient` keep only their own messages: each sends its first message in `onOpen`, parses frames in `onText`, and says which message resets the backoff. `FleetClient` kept its public API, so the 12d client tests passed without a change |
+| C2 | Page 1 of the trips list asks again every 10 s while the tab is visible (`listRefetchInterval`). Later pages never refresh on their own, and every page has a Refresh button, as in 12c |
+| C3 | Before the first `driver_position`, the driver shows at the position from `GET /api/v1/admin/drivers/{driverId}`, read once, as a grey hollow dot labelled "Last known at …, before this page opened". The first live position replaces it, and a later seed never does |
+| C4 | The live view draws a trail of the positions received since the page opened, at most 2 000 (about 70 minutes at one fix every 2 s). An exact repeat adds nothing. A reconnect keeps it, and a reload starts it over |
+
+The defaults the user accepted are built as well: live and replay modes, cancel through `ReasonDialog`, the filters,
+the links, the polyline decoder, the shared map setup, the exports through `downloadCsv`, the AbortError check, and
+the tests.
+
+- **The trip client (`src/trip/client.ts`).** It opens `/ws/v1/admin/trip?ticket=` and sends `subscribe` with the trip
+  id on every new socket. `subscribed` resets the backoff. After the trip's last message (a `status_changed` to
+  COMPLETED or CANCELLED, or a `subscribed` for a trip that has already ended) it stops itself and reports `ended`. The
+  server closes with 1000 right after that message. The connection treats a server's 1000 as a drop, so without the
+  stop the client would connect again. A 1000 without a final message, from a server shutting down, still reconnects.
+- **Schemas (`src/trip/messages.ts`).** zod schemas for `subscribed`, `driver_position`, `trip_progress`, `trip_event`,
+  `route_updated` and `error`, with the contract's ranges. `event` and `reason` take any string, because the contract
+  says a later server may add values. A frame that fails is logged and dropped, as on the fleet socket.
+- **The live store (`src/trip/store.ts`).** A Zustand vanilla store: the trip from `subscribed` with the stage kept
+  current, the decoded route, the position, the trail, the progress, the newest 50 events and the connection. A
+  `route_updated` whose polyline cannot be read keeps the old route on the map.
+- **The polyline decoder (`src/trip/polyline.ts`).** Precision 5, `[lng, lat]` for GeoJSON. It multiplies instead of
+  shifting, so it stays exact past 32 bits, and it throws on a cut-off number, a latitude without a longitude, or a
+  character outside the alphabet. Tests decode Google's documented example and the golden `route_updated` frame.
+- **The pages (`src/routes/trips/`).** Trips (`/trips`) filters by stage (repeatable), driver id, guest id and a range
+  of whole days, all applied with "Apply", as on the Audit page. The URL keeps the stages as a JSON array, in the
+  contract's order, and the request repeats `status`. Trip detail (`/trips/$tripId`) shows the trip, "Cancel trip" for
+  OPERATOR and ADMIN while it has not ended, and one of two views:
+  - Live, for a trip that has not ended: the connection badge, the map (planned route, trail, driver, pickup and
+    destination), the stage, the position and its time, the speed, the progress and the events since the page opened.
+    A `status_changed` reads the trip again, so the header follows the socket, and the final one switches the page to
+    replay.
+  - Replay, for COMPLETED and CANCELLED: both legs from `/track` on the map, the timeline, the summary and the exports.
+    `pointsExpired` shows a notice. The summary is asked for a COMPLETED trip only. 404 SUMMARY_NOT_READY shows "Not
+    computed yet" with "Check again", and "Compute now" for ADMIN, as 12c's session health does.
+- **Cancel.** After a 200 the page writes the returned trip into the cache, then reads it again, because the POST's
+  answer has no route. After a 409 the page reads the trip again behind the dialog, and the dialog stays open with
+  "The trip has already ended" (TC-12-UI-03). 422 REASON_REQUIRED shows "Reason needed". `describeError` has text for
+  TRIP_NOT_FOUND, ILLEGAL_TRANSITION, CONCURRENT_MODIFICATION, TRIP_NOT_ENDED, SUMMARY_NOT_READY, TRACK_EXPIRED and
+  TRIP_ACTION_FORBIDDEN.
+- **Exports.** GPX and GeoJSON for each leg, four buttons, through `downloadCsv` and `CsvButton`. Both already took any
+  blob, so they kept their names. A 410 TRACK_EXPIRED shows next to the button.
+- **The trip map (`src/map/TripMap.tsx`, `tripLayers.ts`).** The worker setup and `canDrawMap` moved from `FleetMap.tsx`
+  to `src/map/maplibre.ts`, which both maps import. The trip map reuses the base style, the fallback style, the heading
+  arrow and the lazy `maplibre` chunk. It has one GeoJSON source of lines and one of points, and six layers that pass
+  the style validator. The camera fits the trip once, when the map starts, and then stays where the operator puts it.
+- **Links.** Driver detail links the current trip, each recent trip, and "All trips of this driver" (`/trips?driverId=`).
+  The audit log links TRIP targets. Trip detail links the driver, and the guest to the trips list filtered by guest.
+- **The AbortError check.** `networkErrorMiddleware` keeps an error whose name is `AbortError`. Under jsdom an aborted
+  fetch throws Node's DOMException, which is not jsdom's `DOMException` class, so `instanceof` missed it and a cancelled
+  query became a "network" error in the tests.
+- **Chunks.** The trips pages add nothing to the first load. Trip detail shares the map chunk with the live map page.
+
+  | Chunk | Size | Gzipped |
+  |---|---|---|
+  | First load: entry, `client`, `route` and `roles` | 533.4 kB | 166.3 kB |
+  | Trips (`TripsPage`) | 11.2 kB | 4.1 kB |
+  | Trip detail (`TripDetailPage`) | 24.0 kB | 8.6 kB |
+  | Map code shared by both map pages (`view`) | 9.2 kB | 3.8 kB |
+  | MapLibre (`maplibre`) | 1 060.2 kB | 292.3 kB |
+
+  The first load was 532.0 kB (166.7 kB gzipped) in 12d.
+- **Tests.** 272 Vitest tests. Line coverage is 100 % in `src/socket` and 98 % in `src/trip`, which now have the same
+  80 % gate as `src/api`, `src/auth` and `src/fleet`. The trip fixtures are the protocol's golden frames, parsed with
+  the app's schemas in `src/test/trip.ts`.
+
+  | Case | Where |
+  |---|---|
+  | TC-12-UI-03 | `src/routes/trips/TripDetailPage.test.tsx`: the 409 message in the dialog, the trip read again behind it |
+  | Trip client | `src/trip/client.test.ts` with `FakeSocket`: subscribe, reconnect with a new ticket, the backoff reset, the end after a final message, a 1000 without one, 4403, dropped frames, the hidden tab |
+  | Live and replay pages | `TripDetailPage.test.tsx` with the real client over MSW's `ws.link` (`tripSocket` in `src/test/server.ts`) and a stub map: the C3 seed, the C4 trail, a stage change, the switch to replay, summary states, `pointsExpired`, 410, an export |
+  | List | `src/routes/trips/TripsPage.test.tsx`: filters from the URL, repeated `status`, Apply, the cursor, C2 |
+  | Store, decoder, layers | `src/trip/store.test.ts`, `src/trip/polyline.test.ts`, `src/map/tripLayers.test.ts` |
+  | TC-12-E2E-04 | `e2e/trips.spec.ts` |
+
+- **TC-12-E2E-04 runs in CI.** Booking a trip plans a road route, and CI has no map of Hanoi. The server reads its graph
+  from `routing.graphPath`, so the E2E job now sets `ROUTING_GRAPHPATH` to the fixture `saigon_test_grid.osm` that the
+  app's own tests use, turns the binary cache off, and waits for `/health/ready`. The test books a trip inside that
+  grid as a minted guest, accepts it as a minted driver, opens it from the list as OPERATOR, sees the socket live,
+  cancels with a reason, and expects "Cancelled", the replay, no live status, the CANCELLED row in the timeline, and
+  TRIP_CANCELLED with the reason in the audit log. All five E2E tests passed locally against a server started that way,
+  with 50 simulated drivers.
+- **Differences from the plan and the brief.**
+  - A REQUESTED trip opens in live mode too, not only ACCEPTED, ARRIVED and IN_PROGRESS. It has not ended, the socket
+    serves it (a guest watches a REQUESTED trip), and live mode shows the accept as it happens. Replay would ask `/track`,
+    which answers 409 TRIP_NOT_ENDED.
+  - The summary is asked for COMPLETED trips only. The server computes one for COMPLETED only
+    (`TripSummaryService.summarize`), so a CANCELLED trip would always answer 404.
+  - MSW's WebSocket mock can dispatch a server's close before a message sent just before it. A browser keeps the order.
+    The page test sends the final `trip_event`, waits for the replay, then closes. `client.test.ts` covers the close
+    after the final message with a fake socket.
+  - The replay draws the trip's planned route from `GET /api/v1/trips/{id}`, not every route version in the timeline.
+  - The timeline has no `cancelledBy`, so the replay cannot say who cancelled. The live event list can.
 
 ## Definition of Done
 

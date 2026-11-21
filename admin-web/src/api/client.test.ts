@@ -1,7 +1,7 @@
 import { HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { http, overviewBody, problem, server } from '../test/server';
-import { createApiClient } from './client';
+import { createApiClient, networkErrorMiddleware } from './client';
 import { ApiError, NETWORK, unwrap } from './errors';
 
 describe('the API client', () => {
@@ -32,6 +32,22 @@ describe('the API client', () => {
 
     await expect(failure).rejects.toBeInstanceOf(ApiError);
     await expect(failure).rejects.toMatchObject({ status: 0, code: NETWORK });
+  });
+
+  it('keeps an aborted request an AbortError, also one from another realm', async () => {
+    const api = createApiClient({ getToken: () => undefined });
+    const controller = new AbortController();
+    controller.abort();
+    const failure = api.GET('/api/v1/admin/overview', { signal: controller.signal });
+    await expect(failure).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(failure).rejects.not.toBeInstanceOf(ApiError);
+
+    // jsdom's DOMException is not the class Node's fetch throws, so the middleware checks the name only.
+    const foreign = Object.assign(new Error('aborted'), { name: 'AbortError' });
+    const onError = networkErrorMiddleware.onError;
+    expect(onError).toBeDefined();
+    const kept: unknown = await onError?.({ error: foreign } as Parameters<NonNullable<typeof onError>>[0]);
+    expect(kept).toBeUndefined();
   });
 
   it('turns a 429 Problem into an ApiError with retryAfter', async () => {
