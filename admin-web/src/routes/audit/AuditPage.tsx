@@ -298,12 +298,20 @@ function AuditTable({ records }: { records: AuditRecord[] }) {
   );
 }
 
-/** A driver target links to the driver. Trip links come with the trip pages in 12e. */
+/** A driver target links to the driver, and a trip target to the trip. */
 function Target({ record }: { record: AuditRecord }) {
   const label = `${record.targetType} ${shortId(record.targetId)}`;
-  if (record.targetType === 'DRIVER' && uuid.safeParse(record.targetId).success) {
+  const isId = uuid.safeParse(record.targetId).success;
+  if (record.targetType === 'DRIVER' && isId) {
     return (
       <AnchorLink to="/drivers/$driverId" params={{ driverId: record.targetId }} size="sm" title={record.targetId}>
+        {label}
+      </AnchorLink>
+    );
+  }
+  if (record.targetType === 'TRIP' && isId) {
+    return (
+      <AnchorLink to="/trips/$tripId" params={{ tripId: record.targetId }} size="sm" title={record.targetId}>
         {label}
       </AnchorLink>
     );

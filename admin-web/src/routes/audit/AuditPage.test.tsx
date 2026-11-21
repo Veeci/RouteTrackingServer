@@ -48,13 +48,15 @@ describe('the audit page', () => {
     expect(command.getByText('ADMIN')).toBeInTheDocument();
     expect(command.getByText('kind: FLUSH_QUEUE')).toBeInTheDocument();
     expect(command.getByText('req-2')).toBeInTheDocument();
-    // A driver target links to the driver. A trip target is text until the trip pages exist (12e).
+    // A driver target links to the driver, and a trip target to the trip (12e).
     expect(command.getByRole('link', { name: `DRIVER ${DRIVER_ID.slice(0, 8)}` })).toHaveAttribute(
       'href',
       `/drivers/${DRIVER_ID}`,
     );
-    expect(trip.queryByRole('link')).toBeNull();
-    expect(trip.getByText('TRIP 5d0f3c2a')).toBeInTheDocument();
+    expect(trip.getByRole('link', { name: 'TRIP 5d0f3c2a' })).toHaveAttribute(
+      'href',
+      '/trips/5d0f3c2a-1111-4222-8333-944455556666',
+    );
   });
 
   it('puts the filters in the URL and sends whole days as instants', async () => {

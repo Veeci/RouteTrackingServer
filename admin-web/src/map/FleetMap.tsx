@@ -1,5 +1,3 @@
-import 'maplibre-gl/dist/maplibre-gl.css';
-import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import { Alert, Box, Text } from '@mantine/core';
 import {
   type GeoJSONSource,
@@ -7,7 +5,6 @@ import {
   Map as MapLibreMap,
   NavigationControl,
   type PointLike,
-  setWorkerUrl,
 } from 'maplibre-gl';
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { type FeatureCollection, syncGeoJson } from '../fleet/geojson';
@@ -24,11 +21,11 @@ import {
   LayerId,
   selectedFilter,
 } from './layers';
+import { canDrawMap } from './maplibre';
 import { bboxOf, type MapView, roundView, sameView } from './view';
 
-// C1: MapLibre 6 starts its worker from this file, which Vite copies next to the app's own scripts. The policy then
-// says `worker-src 'self'`, with no blob: worker and no eval.
-setWorkerUrl(workerUrl);
+// The worker setup and the WebGL check moved to ./maplibre in 12e, to share them with the trip map.
+export { canDrawMap };
 
 /** The map stopped moving: where it looks now, and the area to watch. */
 export interface MapMove {
@@ -51,22 +48,6 @@ const MOVE_DEBOUNCE_MS = 300;
 const CLICK_TOLERANCE_PX = 6;
 /** A cluster click zooms in this many levels, where the cells are smaller and fewer drivers fall in the view. */
 const CLUSTER_ZOOM_STEP = 2;
-
-/**
- * Whether the browser can make a WebGL 2 context, which MapLibre 6 needs. A browser can know WebGL 2 and still refuse a
- * context, when hardware acceleration is off or the GPU is blocked. The test context is released at once, because a
- * page may hold only a few.
- */
-export function canDrawMap(): boolean {
-  try {
-    const context = document.createElement('canvas').getContext('webgl2');
-    context?.getExtension('WEBGL_lose_context')?.loseContext();
-    // jsdom has no WebGL at all, so the class is missing there and the check throws, which also means "no".
-    return context instanceof WebGL2RenderingContext;
-  } catch {
-    return false;
-  }
-}
 
 function edgesOf(bounds: LngLatBounds) {
   return { west: bounds.getWest(), south: bounds.getSouth(), east: bounds.getEast(), north: bounds.getNorth() };

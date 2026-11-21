@@ -32,3 +32,13 @@ export type ProviderGroup = Schemas['ProviderGroup'];
 
 export type AuditPage = Schemas['AuditPage'];
 export type AuditRecord = Schemas['AuditRecord'];
+
+export type Trip = Schemas['Trip'];
+export type TripPage = Schemas['TripPage'];
+export type TripTrack = Schemas['TripTrack'];
+export type TrackPoint = Schemas['TrackPoint'];
+export type TimelineEntry = Schemas['TimelineEntry'];
+export type TripSummary = Schemas['TripSummary'];
+export type LegSummary = Schemas['LegSummary'];
+/** `ride`: with the guest in the car. `approach`: from accept to the pickup. */
+export type TrackLeg = TripTrack['leg'];

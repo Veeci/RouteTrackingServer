@@ -52,6 +52,25 @@ const byCode: Record<string, CodeText> = {
     title: 'Not found',
     message: 'The server has no such route. With an admin port, the dashboard must reach that port.',
   },
+  TRIP_NOT_FOUND: { title: 'Trip not found', message: 'No trip has this id. Check the link.' },
+  ILLEGAL_TRANSITION: {
+    title: 'The trip has already ended',
+    message: 'A completed or cancelled trip cannot be cancelled. The page now shows its current stage.',
+  },
+  CONCURRENT_MODIFICATION: {
+    title: 'The trip changed at the same time',
+    message: 'Someone else changed the trip a moment ago. Try again.',
+  },
+  TRIP_NOT_ENDED: { title: 'The trip has not ended', message: 'A track and a summary need a trip that has ended.' },
+  SUMMARY_NOT_READY: {
+    title: 'Summary not computed yet',
+    message: 'The server computes the summary within a second of the trip completing.',
+  },
+  TRACK_EXPIRED: {
+    title: 'GPS points deleted',
+    message: 'The trip ended more than 90 days ago, so its GPS points are gone. The timeline stays.',
+  },
+  TRIP_ACTION_FORBIDDEN: { title: NO_PERMISSION, message: 'Your role may not do this to the trip.' },
   INTERNAL_ERROR: { title: 'Server error', message: 'The server failed. Quote the request id when you report it.' },
 };
 

@@ -166,7 +166,17 @@ function tripFacts({ driver }: DriverDetail): Fact[] {
   return [
     { label: 'Stage', value: trip.status },
     { label: 'Since', value: formatDateTime(trip.at) },
-    { label: 'Current trip', value: trip.currentTripId ?? 'None, the trip has ended' },
+    {
+      label: 'Current trip',
+      value:
+        trip.currentTripId === undefined ? (
+          'None, the trip has ended'
+        ) : (
+          <AnchorLink to="/trips/$tripId" params={{ tripId: trip.currentTripId }} ff="monospace">
+            {shortId(trip.currentTripId)}
+          </AnchorLink>
+        ),
+    },
   ];
 }
 
@@ -255,6 +265,9 @@ function RecentTrips({ detail }: { detail: DriverDetail }) {
   const trips = detail.recentTrips;
   return (
     <Card title="Recent trips">
+      <AnchorLink to="/trips" search={{ driverId: detail.driver.driverId }} size="sm">
+        All trips of this driver
+      </AnchorLink>
       {trips.length === 0 ? (
         <Text size="sm">No trip yet.</Text>
       ) : (
@@ -269,11 +282,12 @@ function RecentTrips({ detail }: { detail: DriverDetail }) {
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {/* Trip links come with the trip pages in 12e. */}
               {trips.map((trip) => (
                 <Table.Tr key={trip.id}>
-                  <Table.Td ff="monospace" title={trip.id}>
-                    {shortId(trip.id)}
+                  <Table.Td>
+                    <AnchorLink to="/trips/$tripId" params={{ tripId: trip.id }} ff="monospace" title={trip.id}>
+                      {shortId(trip.id)}
+                    </AnchorLink>
                   </Table.Td>
                   <Table.Td>{trip.status}</Table.Td>
                   <Table.Td>{formatDateTime(trip.createdAt)}</Table.Td>

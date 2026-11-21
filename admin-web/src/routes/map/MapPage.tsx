@@ -6,7 +6,7 @@ import { formatInteger, formatTime } from '../../components/format';
 import { type ConnectionState, FleetClient } from '../../fleet/client';
 import type { Bbox, FleetFilters } from '../../fleet/messages';
 import { createFleetStore, driversInView, type FleetStore, useFleet } from '../../fleet/store';
-import { ticketFetcher } from '../../fleet/ticket';
+import { ticketFetcher } from '../../socket/ticket';
 import { FleetMap, type MapMove } from '../../map/FleetMap';
 import { DRIVER_COLORS } from '../../map/layers';
 import { viewOf } from '../../map/view';
