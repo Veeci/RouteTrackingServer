@@ -9,13 +9,19 @@ import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
 import io.ktor.server.application.Application
 import kotlinx.serialization.json.Json
+import org.jetbrains.exposed.v1.core.SqlLogger
+import org.jetbrains.exposed.v1.core.Transaction
+import org.jetbrains.exposed.v1.core.statements.StatementContext
+import org.jetbrains.exposed.v1.jdbc.transactions.TransactionManager
 import org.junit.jupiter.api.Test
+import org.koin.ktor.ext.get
 import org.koin.ktor.ext.getKoin
 import org.testcontainers.junit.jupiter.Testcontainers
 import veeci.practicing.rts.fleet.FleetFixtures.fleetRow
 import veeci.practicing.rts.fleet.FleetFixtures.updatedAt
 import veeci.practicing.rts.identity.domain.event.DriverAccountChanged
 import veeci.practicing.rts.identity.domain.event.DriverAccountChangedV1
+import veeci.practicing.rts.platform.db.TransactionRunner
 import veeci.practicing.rts.platform.events.OutboxEventHandler
 import veeci.practicing.rts.shared.geo.GeoPoint
 import veeci.practicing.rts.testing.TestDatabase
@@ -134,6 +140,123 @@ class FleetProjectionIT {
             application.fleetRow(driver)?.displayName shouldBe "Lan"
             application.fleetRow(driver)?.enabled shouldBe false
         }
+
+    @Test
+    fun `an older fix after a newer one leaves the newer position, and writes nothing`() =
+        testApp(env = TestDatabase.freshDatabaseEnv()) {
+            application.deliver(FixesAcceptedV1.TYPE, FixesAcceptedV1.serializer(), FixesAcceptedV1.of(fixes(now - 1.seconds)))
+            val writtenAt = application.updatedAt(driver)
+
+            val older = fixes(now - 30.seconds).let { it.copy(positions = it.positions.map { p -> p.copy(point = GeoPoint(20.0, 105.0)) }) }
+            application.deliver(FixesAcceptedV1.TYPE, FixesAcceptedV1.serializer(), FixesAcceptedV1.of(older))
+
+            val row = application.fleetRow(driver).shouldNotBeNull()
+            row.position?.lat shouldBe LAST.lat
+            row.position?.at shouldBe now - 1.seconds
+            row.lastSeenAt shouldBe now - 1.seconds
+            application.updatedAt(driver) shouldBe writtenAt
+        }
+
+    @Test
+    fun `a first position creates the row of a driver who has none, with the defaults`() =
+        testApp(env = TestDatabase.freshDatabaseEnv()) {
+            application.fleetRow(driver).shouldBeNull()
+
+            application.deliver(FixesAcceptedV1.TYPE, FixesAcceptedV1.serializer(), FixesAcceptedV1.of(fixes(now - 2.seconds)))
+
+            val row = application.fleetRow(driver).shouldNotBeNull()
+            row.displayName.shouldBeNull()
+            row.enabled shouldBe true
+            row.device.shouldBeNull()
+            row.trip.shouldBeNull()
+            row.position?.bearingDeg shouldBe 45.0
+            row.lastSeenAt shouldBe now - 2.seconds
+            application.updatedAt(driver).shouldNotBeNull()
+        }
+
+    @Test
+    fun `a position and a status keep the rest of the row, and last seen is the newer of the two`() =
+        testApp(env = TestDatabase.freshDatabaseEnv()) {
+            val tripId = UUID.randomUUID()
+            val account = DriverAccountChanged(driver, "Lan", enabled = false, at = now)
+            application.deliver(DriverAccountChangedV1.TYPE, DriverAccountChangedV1.serializer(), DriverAccountChangedV1.of(account))
+            application.deliver(TripStatusChangedV1.TYPE, TripStatusChangedV1.serializer(), stage(tripId, TripStatus.ACCEPTED, now))
+            application.deliver(
+                DeviceStatusReportedV1.TYPE,
+                DeviceStatusReportedV1.serializer(),
+                DeviceStatusReportedV1.of(
+                    status(now - 5.seconds, 70),
+                ),
+            )
+
+            application.deliver(FixesAcceptedV1.TYPE, FixesAcceptedV1.serializer(), FixesAcceptedV1.of(fixes(now - 10.seconds)))
+            application.fleetRow(driver).shouldNotBeNull().apply {
+                displayName shouldBe "Lan"
+                enabled shouldBe false
+                trip?.currentTripId shouldBe tripId
+                device?.batteryPct shouldBe 70
+                position?.at shouldBe now - 10.seconds
+                lastSeenAt shouldBe now - 5.seconds // the status is newer than the fix
+            }
+
+            application.deliver(FixesAcceptedV1.TYPE, FixesAcceptedV1.serializer(), FixesAcceptedV1.of(fixes(now - 1.seconds)))
+            application.fleetRow(driver)?.lastSeenAt shouldBe now - 1.seconds
+
+            application.deliver(
+                DeviceStatusReportedV1.TYPE,
+                DeviceStatusReportedV1.serializer(),
+                DeviceStatusReportedV1.of(
+                    status(now - 3.seconds, 60),
+                ),
+            )
+            application.fleetRow(driver).shouldNotBeNull().apply {
+                device?.batteryPct shouldBe 60
+                lastSeenAt shouldBe now - 1.seconds // the fix is newer than the status
+            }
+            application.deliver(
+                DeviceStatusReportedV1.TYPE,
+                DeviceStatusReportedV1.serializer(),
+                DeviceStatusReportedV1.of(
+                    status(now - 4.seconds, 50),
+                ),
+            )
+            application.fleetRow(driver)?.device?.batteryPct shouldBe 60 // an older status changes nothing
+        }
+
+    @Test
+    fun `fix A1 one position event costs the relay two statements, the fleet upsert and one trip read`() =
+        testApp(env = TestDatabase.freshDatabaseEnv()) {
+            val payload = Json.encodeToJsonElement(FixesAcceptedV1.serializer(), FixesAcceptedV1.of(fixes(now - 1.seconds)))
+            val statements = mutableListOf<String>()
+
+            application.get<TransactionRunner>().inTransaction {
+                TransactionManager.current().addLogger(
+                    object : SqlLogger {
+                        override fun log(
+                            context: StatementContext,
+                            transaction: Transaction,
+                        ) {
+                            statements += context.sql(transaction)
+                        }
+                    },
+                )
+                application.getKoin().getAll<OutboxEventHandler>().filter { it.eventType == FixesAcceptedV1.TYPE }.forEach {
+                    it.handle(
+                        payload,
+                    )
+                }
+            }
+
+            statements.size shouldBe 2
+            statements.count { it.startsWith("INSERT INTO fleet_drivers") } shouldBe 1
+            statements.count { it.startsWith("SELECT") && "FROM trips" in it } shouldBe 1
+            application.fleetRow(driver)?.position?.at shouldBe now - 1.seconds
+        }
+
+    private fun status(
+        at: Instant,
+        batteryPct: Int,
+    ) = DeviceStatusReported(UUID.randomUUID(), "phone", driver, at, DeviceStatusReported.Battery(batteryPct, false, null, null), "STILL")
 
     private fun fixes(vararg times: Instant) =
         FixesAccepted(

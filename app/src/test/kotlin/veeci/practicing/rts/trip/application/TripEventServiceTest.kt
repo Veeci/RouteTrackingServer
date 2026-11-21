@@ -54,6 +54,11 @@ class TripEventServiceTest {
 
     private suspend fun tripIn(status: TripStatus) = TripSamples.inStatus(status, driver = driver).also { trips.insert(it) }
 
+    /** The active trip lookup that [DriverMovementService] does before it calls the service. */
+    private suspend fun TripEventService.onFixesAccepted(event: FixesAccepted) {
+        event.driverId?.let { trips.findActiveForDriver(UserId(it)) }?.let { onFixesAccepted(event, it) }
+    }
+
     /** One batch of the driver: a fix [m] meters south of the pickup every 5 s, starting [startS] s after T0. */
     private fun batch(
         vararg meters: Double,
@@ -255,16 +260,6 @@ class TripEventServiceTest {
             lastSeen[driver.userId] = T0
 
             service().detectStale()
-
-            moments.moments.shouldBeEmpty()
-        }
-
-    @Test
-    fun `a session without a driver is ignored`() =
-        runTest {
-            tripIn(TripStatus.ACCEPTED)
-
-            service().onFixesAccepted(batch(190.0, 180.0).copy(driverId = null))
 
             moments.moments.shouldBeEmpty()
         }

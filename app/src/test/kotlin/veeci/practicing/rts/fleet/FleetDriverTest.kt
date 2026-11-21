@@ -2,7 +2,6 @@ package veeci.practicing.rts.fleet
 
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.nulls.shouldBeNull
-import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import veeci.practicing.rts.fleet.domain.Bbox
@@ -13,7 +12,10 @@ import java.util.UUID
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 
-/** The newer-wins rules of the fleet read model (phase 11b), without a database. */
+/**
+ * The newer-wins rules of the fleet read model (phase 11b), without a database. The rule for positions and device
+ * statuses runs in SQL since fleet lag fix A1: FleetProjectionIT tests it.
+ */
 class FleetDriverTest {
     private val t0 = Instant.parse("2026-11-17T08:00:00Z")
     private val empty = FleetDriver(UUID.randomUUID())
@@ -23,28 +25,17 @@ class FleetDriverTest {
     private fun position(at: Instant) = DriverPosition(21.0, 105.8, 12.3, 90.0, at)
 
     @Test
-    fun `a newer position replaces the stored one, an equal or older one changes nothing`() {
-        val stored = checkNotNull(empty.withPosition(position(t0 + 10.seconds)))
-
-        stored.withPosition(position(t0 + 10.seconds)).shouldBeNull() // the same event again
-        stored.withPosition(position(t0)).shouldBeNull() // a late, older event
-        stored.withPosition(position(t0 + 11.seconds))?.position?.at shouldBe t0 + 11.seconds
-    }
-
-    @Test
     fun `last seen is the newer of the position and the device status`() {
-        val driver =
-            checkNotNull(empty.withPosition(position(t0)))
-                .withDevice(DeviceState(80, false, "STILL", t0 + 5.seconds))
-                .shouldNotBeNull()
+        val driver = empty.copy(position = position(t0), device = DeviceState(80, false, "STILL", t0 + 5.seconds))
 
         driver.lastSeenAt shouldBe t0 + 5.seconds
-        driver.withDevice(DeviceState(79, false, null, t0 + 5.seconds)).shouldBeNull()
+        driver.copy(device = null).lastSeenAt shouldBe t0
+        empty.lastSeenAt.shouldBeNull()
     }
 
     @Test
     fun `online means heard from within the stale time, the boundary is offline`() {
-        val driver = checkNotNull(empty.withPosition(position(t0)))
+        val driver = empty.copy(position = position(t0))
 
         driver.isOnline(t0 + 59.seconds, 60.seconds) shouldBe true
         driver.isOnline(t0 + 60.seconds, 60.seconds) shouldBe false

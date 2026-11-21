@@ -9,7 +9,6 @@ import veeci.practicing.rts.platform.config.RetentionConfig
 import veeci.practicing.rts.platform.events.OutboxEventHandler
 import veeci.practicing.rts.platform.jobs.BackgroundWorker
 import veeci.practicing.rts.platform.jobs.ScheduledJob
-import veeci.practicing.rts.trip.adapter.inbound.event.ArrivalListener
 import veeci.practicing.rts.trip.adapter.inbound.event.BatteryListener
 import veeci.practicing.rts.trip.adapter.inbound.event.DriverCancelListener
 import veeci.practicing.rts.trip.adapter.inbound.event.DriverRouteListener
@@ -27,6 +26,7 @@ import veeci.practicing.rts.trip.adapter.out.persistence.ExposedTripMomentReposi
 import veeci.practicing.rts.trip.adapter.out.persistence.ExposedTripRepository
 import veeci.practicing.rts.trip.adapter.out.persistence.ExposedTripRouteRepository
 import veeci.practicing.rts.trip.adapter.out.persistence.ExposedTripSummaryRepository
+import veeci.practicing.rts.trip.application.DriverMovementService
 import veeci.practicing.rts.trip.application.RerouteHandler
 import veeci.practicing.rts.trip.application.RerouteWorker
 import veeci.practicing.rts.trip.application.Rerouter
@@ -71,7 +71,7 @@ fun tripModule(
 
         single<ProgressStateStore> { ExposedProgressStateStore(get()) }
         single<ProgressPublisher> { LiveProgressPublisher(get()) }
-        single { TripProgressService(get(), get(), get(), get(), get(), get()) }
+        single { TripProgressService(get(), get(), get(), get(), get()) }
 
         // Phase 7b: re-routes, planned by a worker outside the relay's transaction.
         single { TripRouteService(get(), get(), get(), get(), get(), get(), get()) } bind RerouteHandler::class
@@ -80,7 +80,6 @@ fun tripModule(
         // Phase 7c: the driver's device gets the route it follows, live and after every connect.
         single(createdAtStart = true) { DriverRoutePush(get(), get()).also { it.start() } }
         single { DriverRouteListener(get()) } bind OutboxEventHandler::class
-        single { FixesAcceptedListener(get()) } bind OutboxEventHandler::class
         single { TripFinishedListener(get()) } bind OutboxEventHandler::class
 
         // Phase 4: moments and auto-arrive, decided inside the relay's transaction.
@@ -90,7 +89,9 @@ fun tripModule(
             TripEventService(get(), get(), get(), get(), get(), get(), get(), TripRules(presence = PresenceRules(events.staleAfter)))
         }
         single { StaleDriverJob(get(), events.staleCheckEvery) } bind ScheduledJob::class
-        single { ArrivalListener(get()) } bind OutboxEventHandler::class
+        // Fleet lag fix A1: one handler reads the active trip once per FixesAccepted, for arrival and then progress.
+        single { DriverMovementService(get(), get(), get(), get()) }
+        single { FixesAcceptedListener(get()) } bind OutboxEventHandler::class
         single { BatteryListener(get()) } bind OutboxEventHandler::class
 
         // Phase 8a: a summary of every completed trip.

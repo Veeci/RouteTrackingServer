@@ -1,5 +1,7 @@
 package veeci.practicing.rts.fleet.application.port.out
 
+import veeci.practicing.rts.fleet.domain.DeviceState
+import veeci.practicing.rts.fleet.domain.DriverPosition
 import veeci.practicing.rts.fleet.domain.FleetCounts
 import veeci.practicing.rts.fleet.domain.FleetCursor
 import veeci.practicing.rts.fleet.domain.FleetDriver
@@ -12,12 +14,31 @@ import kotlin.time.Instant
 interface FleetRepository {
     suspend fun find(driverId: UUID): FleetDriver?
 
-    /** Reads the row and locks it until the transaction ends, so two writers of one driver take turns. */
-    suspend fun findForUpdate(driverId: UUID): FleetDriver?
+    /**
+     * Reads the driver's row and locks it until the transaction ends, so two writers of one driver take turns. A
+     * driver with no row reads as an empty [FleetDriver]. Writes the whole row that [change] returns, with
+     * [updatedAt] as the server time of the write. Null writes nothing.
+     */
+    suspend fun update(
+        driverId: UUID,
+        updatedAt: Instant,
+        change: (FleetDriver) -> FleetDriver?,
+    )
 
-    /** Inserts or replaces the row; [updatedAt] is the server time of the write. */
-    suspend fun save(
-        driver: FleetDriver,
+    /**
+     * Gives each driver of [positions] that position when it is newer than the stored one, or when none is stored,
+     * and creates the row of a driver who has none. Newer wins inside the statement itself, so nothing is read or
+     * locked first: one statement per driver (fleet lag fix A1). A position that is not newer writes nothing, not
+     * even [updatedAt]. `last_seen_at` becomes the newer of the position time and the stored status time.
+     */
+    suspend fun savePositions(
+        positions: Map<UUID, DriverPosition>,
+        updatedAt: Instant,
+    )
+
+    /** [savePositions] for device statuses: the same rule on the status columns and `status_at`. */
+    suspend fun saveDevices(
+        devices: Map<UUID, DeviceState>,
         updatedAt: Instant,
     )
 

@@ -248,7 +248,7 @@ class FleetSocketIT {
 
     /** Writes [driver] as the projection would: a new row version with the server time. */
     private suspend fun io.ktor.server.application.Application.write(driver: FleetDriver) {
-        get<TransactionRunner>().inTransaction { get<FleetRepository>().save(driver, Clock.System.now()) }
+        get<TransactionRunner>().inTransaction { get<FleetRepository>().update(driver.driverId, Clock.System.now()) { driver } }
     }
 
     private suspend fun io.ktor.server.application.Application.sql(statement: String) {

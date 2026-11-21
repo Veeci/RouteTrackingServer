@@ -7,6 +7,7 @@ import veeci.practicing.rts.tracking.domain.event.DeviceStatusReportedV1
 import veeci.practicing.rts.tracking.domain.event.FixesAcceptedV1
 import veeci.practicing.rts.trip.adapter.out.driver.DriverCancelPush
 import veeci.practicing.rts.trip.adapter.out.driver.DriverRoutePush
+import veeci.practicing.rts.trip.application.DriverMovementService
 import veeci.practicing.rts.trip.application.TripEventService
 import veeci.practicing.rts.trip.application.TripProgressService
 import veeci.practicing.rts.trip.application.TripSummaryService
@@ -15,14 +16,17 @@ import veeci.practicing.rts.trip.domain.event.TripRouteChangedV1
 import veeci.practicing.rts.trip.domain.event.TripStatus
 import veeci.practicing.rts.trip.domain.event.TripStatusChangedV1
 
-/** The driver moved (tracking context): update the progress of their active trip. */
+/**
+ * The driver moved (tracking context): check arrival at the pickup, then update the progress of their active trip.
+ * One handler, so the active trip is read once per event (fleet lag fix A1).
+ */
 class FixesAcceptedListener(
-    private val progress: TripProgressService,
+    private val movement: DriverMovementService,
 ) : OutboxEventHandler {
     override val eventType = FixesAcceptedV1.TYPE
 
     override suspend fun handle(payload: JsonElement) {
-        progress.onFixesAccepted(EventJson.decodeFromJsonElement(FixesAcceptedV1.serializer(), payload).toEvent())
+        movement.onFixesAccepted(EventJson.decodeFromJsonElement(FixesAcceptedV1.serializer(), payload).toEvent())
     }
 }
 
@@ -35,17 +39,6 @@ class TripFinishedListener(
     override suspend fun handle(payload: JsonElement) {
         val event = EventJson.decodeFromJsonElement(TripStatusChangedV1.serializer(), payload).toEvent()
         if (event.to.isTerminal) progress.forget(TripId(event.tripId))
-    }
-}
-
-/** The driver moved (tracking context): check whether they are arriving at, or have arrived at, the pickup. */
-class ArrivalListener(
-    private val events: TripEventService,
-) : OutboxEventHandler {
-    override val eventType = FixesAcceptedV1.TYPE
-
-    override suspend fun handle(payload: JsonElement) {
-        events.onFixesAccepted(EventJson.decodeFromJsonElement(FixesAcceptedV1.serializer(), payload).toEvent())
     }
 }
 

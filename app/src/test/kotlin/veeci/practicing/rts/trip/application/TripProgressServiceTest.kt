@@ -6,6 +6,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
+import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.shared.geo.GeoPoint
 import veeci.practicing.rts.shared.geo.Haversine
 import veeci.practicing.rts.shared.geo.PolylineCodec
@@ -50,7 +51,7 @@ class TripProgressServiceTest {
     private val routes = InMemoryTripRouteRepository()
     private val rerouteRequests = mutableListOf<RerouteRequest>()
     private val service =
-        TripProgressService(trips, routes, states, publisher, DirectTransactionRunner, {
+        TripProgressService(routes, states, publisher, DirectTransactionRunner, {
             rerouteRequests += it
             true
         })
@@ -78,6 +79,11 @@ class TripProgressServiceTest {
         FixesAccepted(UUID.randomUUID(), "phone-1", driver.userId.value, seq = 1, positions = positions.toList())
 
     private fun progress() = published.filterIsInstance<TripProgress>()
+
+    /** The active trip lookup that [DriverMovementService] does before it calls the service. */
+    private suspend fun TripProgressService.onFixesAccepted(event: FixesAccepted) {
+        event.driverId?.let { trips.findActiveForDriver(UserId(it)) }?.let { onFixesAccepted(event, it) }
+    }
 
     @Test
     fun `TC-3-PRG-01 before the ride the target is the pickup, during the ride the destination`() =

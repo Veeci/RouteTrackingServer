@@ -38,12 +38,17 @@ class TripEventService(
     private val clock: Clock,
     private val rules: TripRules = TripRules(),
 ) {
-    suspend fun onFixesAccepted(event: FixesAccepted) {
-        val driver = event.driverId ?: return
+    /**
+     * The driver of [trip], their active trip, moved: check whether they are arriving at, or have arrived at, the
+     * pickup. [DriverMovementService] reads the trip and calls this. Auto-arrive changes [trip] itself.
+     */
+    suspend fun onFixesAccepted(
+        event: FixesAccepted,
+        trip: Trip,
+    ) {
+        // Arrival matters only on the way to the pickup.
+        if (trip.status != TripStatus.ACCEPTED) return
         transactions.inTransaction {
-            val trip = trips.findActiveForDriver(UserId(driver))
-            // Arrival matters only on the way to the pickup.
-            if (trip == null || trip.status != TripStatus.ACCEPTED) return@inTransaction
             var state = states.lockArrival(trip.id)
             for (position in event.positions) {
                 val sample = ArrivalSample(Haversine.distance(position.point, trip.pickup).value, position.speedMps, position.recordedAt)

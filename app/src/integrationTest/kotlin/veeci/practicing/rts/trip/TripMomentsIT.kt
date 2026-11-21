@@ -13,6 +13,7 @@ import veeci.practicing.rts.platform.db.Migrations
 import veeci.practicing.rts.platform.db.createDataSource
 import veeci.practicing.rts.platform.events.OutboxWriter
 import veeci.practicing.rts.shared.DomainException
+import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.shared.geo.GeoPoint
 import veeci.practicing.rts.testing.TestConfig
 import veeci.practicing.rts.testing.TestDatabase
@@ -63,6 +64,12 @@ class TripMomentsIT {
             transactions,
             Clock.systemUTC(),
         )
+
+    /** The active trip lookup that DriverMovementService does before it calls the service. */
+    private suspend fun TripEventService.onFixesAccepted(event: FixesAccepted) {
+        val trip = transactions.inTransaction { trips.findActiveForDriver(UserId(checkNotNull(event.driverId))) }
+        trip?.let { onFixesAccepted(event, it) }
+    }
 
     private suspend fun acceptedTrip(): Trip =
         TripSamples.inStatus(TripStatus.ACCEPTED, driver = driver).also {
