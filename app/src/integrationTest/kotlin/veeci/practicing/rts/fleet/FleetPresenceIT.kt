@@ -122,7 +122,7 @@ class FleetPresenceIT {
             val seeded = driver(ago = 30.seconds, id = driver)
             application.seed(seeded)
             val stranger = UUID.randomUUID()
-            val now = Clock.System.now()
+            val now = FleetFixtures.now()
             val locked = CompletableDeferred<Unit>()
             val release = CompletableDeferred<Unit>()
 

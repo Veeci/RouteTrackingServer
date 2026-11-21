@@ -24,6 +24,13 @@ import kotlin.time.Instant
 /** Builds and reads fleet rows for the fleet's integration tests. */
 object FleetFixtures {
     /**
+     * The current time in whole milliseconds. Postgres keeps microseconds, and the clock on Linux (CI) has nanoseconds,
+     * so a time read back from a row would differ from an untruncated one. The clock on macOS has only microseconds,
+     * which hid this locally.
+     */
+    fun now(): Instant = Instant.fromEpochMilliseconds(Clock.System.now().toEpochMilliseconds())
+
+    /**
      * A driver whose position and status were measured [ago] (null: never), at [lat], [lng], optionally on a trip. The
      * server heard from them [heard] ago (null: never), by default when the data was measured.
      */
@@ -37,15 +44,15 @@ object FleetFixtures {
         enabled: Boolean = true,
         id: UUID = UUID.randomUUID(),
     ): FleetDriver {
-        val seen = ago?.let { Clock.System.now() - it }
+        val seen = ago?.let { now() - it }
         return FleetDriver(
             driverId = id,
             displayName = name,
             enabled = enabled,
             position = seen?.let { DriverPosition(lat, lng, 8.5, 90.0, it) },
             device = seen?.let { DeviceState(80, false, "IN_VEHICLE", it) },
-            trip = if (onTrip) TripState(UUID.randomUUID(), "ACCEPTED", Clock.System.now() - 1.minutes) else null,
-            heardAt = heard?.let { Clock.System.now() - it },
+            trip = if (onTrip) TripState(UUID.randomUUID(), "ACCEPTED", now() - 1.minutes) else null,
+            heardAt = heard?.let { now() - it },
         )
     }
 
