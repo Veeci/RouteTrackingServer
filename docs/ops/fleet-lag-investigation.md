@@ -244,6 +244,45 @@ Do A1 first. It is small, keeps the design of phases 3, 10 and 11, and its measu
 load at all. Decide on A2 in T10.7, once the relay's ceiling is measured on the target setup. Keep B for a scale where
 even A2 cannot keep up, or if the map must stay fresh through long outages.
 
+## After fix A1
+
+Fix A1 is on branch `fix/fleet-relay-round-trips`. A position event for a driver with no trip now costs the relay 2
+statements instead of 4, and `FleetProjectionIT` counts them.
+
+- Positions and device statuses write `fleet_drivers` with one statement each. It applies newer wins in SQL:
+  `INSERT ... ON CONFLICT (driver_id) DO UPDATE ... WHERE` the stored time is null or older. `last_seen_at` becomes
+  `GREATEST` of the position and status times. The rebuild uses the same statements, so the rule has one
+  implementation, and `FleetDriver.withPosition` and `withDevice` are gone.
+- `DriverMovementService` reads the active trip once per event and hands it to arrival, then progress. Before, Koin's
+  hash map happened to run `ArrivalListener` before `FixesAcceptedListener`, so the new order keeps what the code did.
+
+### Idle drain, before and after
+
+Both builds ran on 2026-11-21 on the same Mac, one after the other: `main` at `a9e6471` and the fix. Each run used a
+fresh Postgres 16 container on port 55432 and the server on port 18080 (Java 21, `APP_ENV=dev`). The backlog was
+200 000 `FixesAccepted` events from 5 000 drivers with no trip, 5 fixes each. One transaction inserted them all, so
+the relay drained them with nothing else running. The numbers come from `outbox.published_at`, as in
+[how to repeat it](#how-to-repeat-it).
+
+| Run | Events delivered a second | Batch gap, p50 | Batch gap, p95 |
+|---|---|---|---|
+| Before, run 1 | 1 464 | 48.7 ms | 143.5 ms |
+| After, run 1 | 1 621 | 33.8 ms | 256.2 ms |
+| Before, run 2 | 382 | 76.7 ms | 900.9 ms |
+| After, run 2 | 2 941 | 19.5 ms | 93.7 ms |
+
+Other work shared the Mac during these runs. The load average reached 16 on 10 cores during the second run before
+the fix, which explains its 382 events a second, and it had fallen by the second run after. So the rates swing with
+the load and give no clean factor. The median gap between batches is the steadier signal: 33.8 and 19.5 ms after,
+against 48.7 and 76.7 ms before. In run 1, the pair closest in load, the fix delivered 11 % more events a second and
+its median batch was 31 % shorter. Throughput gained less than the median because of slow batches at p95.
+
+These runs are slower than the 2 430 events a second of the investigation's drain. The payload differs (5 fixes per
+event here) and the Mac was busier, so compare only runs from the same day.
+
+Not measured: the 5 000-driver run and the 10 100-driver overlap. The work closed before them. T10.7 should measure
+the relay under load, with Postgres on another host, where each saved round trip counts more.
+
 ## Relation to the phase 10 capacity work (T10.7)
 
 T10.7, the capacity test and report in `docs/ops/capacity.md`, is not done, and the runbook already asks to record the

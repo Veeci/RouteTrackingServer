@@ -1,8 +1,11 @@
 package veeci.practicing.rts.fleet.adapter.out.persistence
 
+import org.jetbrains.exposed.v1.core.Column
 import org.jetbrains.exposed.v1.core.CustomFunction
 import org.jetbrains.exposed.v1.core.DoubleColumnType
+import org.jetbrains.exposed.v1.core.Expression
 import org.jetbrains.exposed.v1.core.Op
+import org.jetbrains.exposed.v1.core.QueryBuilder
 import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.Table
@@ -15,11 +18,14 @@ import org.jetbrains.exposed.v1.core.doubleLiteral
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greater
 import org.jetbrains.exposed.v1.core.isNotNull
+import org.jetbrains.exposed.v1.core.isNull
 import org.jetbrains.exposed.v1.core.java.javaUUID
+import org.jetbrains.exposed.v1.core.less
 import org.jetbrains.exposed.v1.core.or
 import org.jetbrains.exposed.v1.core.statements.UpdateBuilder
 import org.jetbrains.exposed.v1.datetime.timestamp
 import org.jetbrains.exposed.v1.jdbc.batchInsert
+import org.jetbrains.exposed.v1.jdbc.batchUpsert
 import org.jetbrains.exposed.v1.jdbc.select
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.TransactionManager
@@ -72,19 +78,84 @@ class ExposedFleetRepository : FleetRepository {
             .singleOrNull()
             ?.toDriver()
 
-    override suspend fun findForUpdate(driverId: UUID): FleetDriver? =
-        table
-            .selectAll()
-            .where { table.driverId eq driverId }
-            .forUpdate()
-            .singleOrNull()
-            ?.toDriver()
+    override suspend fun update(
+        driverId: UUID,
+        updatedAt: Instant,
+        change: (FleetDriver) -> FleetDriver?,
+    ) {
+        val current =
+            table
+                .selectAll()
+                .where { table.driverId eq driverId }
+                .forUpdate()
+                .singleOrNull()
+                ?.toDriver() ?: FleetDriver(driverId)
+        change(current)?.let { changed -> table.upsert { it.fill(changed, updatedAt) } }
+    }
 
-    override suspend fun save(
-        driver: FleetDriver,
+    // INSERT ... ON CONFLICT (driver_id) DO UPDATE ... WHERE the stored time is older. Postgres locks the row before it
+    // checks the WHERE, so two writers of one driver still take turns, as they do in update(). When the WHERE
+    // is false it writes nothing. In SET, a column of fleet_drivers is the stored value, before this statement.
+    override suspend fun savePositions(
+        positions: Map<UUID, DriverPosition>,
         updatedAt: Instant,
     ) {
-        table.upsert { it.fill(driver, updatedAt) }
+        if (positions.isEmpty()) return
+        table.batchUpsert(
+            positions.entries,
+            table.driverId,
+            onUpdate = {
+                it[table.lat] = insertValue(table.lat)
+                it[table.lng] = insertValue(table.lng)
+                it[table.speedMps] = insertValue(table.speedMps)
+                it[table.bearingDeg] = insertValue(table.bearingDeg)
+                it[table.positionAt] = insertValue(table.positionAt)
+                it[table.lastSeenAt] = newerOf(insertValue(table.positionAt), table.statusAt)
+                it[table.updatedAt] = insertValue(table.updatedAt)
+            },
+            where = { newerThanStored(table.positionAt) },
+            shouldReturnGeneratedValues = false,
+        ) { (driverId, position) ->
+            this[FleetDriversTable.driverId] = driverId
+            this[FleetDriversTable.enabled] = true
+            this[FleetDriversTable.lat] = position.lat
+            this[FleetDriversTable.lng] = position.lng
+            this[FleetDriversTable.speedMps] = position.speedMps?.toFloat()
+            this[FleetDriversTable.bearingDeg] = position.bearingDeg?.toFloat()
+            this[FleetDriversTable.positionAt] = position.at
+            this[FleetDriversTable.lastSeenAt] = position.at
+            this[FleetDriversTable.updatedAt] = updatedAt
+        }
+    }
+
+    override suspend fun saveDevices(
+        devices: Map<UUID, DeviceState>,
+        updatedAt: Instant,
+    ) {
+        if (devices.isEmpty()) return
+        table.batchUpsert(
+            devices.entries,
+            table.driverId,
+            onUpdate = {
+                it[table.batteryPct] = insertValue(table.batteryPct)
+                it[table.isCharging] = insertValue(table.isCharging)
+                it[table.motion] = insertValue(table.motion)
+                it[table.statusAt] = insertValue(table.statusAt)
+                it[table.lastSeenAt] = newerOf(table.positionAt, insertValue(table.statusAt))
+                it[table.updatedAt] = insertValue(table.updatedAt)
+            },
+            where = { newerThanStored(table.statusAt) },
+            shouldReturnGeneratedValues = false,
+        ) { (driverId, device) ->
+            this[FleetDriversTable.driverId] = driverId
+            this[FleetDriversTable.enabled] = true
+            this[FleetDriversTable.batteryPct] = device.batteryPct.toShort()
+            this[FleetDriversTable.isCharging] = device.isCharging
+            this[FleetDriversTable.motion] = device.motion
+            this[FleetDriversTable.statusAt] = device.at
+            this[FleetDriversTable.lastSeenAt] = device.at
+            this[FleetDriversTable.updatedAt] = updatedAt
+        }
     }
 
     override suspend fun page(
@@ -148,6 +219,24 @@ class ExposedFleetRepository : FleetRepository {
         table.batchInsert(drivers, shouldReturnGeneratedValues = false) { fill(it, updatedAt) }
     }
 }
+
+/** `EXCLUDED.column`: the value the upsert tried to insert. Exposed's `insertValue` gives it only inside `onUpdate`. */
+private class Excluded<T>(
+    private val column: Column<T>,
+) : Expression<T>() {
+    override fun toQueryBuilder(queryBuilder: QueryBuilder) {
+        queryBuilder.append("EXCLUDED.").append(TransactionManager.current().identity(column))
+    }
+}
+
+/** True when the row has no [stored] time yet, or the upsert brings a later one: the newer-wins rule of the fleet. */
+private fun newerThanStored(stored: Column<Instant?>): Op<Boolean> = stored.isNull() or (stored less Excluded(stored))
+
+/** GREATEST ignores nulls: the newer of two times, either of which may be missing. */
+private fun newerOf(
+    a: Expression<Instant?>,
+    b: Expression<Instant?>,
+): Expression<Instant?> = CustomFunction("GREATEST", FleetDriversTable.lastSeenAt.columnType, a, b)
 
 private fun count(condition: Op<Boolean>): Int =
     FleetDriversTable

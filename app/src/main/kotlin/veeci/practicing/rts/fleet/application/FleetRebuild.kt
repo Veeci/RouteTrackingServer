@@ -18,8 +18,10 @@ import kotlin.time.toKotlinInstant
 /**
  * Builds the fleet read model again from the source data (phase 11, ADMIN), for when it is ever wrong. It reads each
  * context through its public API and applies the same newer-wins rules as the event handlers, so the result equals
- * what the events built (TC-11-PRJ-05). One transaction: the table is emptied and filled, and the audit row is
- * written, together.
+ * what the events built (TC-11-PRJ-05). Accounts and trip stages go through the rules of [FleetDriver]. Positions and
+ * statuses go through the same statements as the event handlers, [FleetRepository.savePositions] and
+ * [FleetRepository.saveDevices], so their rule has one implementation. One transaction: the table is emptied and
+ * filled, and the audit row is written, together.
  *
  * The table is emptied first, before reading the sources. Emptying locks it, so an event handler waits until the
  * rebuild commits and then applies its change on top (newer wins). Read first and empty later, and an event delivered
@@ -49,21 +51,32 @@ class FleetRebuild(
                 drivers[id] = change(current) ?: current
             }
             accounts.drivers().forEach { account -> update(account.id) { it.withAccount(account.displayName, account.enabled) } }
-            activity.latestPositions().forEach { p ->
-                update(p.driverId) { it.withPosition(DriverPosition(p.lat, p.lng, p.speedMps, p.bearingDeg, p.recordedAt)) }
-            }
-            activity.latestStatuses().forEach { s ->
-                update(s.driverId) { it.withDevice(DeviceState(s.levelPercent, s.isCharging, s.motion, s.at)) }
-            }
             trips.latestPerDriver().forEach { trip ->
                 val driver = checkNotNull(trip.driverId) { "latestPerDriver returns trips with a driver" }
                 update(driver) { it.withTripStage(trip.id, trip.status.name, trip.status.isTerminal, trip.updatedAt) }
             }
-            fleet.insertAll(drivers.values, clock.instant().toKotlinInstant())
-            audit.record(
-                AuditEntry(actor, "FLEET_REBUILT", "FLEET", "fleet_drivers", details = mapOf("drivers" to drivers.size.toString())),
-            )
-            drivers.size
+            val positions =
+                activity.latestPositions().associate {
+                    it.driverId to
+                        DriverPosition(it.lat, it.lng, it.speedMps, it.bearingDeg, it.recordedAt)
+                }
+            val devices =
+                activity.latestStatuses().associate {
+                    it.driverId to
+                        DeviceState(
+                            it.levelPercent,
+                            it.isCharging,
+                            it.motion,
+                            it.at,
+                        )
+                }
+            val now = clock.instant().toKotlinInstant()
+            fleet.insertAll(drivers.values, now)
+            fleet.savePositions(positions, now)
+            fleet.saveDevices(devices, now)
+            val count = (drivers.keys + positions.keys + devices.keys).size
+            audit.record(AuditEntry(actor, "FLEET_REBUILT", "FLEET", "fleet_drivers", details = mapOf("drivers" to count.toString())))
+            count
         }
     }
 }

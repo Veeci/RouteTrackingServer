@@ -11,8 +11,11 @@ import kotlin.time.toKotlinInstant
 
 /**
  * Keeps the fleet read model up to date from events (phase 11). The outbox relay calls it inside its transaction,
- * on whichever instance holds the delivery lock, so it keeps no state in memory: the table is the state. Each change
- * reads the row with a lock, applies the newer-wins rule of [FleetDriver], and writes only when something changed.
+ * on whichever instance holds the delivery lock, so it keeps no state in memory: the table is the state.
+ *
+ * Positions and device statuses are most of the events, and the relay handles one event after another, so each one
+ * costs one statement: [FleetRepository.savePositions] applies newer wins in SQL (fleet lag fix A1). A trip stage or
+ * an account reads the row with a lock, applies the rule of [FleetDriver], and writes only when something changed.
  */
 class FleetProjection(
     private val fleet: FleetRepository,
@@ -22,12 +25,12 @@ class FleetProjection(
     suspend fun onPosition(
         driverId: UUID,
         position: DriverPosition,
-    ) = apply(driverId) { it.withPosition(position) }
+    ) = transactions.inTransaction { fleet.savePositions(mapOf(driverId to position), now()) }
 
     suspend fun onDeviceStatus(
         driverId: UUID,
         device: DeviceState,
-    ) = apply(driverId) { it.withDevice(device) }
+    ) = transactions.inTransaction { fleet.saveDevices(mapOf(driverId to device), now()) }
 
     suspend fun onTripStage(
         driverId: UUID,
@@ -47,9 +50,8 @@ class FleetProjection(
         driverId: UUID,
         change: (FleetDriver) -> FleetDriver?,
     ) {
-        transactions.inTransaction {
-            val current = fleet.findForUpdate(driverId) ?: FleetDriver(driverId)
-            change(current)?.let { fleet.save(it, clock.instant().toKotlinInstant()) }
-        }
+        transactions.inTransaction { fleet.update(driverId, now(), change) }
     }
+
+    private fun now() = clock.instant().toKotlinInstant()
 }

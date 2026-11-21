@@ -1,7 +1,6 @@
 package veeci.practicing.rts.trip.application
 
 import veeci.practicing.rts.platform.db.TransactionRunner
-import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.shared.geo.GeoPoint
 import veeci.practicing.rts.shared.geo.Haversine
 import veeci.practicing.rts.shared.geo.MeasuredPolyline
@@ -15,7 +14,6 @@ import veeci.practicing.rts.trip.application.port.out.ProgressState
 import veeci.practicing.rts.trip.application.port.out.ProgressStateStore
 import veeci.practicing.rts.trip.application.port.out.ProgressTarget
 import veeci.practicing.rts.trip.application.port.out.TripProgress
-import veeci.practicing.rts.trip.application.port.out.TripRepository
 import veeci.practicing.rts.trip.application.port.out.TripRouteRepository
 import veeci.practicing.rts.trip.domain.RouteKind
 import veeci.practicing.rts.trip.domain.RouteReason
@@ -50,7 +48,6 @@ import kotlin.time.Instant
  * is at least [ProgressRules.minSpeedMps].
  */
 class TripProgressService(
-    private val trips: TripRepository,
     private val routes: TripRouteRepository,
     private val states: ProgressStateStore,
     private val publisher: ProgressPublisher,
@@ -58,9 +55,12 @@ class TripProgressService(
     private val rerouter: Rerouter,
     private val rules: ProgressRules = ProgressRules(),
 ) {
-    suspend fun onFixesAccepted(event: FixesAccepted) {
-        // No driver: a session from before drivers had accounts. No active trip: nobody is waiting for this driver.
-        val (trip, stored) = event.driverId?.let { load(UserId(it)) } ?: return
+    /** The driver of [trip], their active trip, moved. [DriverMovementService] reads the trip and calls this. */
+    suspend fun onFixesAccepted(
+        event: FixesAccepted,
+        trip: Trip,
+    ) {
+        val stored = routeOf(trip)
         val before = states.get(trip.id)
         // The outbox delivers at least once and a retry may come late: only positions newer than the last one count.
         val fresh = event.positions.filter { before == null || it.recordedAt > before.lastAt }
@@ -146,12 +146,9 @@ class TripProgressService(
 
     private fun Instant?.cooledDownAt(now: Instant) = this == null || now - this >= rules.rerouteCooldown
 
-    /** The driver's active trip and the newest route of the kind its stage follows, in one transaction. */
-    private suspend fun load(driver: UserId): Pair<Trip, TripRoute?>? =
-        transactions.inTransaction {
-            val trip = trips.findActiveForDriver(driver) ?: return@inTransaction null
-            trip to RouteKind.followedIn(trip.status)?.let { routes.findLatest(trip.id, it) }
-        }
+    /** The newest route of the kind the trip's stage follows; null for a stage that follows none. */
+    private suspend fun routeOf(trip: Trip): TripRoute? =
+        RouteKind.followedIn(trip.status)?.let { kind -> transactions.inTransaction { routes.findLatest(trip.id, kind) } }
 
     /** The trip is finished: its state is not needed any more. */
     suspend fun forget(trip: TripId) = states.remove(trip)

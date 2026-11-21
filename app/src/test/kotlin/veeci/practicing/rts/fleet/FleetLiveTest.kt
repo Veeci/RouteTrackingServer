@@ -290,10 +290,19 @@ class FleetLiveTest {
 
         override suspend fun find(driverId: UUID) = error("unused")
 
-        override suspend fun findForUpdate(driverId: UUID) = error("unused")
+        override suspend fun update(
+            driverId: UUID,
+            updatedAt: Instant,
+            change: (FleetDriver) -> FleetDriver?,
+        ) = error("unused")
 
-        override suspend fun save(
-            driver: FleetDriver,
+        override suspend fun savePositions(
+            positions: Map<UUID, DriverPosition>,
+            updatedAt: Instant,
+        ) = error("unused")
+
+        override suspend fun saveDevices(
+            devices: Map<UUID, DeviceState>,
             updatedAt: Instant,
         ) = error("unused")
 

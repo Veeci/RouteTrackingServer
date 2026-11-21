@@ -33,7 +33,8 @@ data class TripState(
  * events. Events arrive at least once, and a rebuild replays stored data over the same rules, so every change
  * follows "newer data wins": each `with...` returns the changed driver, or null when the change is not newer than
  * what is stored (a repeated or late event). Null means "write nothing", so a repeated event does not even move the
- * row's update time.
+ * row's update time. Positions and device statuses follow the same rule in SQL, one statement per event
+ * (`FleetRepository.savePositions`, fleet lag fix A1), because they are most of the relay's events.
  */
 data class FleetDriver(
     val driverId: UUID,
@@ -60,10 +61,6 @@ data class FleetDriver(
         displayName: String,
         enabled: Boolean,
     ): FleetDriver? = copy(displayName = displayName, enabled = enabled).takeIf { it != this }
-
-    fun withPosition(new: DriverPosition): FleetDriver? = if (position == null || new.at > position.at) copy(position = new) else null
-
-    fun withDevice(new: DeviceState): FleetDriver? = if (device == null || new.at > device.at) copy(device = new) else null
 
     /**
      * Trip [tripId] reached [status] at [at]. An [ended] trip clears the current trip, but only if it is that trip:
