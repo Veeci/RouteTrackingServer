@@ -4,6 +4,7 @@ import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
@@ -18,16 +19,19 @@ import org.koin.ktor.ext.get
 import org.koin.ktor.ext.getKoin
 import org.testcontainers.junit.jupiter.Testcontainers
 import veeci.practicing.rts.fleet.FleetFixtures.fleetRow
+import veeci.practicing.rts.fleet.FleetFixtures.flushPresence
 import veeci.practicing.rts.fleet.FleetFixtures.updatedAt
 import veeci.practicing.rts.identity.domain.event.DriverAccountChanged
 import veeci.practicing.rts.identity.domain.event.DriverAccountChangedV1
 import veeci.practicing.rts.platform.db.TransactionRunner
 import veeci.practicing.rts.platform.events.OutboxEventHandler
+import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.shared.geo.GeoPoint
 import veeci.practicing.rts.testing.TestDatabase
 import veeci.practicing.rts.testing.TestTokens
 import veeci.practicing.rts.testing.shouldMatchContract
 import veeci.practicing.rts.testing.testApp
+import veeci.practicing.rts.tracking.application.api.DriverHeard
 import veeci.practicing.rts.tracking.domain.event.DeviceStatusReported
 import veeci.practicing.rts.tracking.domain.event.DeviceStatusReportedV1
 import veeci.practicing.rts.tracking.domain.event.FixesAccepted
@@ -50,7 +54,7 @@ class FleetProjectionIT {
     private val now = Instant.fromEpochMilliseconds(Clock.System.now().toEpochMilliseconds()) // Postgres keeps microseconds
 
     @Test
-    fun `TC-11-PRJ-01 accepted fixes give the row the batch's last position, and the driver is online`() =
+    fun `TC-11-PRJ-01 accepted fixes give the row the batch's last position, and ingest, not the event, makes the driver online`() =
         testApp(env = TestDatabase.freshDatabaseEnv()) {
             application.deliver(
                 FixesAcceptedV1.TYPE,
@@ -68,10 +72,43 @@ class FleetProjectionIT {
             row.position?.lng shouldBe LAST.lng
             row.position?.speedMps shouldBe 12.3 // stored as a 4-byte float, read back as the same decimal
             row.lastSeenAt shouldBe row.position?.at
+            // Fleet lag fix C: the relay's event carries the phone's times only, so it says nothing about presence.
+            row.heardAt.shouldBeNull()
+            client.get("/api/v1/admin/drivers?online=true") { bearerAuth(TestTokens.operator()) }.bodyAsText() shouldNotContain "$driver"
+
+            application.get<DriverHeard>().heard(UserId(driver), now)
+            application.flushPresence()
 
             client.get("/api/v1/admin/drivers?online=true") { bearerAuth(TestTokens.operator()) }.apply {
                 shouldMatchContract()
                 bodyAsText() shouldContain "\"driverId\":\"$driver\",\"enabled\":true,\"online\":true"
+            }
+        }
+
+    @Test
+    fun `the relay's positions, statuses, trips and accounts leave heard_at as the presence flush wrote it`() =
+        testApp(env = TestDatabase.freshDatabaseEnv()) {
+            application.get<DriverHeard>().heard(UserId(driver), now)
+            application.flushPresence()
+
+            application.deliver(FixesAcceptedV1.TYPE, FixesAcceptedV1.serializer(), FixesAcceptedV1.of(fixes(now - 1.seconds)))
+            application.deliver(
+                DeviceStatusReportedV1.TYPE,
+                DeviceStatusReportedV1.serializer(),
+                DeviceStatusReportedV1.of(status(now, 70)),
+            )
+            application.deliver(
+                TripStatusChangedV1.TYPE,
+                TripStatusChangedV1.serializer(),
+                stage(UUID.randomUUID(), TripStatus.ACCEPTED, now),
+            )
+            val account = DriverAccountChanged(driver, "Lan", enabled = true, at = now)
+            application.deliver(DriverAccountChangedV1.TYPE, DriverAccountChangedV1.serializer(), DriverAccountChangedV1.of(account))
+
+            application.fleetRow(driver).shouldNotBeNull().apply {
+                heardAt shouldBe now
+                displayName shouldBe "Lan"
+                onTrip shouldBe true
             }
         }
 

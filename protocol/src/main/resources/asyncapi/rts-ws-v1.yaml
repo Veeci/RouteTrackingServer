@@ -1134,7 +1134,7 @@ components:
           description: Degrees, 0 = north. Absent when the newest fix had no bearing.
         online:
           type: boolean
-          description: Heard from within the stale time (60 s).
+          description: The server heard from the driver within the stale time (60 s), by the server's clock (see heardAt).
         tripStatus:
           type: string
           description: The stage of the driver's current trip. Absent when they are not on one.
@@ -1145,4 +1145,10 @@ components:
         lastSeenAt:
           type: string
           format: date-time
-          description: When the phone last told the server something, by the phone's clock.
+          description: >-
+            When the newest position or status was measured, by the phone's clock. A driver can be online with an old
+            lastSeenAt: show its age.
+        heardAt:
+          type: string
+          format: date-time
+          description: When the server last heard from the driver, by the server's clock. Absent until it has.

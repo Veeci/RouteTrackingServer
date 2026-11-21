@@ -218,6 +218,8 @@ describe('MapPage', () => {
     expect(await within(panel).findByText(formatPosition(21.0285, 105.8542))).toBeInTheDocument();
     expect(within(panel).getByText('IN_PROGRESS')).toBeInTheDocument();
     expect(within(panel).getByText('64 %')).toBeInTheDocument();
+    // The marker's newest data was measured 0.88 s before the snapshot's `at`.
+    expect(within(panel).getByText('last update 0 s old')).toBeInTheDocument();
     fleet.send(goldenDelta);
     expect(await within(panel).findByText(formatPosition(21.0291, 105.855))).toBeInTheDocument();
     expect(within(panel).getByText('92.5 °')).toBeInTheDocument();

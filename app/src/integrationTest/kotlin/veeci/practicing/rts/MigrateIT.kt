@@ -18,7 +18,7 @@ class MigrateIT {
     fun `TC-1b-MIG-01 migrate applies every migration to an empty database and exits 0`() {
         migrate(env) shouldBe 0
 
-        latestVersion() shouldBe "22"
+        latestVersion() shouldBe "23"
         migrate(env) shouldBe 0 // nothing pending: still a success
     }
 
@@ -28,7 +28,7 @@ class MigrateIT {
 
         migrate(env, withBrokenMigration) shouldBe 1
 
-        latestVersion() shouldBe "22"
+        latestVersion() shouldBe "23"
     }
 
     @Test

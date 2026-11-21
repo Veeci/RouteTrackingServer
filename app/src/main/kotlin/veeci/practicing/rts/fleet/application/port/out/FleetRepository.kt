@@ -10,7 +10,10 @@ import veeci.practicing.rts.fleet.domain.MapCell
 import java.util.UUID
 import kotlin.time.Instant
 
-/** The `fleet_drivers` table (V20). Runs inside the caller's transaction. */
+/**
+ * The `fleet_drivers` table (V20). Runs inside the caller's transaction. "Online" reads `heard_at` (V23), which
+ * [FleetPresenceRepository] writes; nothing here writes it.
+ */
 interface FleetRepository {
     suspend fun find(driverId: UUID): FleetDriver?
 
@@ -44,7 +47,7 @@ interface FleetRepository {
 
     /**
      * Drivers matching [filter], in [FleetCursor] order, at most [limit], after [after]. A driver counts as online
-     * when last seen after [onlineSince].
+     * when heard after [onlineSince].
      */
     suspend fun page(
         filter: FleetFilter,
@@ -56,9 +59,10 @@ interface FleetRepository {
     suspend fun counts(onlineSince: Instant): FleetCounts
 
     /**
-     * The live map's tick (11c): every row written after [since], and every row whose `last_seen_at` lies between
+     * The live map's tick (11c): every row written after [since], and every row whose `heard_at` lies between
      * [staleFrom] and [staleTo]. The second part finds the drivers who went offline: going offline is only time
-     * passing, it writes no row.
+     * passing, it writes no row. Coming back online does write one: the presence flush moves `updated_at` with
+     * `heard_at`.
      */
     suspend fun changedSince(
         since: Instant,

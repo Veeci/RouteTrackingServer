@@ -11,6 +11,7 @@ import { CursorPager } from '../../components/CursorPager';
 import { AnchorLink } from '../../components/AnchorLink';
 import { ErrorAlert } from '../../components/ErrorAlert';
 import { formatDateTime, formatTime, NONE } from '../../components/format';
+import { PresenceBadge } from '../../components/PresenceBadge';
 import { RequireRole } from '../../components/RequireRole';
 import { flagValue, ONLINE_OPTIONS, toFlag, TRIP_OPTIONS } from '../flags';
 import { type PageMove, useCursorPaging } from '../paging';
@@ -76,7 +77,7 @@ export function DriversPage() {
       ) : (
         <>
           {list.isError && <ErrorAlert error={list.error} />}
-          <DriverTable drivers={list.data.items} />
+          <DriverTable drivers={list.data.items} at={list.data.at} />
           <CursorPager paging={paging} nextCursor={list.data.nextCursor} />
         </>
       )}
@@ -144,7 +145,7 @@ function DriverFilters({ search, onApply }: DriverFiltersProps) {
   );
 }
 
-function DriverTable({ drivers }: { drivers: FleetDriver[] }) {
+function DriverTable({ drivers, at }: { drivers: FleetDriver[]; at: string }) {
   const navigate = routeApi.useNavigate();
   if (drivers.length === 0) return <Text>No driver matches these filters.</Text>;
   return (
@@ -182,9 +183,7 @@ function DriverTable({ drivers }: { drivers: FleetDriver[] }) {
                 </AnchorLink>
               </Table.Td>
               <Table.Td>
-                <Badge color={driver.online ? 'green' : 'gray'} variant="light">
-                  {driver.online ? 'Online' : 'Offline'}
-                </Badge>
+                <PresenceBadge online={driver.online} dataAt={driver.position?.at} now={at} />
               </Table.Td>
               <Table.Td>
                 {driver.enabled ? (

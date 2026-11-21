@@ -85,12 +85,17 @@ data class DriverMarker(
     val lng: Double,
     /** Absent when the newest fix had no bearing. */
     val bearingDeg: Double? = null,
-    /** Heard from within the stale time (60 s). */
+    /** The server heard from the driver within the stale time (60 s), by the server's clock: see [heardAt]. */
     val online: Boolean,
     /** The stage of the driver's current trip; absent when they are not on one. */
     val tripStatus: String? = null,
     /** Absent until the phone sends a device status. */
     val batteryPct: Int? = null,
-    /** When the phone last told the server something, by the phone's clock. */
+    /**
+     * When the newest position or status was measured, by the phone's clock. A driver can be online with an old
+     * [lastSeenAt]: show its age.
+     */
     val lastSeenAt: Instant,
+    /** When the server last heard from the driver, by the server's clock. Absent until it has. */
+    val heardAt: Instant? = null,
 )
