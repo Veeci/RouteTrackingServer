@@ -16,6 +16,7 @@ import { auditSearch } from './audit/search';
 import { driversSearch } from './drivers/search';
 import { mapSearch } from './map/search';
 import { reportsSearch } from './reports/search';
+import { tripsSearch } from './trips/search';
 
 export interface RouterContext {
   queryClient: QueryClient;
@@ -81,6 +82,20 @@ const driverRoute = createRoute({
   component: lazyRouteComponent(() => import('./drivers/DriverDetailPage'), 'DriverDetailPage'),
 });
 
+const tripsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/trips',
+  validateSearch: tripsSearch,
+  component: lazyRouteComponent(() => import('./trips/TripsPage'), 'TripsPage'),
+});
+
+const tripRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/trips/$tripId',
+  // The trip map loads MapLibre in the same lazy chunk as the live map.
+  component: lazyRouteComponent(() => import('./trips/TripDetailPage'), 'TripDetailPage'),
+});
+
 const auditRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/audit',
@@ -97,7 +112,16 @@ const reportsRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
-  appRoute.addChildren([overviewRoute, mapRoute, driversRoute, driverRoute, auditRoute, reportsRoute]),
+  appRoute.addChildren([
+    overviewRoute,
+    mapRoute,
+    driversRoute,
+    driverRoute,
+    tripsRoute,
+    tripRoute,
+    auditRoute,
+    reportsRoute,
+  ]),
 ]);
 
 export interface AppRouterOptions {

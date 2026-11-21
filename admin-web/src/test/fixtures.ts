@@ -11,6 +11,12 @@ import type {
   ProviderGroup,
   ProviderReport,
   SessionHealth,
+  TimelineEntry,
+  TrackLeg,
+  Trip,
+  TripPage,
+  TripSummary,
+  TripTrack,
 } from '../api/types';
 
 export const AT = '2026-11-20T08:30:00Z';
@@ -152,4 +158,80 @@ export function providerGroup(overrides: Partial<ProviderGroup> = {}): ProviderG
 
 export function providerReport(groups: ProviderGroup[], from = AT, to = AT): ProviderReport {
   return { from, to, groups };
+}
+
+// 12e: trips. TRIP_ID is the golden socket trip, so the page's REST trip and its socket frames agree.
+export const TRIP_ID = '3b241101-e2bb-4255-8caf-4136c566a962';
+export const GUEST_ID = '5d1e9a2c-8b7f-4e3d-9c1a-000000000501';
+
+export function trip(overrides: Partial<Trip> = {}): Trip {
+  return {
+    id: TRIP_ID,
+    guestId: GUEST_ID,
+    driverId: DRIVER_ID,
+    pickup: { lat: 10.7725, lng: 106.698 },
+    destination: { lat: 10.7798, lng: 106.699 },
+    status: 'ACCEPTED',
+    createdAt: '2026-11-20T08:00:00Z',
+    updatedAt: AT,
+    version: 2,
+    route: { polyline: '_wd`Ase}iSkk@_E', distanceM: 812.4, durationS: 97.5 },
+    ...overrides,
+  };
+}
+
+export function tripPage(items: Trip[], nextCursor?: string): TripPage {
+  return { items, ...(nextCursor === undefined ? {} : { nextCursor }) };
+}
+
+export const timeline: TimelineEntry[] = [
+  { at: '2026-11-20T08:00:05Z', kind: 'status_changed', status: 'ACCEPTED' },
+  {
+    at: '2026-11-20T08:00:06Z',
+    kind: 'route_updated',
+    routeKind: 'APPROACH',
+    routeVersion: 1,
+    reason: 'initial',
+    distanceM: 1_240,
+    durationS: 150,
+    polyline: '_wd`Ase}iSkk@_E',
+  },
+  { at: '2026-11-20T08:04:00Z', kind: 'driver_arriving', status: 'ACCEPTED', remainingM: 180 },
+  { at: '2026-11-20T08:20:00Z', kind: 'status_changed', status: 'COMPLETED' },
+];
+
+export function track(leg: TrackLeg, overrides: Partial<TripTrack> = {}): TripTrack {
+  return {
+    tripId: TRIP_ID,
+    leg,
+    points: [
+      { lat: 10.7725, lng: 106.698, at: '2026-11-20T08:05:00Z', speedMps: 8 },
+      { lat: 10.776, lng: 106.6985, at: '2026-11-20T08:06:00Z', speedMps: 9 },
+      { lat: 10.7798, lng: 106.699, at: '2026-11-20T08:07:00Z' },
+    ],
+    timeline,
+    ...overrides,
+  };
+}
+
+export function tripSummary(overrides: Partial<TripSummary> = {}): TripSummary {
+  return {
+    tripId: TRIP_ID,
+    ride: {
+      distanceM: 2_430,
+      durationS: 610,
+      movingTimeS: 540,
+      avgSpeedMps: 4.5,
+      maxSpeedMps: 12.1,
+      pointCount: 305,
+      startedAt: '2026-11-20T08:05:00Z',
+      endedAt: '2026-11-20T08:15:10Z',
+    },
+    offRouteCount: 1,
+    rerouteCount: 1,
+    rejected: { POOR_ACCURACY: 4 },
+    approximate: false,
+    computedAt: '2026-11-20T08:15:11Z',
+    ...overrides,
+  };
 }

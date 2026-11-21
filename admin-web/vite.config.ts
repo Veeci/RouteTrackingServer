@@ -40,12 +40,15 @@ export default defineConfig({
       include: ['src/**/*.{ts,tsx}'],
       exclude: ['src/**/*.test.{ts,tsx}', 'src/test/**', 'src/main.tsx'],
       reporter: ['text', 'html'],
-      // The gate covers the code with the most logic per line: errors, retries, the session and re-minting, and the
-      // fleet socket's client, schemas and marker store (12d).
+      // The gate covers the code with the most logic per line: errors, retries, the session and re-minting, the
+      // fleet socket's client, schemas and marker store (12d), the shared socket connection and the trip socket's
+      // client, schemas, store and polyline decoder (12e).
       thresholds: {
         'src/api/**': { lines: 80 },
         'src/auth/**': { lines: 80 },
         'src/fleet/**': { lines: 80 },
+        'src/socket/**': { lines: 80 },
+        'src/trip/**': { lines: 80 },
       },
     },
   },

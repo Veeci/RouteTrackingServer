@@ -3,7 +3,17 @@ import { setupServer } from 'msw/node';
 import { createOpenApiHttp } from 'openapi-msw';
 import type { Session } from '../auth/session';
 import type { paths, Problem, Role } from '../api/types';
-import { auditPage, driverDetail, fleetDriver, fleetPage, providerReport } from './fixtures';
+import {
+  auditPage,
+  driverDetail,
+  fleetDriver,
+  fleetPage,
+  providerReport,
+  track,
+  trip,
+  tripPage,
+  tripSummary,
+} from './fixtures';
 
 /**
  * MSW typed by the generated contract (TC-12-CON-01): a handler for a path the spec lacks, or a body the spec does
@@ -38,6 +48,11 @@ export function problemResponse(status: number, code: string, detail?: string) {
   });
 }
 
+/** Trip ids that differ in their last digits. */
+export function idOfTrip(n: number): string {
+  return `3b241101-e2bb-4255-8caf-${String(n).padStart(12, '0')}`;
+}
+
 export const MINTED_USER_ID = '0b9c6a7e-4a52-4b4f-9a1e-3f1f2a8f6d10';
 
 export const TICKET = 'ticket-test';
@@ -47,6 +62,9 @@ export const TICKET = 'ticket-test';
  * `server.use(fleetSocket.addEventListener('connection', ({ client }) => …))`.
  */
 export const fleetSocket = ws.link('ws://*/ws/v1/admin/fleet');
+
+/** The staff trip socket on any host (12e). A test that opens a live trip adds a handler on it. */
+export const tripSocket = ws.link('ws://*/ws/v1/admin/trip');
 
 export const defaultHandlers = [
   http.post('/api/v1/dev/tokens', async ({ request, response }) => {
@@ -74,6 +92,18 @@ export const defaultHandlers = [
   http.post('/api/v1/admin/ws-tickets', ({ response }) =>
     response(200).json({ ticket: TICKET, expiresAt: new Date(Date.now() + 30_000).toISOString() }),
   ),
+  // 12e: one page of two trips, a trip that has ended (so a page test opens no socket unless it asks for one), its
+  // two legs and its summary.
+  http.get('/api/v1/admin/trips', ({ response }) =>
+    response(200).json(tripPage([trip({ status: 'COMPLETED' }), trip({ id: idOfTrip(2), status: 'REQUESTED' })])),
+  ),
+  http.get('/api/v1/trips/{id}', ({ params, response }) =>
+    response(200).json(trip({ id: params.id, status: 'COMPLETED' })),
+  ),
+  http.get('/api/v1/trips/{id}/track', ({ query, response }) =>
+    response(200).json(track(query.get('leg') === 'approach' ? 'approach' : 'ride')),
+  ),
+  http.get('/api/v1/trips/{id}/summary', ({ response }) => response(200).json(tripSummary())),
   http.get('/api/v1/admin/reports/providers', ({ query, response }) =>
     response(200).json(providerReport([], query.get('from'), query.get('to'))),
   ),

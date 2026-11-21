@@ -9,16 +9,17 @@ import { sessionStore, useSession } from '../auth/session';
 import { RequireRole } from './RequireRole';
 
 interface NavItem {
-  to: '/' | '/map' | '/drivers' | '/audit' | '/reports';
+  to: '/' | '/map' | '/drivers' | '/trips' | '/audit' | '/reports';
   label: string;
   roles: readonly Role[];
 }
 
-/** Only pages that exist, each shown to the roles that may use it. 12e adds its page here. */
+/** Only pages that exist, each shown to the roles that may use it. */
 const NAV: readonly NavItem[] = [
   { to: '/', label: 'Overview', roles: STAFF_ROLES },
   { to: '/map', label: 'Live map', roles: STAFF_ROLES },
   { to: '/drivers', label: 'Drivers', roles: STAFF_ROLES },
+  { to: '/trips', label: 'Trips', roles: STAFF_ROLES },
   { to: '/audit', label: 'Audit', roles: ADMIN_ONLY },
   { to: '/reports', label: 'Reports', roles: ADMIN_ONLY },
 ];
