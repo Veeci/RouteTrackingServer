@@ -20,8 +20,12 @@ data class FleetDriverDto(
     val driverId: String,
     val displayName: String? = null,
     val enabled: Boolean,
+    /** Heard from within the stale time, judged on [heardAt] against the response's `at`. */
     val online: Boolean,
+    /** When the newest position or status was measured, by the phone's clock. */
     val lastSeenAt: Instant? = null,
+    /** When the server last heard from the driver, by the server's clock (fleet lag fix C). */
+    val heardAt: Instant? = null,
     val position: PositionDto? = null,
     val device: DeviceDto? = null,
     val trip: TripStageDto? = null,
@@ -35,6 +39,7 @@ data class FleetDriverDto(
                 enabled = driver.enabled,
                 online = row.online,
                 lastSeenAt = driver.lastSeenAt,
+                heardAt = driver.heardAt,
                 position = driver.position?.let { PositionDto(it.lat, it.lng, it.speedMps, it.bearingDeg, it.at) },
                 device = driver.device?.let { DeviceDto(it.batteryPct, it.isCharging, it.motion, it.at) },
                 trip = driver.trip?.let { TripStageDto(it.currentTripId?.toString(), it.status, it.at) },

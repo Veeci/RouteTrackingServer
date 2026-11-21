@@ -156,7 +156,7 @@ class FleetApiIT {
             response.headers[HttpHeaders.ContentType].shouldNotBeNull() shouldStartWith "text/csv"
             response.headers[HttpHeaders.ContentDisposition] shouldBe "attachment; filename=drivers.csv"
             val lines = response.bodyAsText().split("\r\n").dropLast(1)
-            lines.first() shouldStartWith "driverId,displayName,enabled,online,lastSeenAt,lat,lng,speedMps"
+            lines.first() shouldStartWith "driverId,displayName,enabled,online,lastSeenAt,heardAt,lat,lng,speedMps"
             lines.drop(1) shouldHaveSize 1_002
             lines.drop(1).map { it.substringBefore(",") }.toSet() shouldHaveSize 1_002
             val trickyLine = lines.single { it.startsWith(tricky.driverId.toString()) }

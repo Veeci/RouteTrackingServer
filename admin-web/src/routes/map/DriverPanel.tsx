@@ -4,6 +4,7 @@ import { AnchorLink } from '../../components/AnchorLink';
 import { ErrorAlert } from '../../components/ErrorAlert';
 import { type Fact, Facts } from '../../components/Facts';
 import { formatDateTime, formatDecimal, NONE, shortId } from '../../components/format';
+import { PresenceBadge } from '../../components/PresenceBadge';
 import type { DriverMarker } from '../../fleet/messages';
 import { type FleetStore, useFleet } from '../../fleet/store';
 import { driverQuery, isEnabled } from '../drivers/queries';
@@ -35,6 +36,7 @@ function liveFacts(marker: DriverMarker): Fact[] {
  */
 export function DriverPanel({ store, driverId, onClose }: DriverPanelProps) {
   const marker = useFleet(store, (state) => state.markers.get(driverId));
+  const at = useFleet(store, (state) => state.at);
   const detail = useQuery(driverQuery(driverId));
   const name =
     detail.data?.driver.displayName ?? (detail.isPending ? `Driver ${shortId(driverId)}` : 'Driver without a name');
@@ -50,9 +52,8 @@ export function DriverPanel({ store, driverId, onClose }: DriverPanelProps) {
         </Group>
         <Group gap="xs">
           {marker !== undefined && (
-            <Badge color={marker.online ? 'green' : 'gray'} variant="light">
-              {marker.online ? 'Online' : 'Offline'}
-            </Badge>
+            // The marker carries one time for its position and status, the newer of the two: name it as such.
+            <PresenceBadge online={marker.online} subject="last update" dataAt={marker.lastSeenAt} now={at} />
           )}
           {detail.data !== undefined && (
             <Badge color={isEnabled(detail.data) ? 'blue' : 'red'} variant="light">

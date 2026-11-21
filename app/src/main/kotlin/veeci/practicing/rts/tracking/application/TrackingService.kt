@@ -3,6 +3,7 @@ package veeci.practicing.rts.tracking.application
 import veeci.practicing.rts.platform.db.TransactionRunner
 import veeci.practicing.rts.shared.DomainException
 import veeci.practicing.rts.shared.UserId
+import veeci.practicing.rts.tracking.application.api.DriverHeard
 import veeci.practicing.rts.tracking.application.port.out.DeviceStatusSampleRepository
 import veeci.practicing.rts.tracking.application.port.out.FixBatchRepository
 import veeci.practicing.rts.tracking.application.port.out.InsertResult
@@ -77,6 +78,8 @@ class TrackingService(
     private val clock: Clock,
     private val maxFixesPerBatch: Int,
     private val statusSamples: DeviceStatusSampleRepository,
+    /** Told at every moment the session's last-seen time moves: the fleet's server-clock presence (fleet lag fix C). */
+    private val heard: DriverHeard,
 ) {
     /** Starts a session, or continues it after a reconnect. Says which seq the client sends next. */
     suspend fun openSession(command: OpenSession): SessionOpened =
@@ -95,6 +98,7 @@ class TrackingService(
                         device = command.device,
                     )
             sessions.save(session)
+            heard.heard(command.driverId, now)
             SessionOpened(session.id, session.resumeFrom(batches.highestSeq(session.id)))
         }
 
@@ -117,8 +121,10 @@ class TrackingService(
             val session =
                 sessions.find(command.sessionId)
                     ?: throw DomainException(TrackingError.SESSION_NOT_FOUND, "Send hello before device_status")
-            session.touch(now())
+            val now = now()
+            session.touch(now)
             sessions.save(session)
+            session.driverId?.let { heard.heard(it, now) }
             statusSamples.insert(DeviceStatusSample(session.id, command.at, command.battery, command.motion))
             outbox.add(
                 DeviceStatusReported(
@@ -170,6 +176,7 @@ class TrackingService(
             InsertResult.Inserted -> {
                 session.touch(now)
                 sessions.save(session)
+                session.driverId?.let { heard.heard(it, now) }
                 if (result.accepted.isNotEmpty()) outbox.add(fixesAccepted(session, command.seq, result.accepted))
                 BatchResult(command.seq, result.accepted.size, result.rejected, duplicate = false)
             }

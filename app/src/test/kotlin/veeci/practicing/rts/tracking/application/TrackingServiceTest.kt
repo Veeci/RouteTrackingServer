@@ -47,6 +47,9 @@ class TrackingServiceTest {
     private val outbox = InMemoryTrackingEventOutbox()
     private val statusSamples = InMemoryDeviceStatusSampleRepository()
 
+    /** Every call of the fleet's presence port, in order. */
+    private val heard = mutableListOf<Pair<UserId, Instant>>()
+
     private val sessionId = SessionId(UUID.fromString("0f8fad5b-d9cb-469f-a165-70867728950e"))
     private val phone = DeviceId("phone-1")
 
@@ -62,6 +65,7 @@ class TrackingServiceTest {
         Clock.fixed(now.toJavaInstant(), ZoneOffset.UTC),
         maxFixesPerBatch = 100,
         statusSamples,
+        heard = { driver, at -> heard += driver to at },
     )
 
     private val service = service()
@@ -291,5 +295,39 @@ class TrackingServiceTest {
             service.ingest(batch(1, reading()))
 
             sessions.find(sessionId)!!.lastSeenAt shouldBe NOW
+        }
+
+    @Test
+    fun `hello, a stored batch and a device status tell the fleet the server time, whatever the phone's clock says`() =
+        runTest {
+            open()
+            // The phone's clock is 2 minutes slow: its fixes and status carry times 2 minutes old.
+            service.ingest(batch(1, reading(at = NOW - 2.minutes)))
+            service.reportStatus(ReportStatus(sessionId, NOW - 2.minutes, DeviceStatusReported.Battery(40, false, null, null), null))
+
+            heard shouldBe List(3) { driver to NOW }
+        }
+
+    @Test
+    fun `a resent seq moves no last-seen time and tells the fleet nothing`() =
+        runTest {
+            open()
+            service.ingest(batch(1, reading()))
+            heard.clear()
+
+            service.ingest(batch(1, reading())).duplicate shouldBe true
+
+            heard.shouldBeEmpty()
+        }
+
+    @Test
+    fun `a batch with every fix rejected still tells the fleet the driver was heard`() =
+        runTest {
+            open()
+            heard.clear()
+
+            service.ingest(batch(1, reading(accuracyM = 80.0)))
+
+            heard shouldBe listOf(driver to NOW)
         }
 }

@@ -9,6 +9,7 @@ import veeci.practicing.rts.fleet.domain.DeviceState
 import veeci.practicing.rts.fleet.domain.DriverPosition
 import veeci.practicing.rts.fleet.domain.FleetDriver
 import java.util.UUID
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 
@@ -35,11 +36,22 @@ class FleetDriverTest {
 
     @Test
     fun `online means heard from within the stale time, the boundary is offline`() {
-        val driver = empty.copy(position = position(t0))
+        val driver = empty.copy(heardAt = t0)
 
         driver.isOnline(t0 + 59.seconds, 60.seconds) shouldBe true
         driver.isOnline(t0 + 60.seconds, 60.seconds) shouldBe false
         empty.isOnline(t0, 60.seconds) shouldBe false
+    }
+
+    @Test
+    fun `online reads the server's clock, so a phone 2 minutes slow is online and a fresh position never heard is not`() {
+        // The phone's clock runs 2 minutes behind, so its newest position looks 2 minutes old to the server.
+        val slowPhone = empty.copy(position = position(t0 - 2.minutes), heardAt = t0)
+        val neverHeard = empty.copy(position = position(t0))
+
+        slowPhone.isOnline(t0 + 1.seconds, 60.seconds) shouldBe true
+        slowPhone.lastSeenAt shouldBe t0 - 2.minutes
+        neverHeard.isOnline(t0 + 1.seconds, 60.seconds) shouldBe false
     }
 
     @Test

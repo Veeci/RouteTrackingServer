@@ -332,9 +332,11 @@ class GoldenFilesTest {
                     tripStatus = "IN_PROGRESS",
                     batteryPct = 64,
                     lastSeenAt = at,
+                    heardAt = Instant.parse("2026-09-30T02:15:04.500Z"),
                 )
             val offline = DriverMarker(SESSION, 21.0301, 105.8411, online = false, lastSeenAt = Instant.parse("2026-09-30T02:10:00Z"))
-            val moved = onTrip.copy(lat = 21.0291, lng = 105.855, bearingDeg = 92.5, lastSeenAt = at + 2.seconds)
+            val moved =
+                onTrip.copy(lat = 21.0291, lng = 105.855, bearingDeg = 92.5, lastSeenAt = at + 2.seconds, heardAt = at + 2.5.seconds)
             val tick = Instant.parse("2026-09-30T02:15:07Z")
             return listOf(
                 Sample(

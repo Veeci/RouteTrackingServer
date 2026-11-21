@@ -44,17 +44,29 @@ data class FleetDriver(
     val position: DriverPosition? = null,
     val device: DeviceState? = null,
     val trip: TripState? = null,
+    /**
+     * The server time when ingest last accepted data from the driver: a hello, a batch or a device_status (fleet lag
+     * fix C). Null until it has. Ingest writes it, not the outbox relay, so a relay backlog never delays it.
+     */
+    val heardAt: Instant? = null,
 ) {
-    /** The newer of the position and status times: when the driver's phone last told us something. */
+    /**
+     * The newer of the position and status times, both by the phone's clock: when the data shown was measured. A slow
+     * phone clock or a relay backlog makes it old while the driver is online, so it says nothing about presence.
+     */
     val lastSeenAt: Instant? get() = listOfNotNull(position?.at, device?.at).maxOrNull()
 
     val onTrip: Boolean get() = trip?.currentTripId != null
 
-    /** Online: heard from within [staleAfter] before [now]. The same stale time that tells guests a driver is gone. */
+    /**
+     * Online: the server heard from the driver within [staleAfter] before [now], both on the server's clock. The same
+     * stale time that tells guests a driver is gone, over the same moments ([heardAt] follows the session's last-seen
+     * time), so the admin and guest sides agree.
+     */
     fun isOnline(
         now: Instant,
         staleAfter: Duration,
-    ): Boolean = lastSeenAt?.let { it > now - staleAfter } ?: false
+    ): Boolean = heardAt?.let { it > now - staleAfter } ?: false
 
     /** The account carries no time: the outbox delivers account events in order, so the last one wins. */
     fun withAccount(

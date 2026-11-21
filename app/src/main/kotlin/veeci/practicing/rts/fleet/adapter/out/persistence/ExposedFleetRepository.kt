@@ -61,12 +61,16 @@ internal object FleetDriversTable : Table("fleet_drivers") {
     val tripStatus = text("trip_status").nullable()
     val tripStatusAt = timestamp("trip_status_at").nullable()
     val updatedAt = timestamp("updated_at")
+
+    /** Server time when ingest last heard from the driver (V23); written by [ExposedFleetPresenceRepository]. */
+    val heardAt = timestamp("heard_at").nullable()
     override val primaryKey = PrimaryKey(driverId)
 }
 
 /**
  * Runs inside the caller's transaction. The list reads `fleet_drivers_last_seen` in order (V20) and stops after one
- * page: keyset paging, so page 50 costs what page 1 costs.
+ * page: keyset paging, so page 50 costs what page 1 costs. "Online" reads `heard_at` (V23), which this class never
+ * writes: [ExposedFleetPresenceRepository] does.
  */
 class ExposedFleetRepository : FleetRepository {
     private val table = FleetDriversTable
@@ -173,12 +177,12 @@ class ExposedFleetRepository : FleetRepository {
 
     override suspend fun counts(onlineSince: Instant): FleetCounts =
         FleetCounts(
-            online = count(table.lastSeenAt greater onlineSince),
+            online = count(table.heardAt greater onlineSince),
             onTrip = count(table.currentTripId.isNotNull()),
             disabled = count(table.enabled eq false),
         )
 
-    // Two indexes answer it together (a BitmapOr): fleet_drivers_updated and fleet_drivers_last_seen.
+    // Two indexes answer it together (a BitmapOr): fleet_drivers_updated and fleet_drivers_heard.
     override suspend fun changedSince(
         since: Instant,
         staleFrom: Instant,
@@ -186,7 +190,7 @@ class ExposedFleetRepository : FleetRepository {
     ): List<FleetDriver> =
         table
             .selectAll()
-            .where { (table.updatedAt greater since) or table.lastSeenAt.between(staleFrom, staleTo) }
+            .where { (table.updatedAt greater since) or table.heardAt.between(staleFrom, staleTo) }
             .map { it.toDriver() }
 
     // The cell size is a literal, not a bind parameter: Postgres matches a GROUP BY expression with the SELECT one by
@@ -221,7 +225,7 @@ class ExposedFleetRepository : FleetRepository {
 }
 
 /** `EXCLUDED.column`: the value the upsert tried to insert. Exposed's `insertValue` gives it only inside `onUpdate`. */
-private class Excluded<T>(
+internal class Excluded<T>(
     private val column: Column<T>,
 ) : Expression<T>() {
     override fun toQueryBuilder(queryBuilder: QueryBuilder) {
@@ -230,7 +234,7 @@ private class Excluded<T>(
 }
 
 /** True when the row has no [stored] time yet, or the upsert brings a later one: the newer-wins rule of the fleet. */
-private fun newerThanStored(stored: Column<Instant?>): Op<Boolean> = stored.isNull() or (stored less Excluded(stored))
+internal fun newerThanStored(stored: Column<Instant?>): Op<Boolean> = stored.isNull() or (stored less Excluded(stored))
 
 /** GREATEST ignores nulls: the newer of two times, either of which may be missing. */
 private fun newerOf(
@@ -245,6 +249,7 @@ private fun count(condition: Op<Boolean>): Int =
         .count()
         .toInt()
 
+// heard_at is left out: the presence flush owns it, and an upsert leaves a column it does not set as it is.
 private fun UpdateBuilder<*>.fill(
     driver: FleetDriver,
     updatedAt: Instant,
@@ -296,6 +301,7 @@ private fun ResultRow.toDriver(): FleetDriver {
                 )
             },
         trip = tripAt?.let { TripState(this[FleetDriversTable.currentTripId], checkNotNull(this[FleetDriversTable.tripStatus]), it) },
+        heardAt = this[FleetDriversTable.heardAt],
     )
 }
 

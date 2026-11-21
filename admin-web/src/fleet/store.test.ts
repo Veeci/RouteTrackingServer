@@ -17,6 +17,14 @@ describe('fleet store (TC-12-FL-01)', () => {
     expect(driversInView(store.getState())).toBe(2);
   });
 
+  it('keeps heardAt from the frame, and a marker without one parses too (fleet lag fix C)', () => {
+    const store = createFleetStore();
+    store.getState().apply(goldenSnapshot);
+
+    expect(store.getState().markers.get(ON_TRIP_ID)?.heardAt).toBe('2026-09-30T02:15:04.500Z');
+    expect(store.getState().markers.get(OFFLINE_ID)?.heardAt).toBeUndefined();
+  });
+
   it('a delta upserts and removes, and keeps the other markers', () => {
     const store = createFleetStore();
     const other = marker(9);

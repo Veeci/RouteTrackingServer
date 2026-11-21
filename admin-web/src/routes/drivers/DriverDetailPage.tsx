@@ -16,6 +16,7 @@ import {
   NONE,
   shortId,
 } from '../../components/format';
+import { PresenceBadge } from '../../components/PresenceBadge';
 import { RequireRole } from '../../components/RequireRole';
 import { AccountActions } from './AccountActions';
 import { CommandsPanel } from './CommandsPanel';
@@ -66,9 +67,7 @@ function DriverView({ detail }: { detail: DriverDetail }) {
         <Stack gap={4}>
           <Title order={2}>{driver.displayName ?? 'Driver without a name'}</Title>
           <Group gap="xs">
-            <Badge color={driver.online ? 'green' : 'gray'} variant="light">
-              {driver.online ? 'Online' : 'Offline'}
-            </Badge>
+            <PresenceBadge online={driver.online} dataAt={driver.position?.at} now={detail.at} />
             <Badge color={isEnabled(detail) ? 'blue' : 'red'} variant="light">
               {isEnabled(detail) ? 'Enabled' : 'Disabled'}
             </Badge>
@@ -149,6 +148,8 @@ function deviceFacts({ driver }: DriverDetail): Fact[] {
   const { device } = driver;
   const facts: Fact[] = [
     { label: 'Last seen', value: driver.lastSeenAt === undefined ? 'Never' : formatDateTime(driver.lastSeenAt) },
+    // The server's own clock: what "online" is judged on.
+    { label: 'Last heard', value: driver.heardAt === undefined ? 'Never' : formatDateTime(driver.heardAt) },
   ];
   if (device === undefined) return [...facts, { label: 'Battery', value: 'No status yet' }];
   return [
