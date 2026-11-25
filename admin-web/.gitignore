@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# The E2E build with the identity provider (12g).
+dist-oidc/
 coverage/
 # Made by `npm run generate` from app/src/main/resources/openapi/rts-v1.yaml.
 generated/

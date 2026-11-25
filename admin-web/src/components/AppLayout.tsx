@@ -4,6 +4,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import type { Role } from '../api/types';
 import { logOut } from '../auth/devLogin';
+import { browser, LOGIN_PATH, logoutUrl } from '../auth/oidc/client';
+import { oidcSettings } from '../auth/oidc/settings';
 import { ADMIN_ONLY, STAFF_ROLES } from '../auth/roles';
 import { sessionStore, useSession } from '../auth/session';
 import { RequireRole } from './RequireRole';
@@ -39,7 +41,16 @@ export function AppLayout() {
   if (session === null) return null;
 
   const onLogOut = () => {
+    const ended = sessionStore.getState().session;
     logOut(sessionStore);
+    if (oidcSettings !== null) {
+      // The provider ends its own session too, then sends the browser back to the login page. Leaving the page drops
+      // the query cache with everything else in memory.
+      void logoutUrl(oidcSettings, ended).then(browser.assign, () => {
+        browser.assign(LOGIN_PATH);
+      });
+      return;
+    }
     // Drop the cached data after the pages have unmounted, so no query refetches without a token.
     void navigate({ to: '/login' }).then(() => {
       queryClient.clear();

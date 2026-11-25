@@ -6,7 +6,7 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default defineConfig(
-  { ignores: ['dist', 'coverage', 'generated', 'playwright-report', 'test-results'] },
+  { ignores: ['dist', 'dist-oidc', 'coverage', 'generated', 'playwright-report', 'test-results'] },
   js.configs.recommended,
   // Type-checked rules: they read the TypeScript types, so they catch a promise nobody awaits
   // (no-floating-promises), an `any` leaking out of a library, and a condition that is always true.
