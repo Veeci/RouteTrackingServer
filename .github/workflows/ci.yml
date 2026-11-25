@@ -31,7 +31,13 @@ jobs:
 
       # The staging deploy scripts (phase 1.5). shellcheck is preinstalled on GitHub's Ubuntu runners.
       - name: Shellcheck
-        run: shellcheck deploy/staging/deploy.sh deploy/staging/backup.sh deploy/staging/smoke-admin-web.sh
+        run: >-
+          shellcheck deploy/staging/deploy.sh deploy/staging/backup.sh deploy/staging/smoke-admin-web.sh
+          deploy/keycloak/check-realms.sh
+
+      # The staging realm must keep the development realm's roles, client and token settings (jq is preinstalled).
+      - name: Keycloak realms agree
+        run: bash deploy/keycloak/check-realms.sh
 
       # Lint (spotless, detekt) + unit, integration (Testcontainers: runners have Docker) and e2e suites.
       - name: Check
@@ -287,12 +293,15 @@ jobs:
             type=raw,value=main,enable={{is_default_branch}}
 
       # load: the smoke test below runs the image before anything is pushed. The SHA goes into version.json, which the
-      # smoke tests compare.
+      # smoke tests compare. On main, the repository variable STAGING_OIDC_ISSUER (the staging Keycloak's realm URL)
+      # turns on the provider login (12g). Unset, or on a pull request, the image keeps the development login.
       - uses: docker/build-push-action@v7
         with:
           context: .
           file: deploy/admin-web/Dockerfile
-          build-args: GIT_SHA=${{ github.sha }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            VITE_OIDC_ISSUER=${{ github.event_name == 'push' && vars.STAGING_OIDC_ISSUER || '' }}
           load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

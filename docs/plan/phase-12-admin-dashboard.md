@@ -1,7 +1,7 @@
 # Phase 12 — Admin Dashboard
 
 Branch: `feat/p12-admin-dashboard` · Depends on: 11 (admin API, fleet socket, tickets), 1.5 for the staging deploy only ·
-Status: **12a to 12d built** (2026-11-20), **12e built** (2026-11-21), **12f built** (2026-11-25, the laptop steps wait for T1b.1 and T1b.6), **12g built** (2026-11-25). The decisions at the end were approved on 2026-11-20,
+Status: **12a to 12d built** (2026-11-20), **12e built** (2026-11-21), **12f built** (2026-11-25, the laptop steps wait for T1b.1 and T1b.6), **12g built** (2026-11-25), **12h built** (2026-11-25, the laptop steps wait for T1b.1 and T1b.6). The decisions at the end were approved on 2026-11-20,
 all as recommended
 
 ## Goal
@@ -284,6 +284,8 @@ Phone with the SDK (anywhere)
       the server, Playwright smoke test against staging, staging guide update. The repository half: the laptop steps
       wait for T1b.1 and T1b.6 (As built 12f).
 - [x] T12.9 (12g) OpenID Connect login with PKCE; RS256 and JWKS verification on the server; role claim mapping.
+- [x] T12.10 (12h) Keycloak in the staging compose file with its own database, the staging realm, the server's issuer
+      and JWKS, the image's build args, backups, guide step 6.7. The repository half (As built 12h).
 
 ## Slices
 
@@ -296,6 +298,7 @@ Phone with the SDK (anywhere)
 | 12e | Trips, trip detail, live trip view | 12a, 12b (12d for the map component) |
 | 12f | Hosting on the staging laptop, deploy, smoke test | 12b to 12e, and staging setup T1b.1 and T1b.6 |
 | 12g | Real login | 12b. Needed before production (10d) |
+| 12h | Keycloak on staging, so the staging dashboard uses 12g's login | 12f, 12g |
 
 12c and 12d are independent and can run in parallel sessions.
 
@@ -961,10 +964,92 @@ without secrets, and it keeps the staff accounts inside the tailnet.
   4174, so the dev-login tests keep their own build. All three `oidc` tests passed locally against Keycloak 26.8.1, a
   server with `OIDC_ISSUER` set and 10 simulated drivers.
 - **Not done here.**
-  - A staging Keycloak service in compose, behind `tailscale serve`, with real accounts. It belongs with 12f's deploy
-    files.
+  - A staging Keycloak service in compose, behind `tailscale serve`, with real accounts. Built in 12h.
   - A silent login on reload (`prompt=none`), which would skip the "Log in" press when the provider session is live.
   - The users table gets no row for provider users. The audit log shows their ids, and the names live in Keycloak.
+
+## As built (12h)
+
+12h runs Keycloak on the staging laptop, so the staging dashboard can use 12g's login. Like 12f, it is the repository
+half: the laptop steps wait for T1b.1 and T1b.6, and step 6.7 of the staging guide holds them. Until that step sets
+`KEYCLOAK_URL` in `/srv/rts/.env` and the repository variable `STAGING_OIDC_ISSUER`, nothing changes on staging.
+
+- **Compose.** Two new services. `keycloak-db` is its own `postgres:16-alpine` with the volume `keycloak-db-data`.
+  - Why not a second database in `db`: the image's init scripts run only on an empty volume, so an existing
+    `db-data` would need a manual `CREATE DATABASE`, and the two would upgrade together.
+  - `keycloak` is `quay.io/keycloak/keycloak:26.8.1`, the version CI tests, run as `start --import-realm`. It
+    publishes `127.0.0.1:8180`, and `tailscale serve --https=8444` is its one entry, tailnet only, like the dashboard
+    on 8443 (D2/H1).
+  - Why its own port and not a `/auth` path behind the dashboard's nginx: Keycloak's cookies and admin console then
+    stay on their own origin, and nginx carries no Keycloak rules.
+  - Plain `start` rebuilds Keycloak's configuration at each start, about 20 s, which spares a custom image.
+- **Hostname and proxy.** `KC_HOSTNAME` is the full URL browsers use. Keycloak writes it into every link and into
+  `iss`, whatever host a request names. `KC_HTTP_ENABLED` and `KC_PROXY_HEADERS=xforwarded` let `tailscale serve`
+  terminate TLS. Only the laptop reaches 8180, so trusting the forwarded headers is safe.
+- **The server.** `OIDC_ISSUER` is `${KEYCLOAK_URL}/realms/rts`, and `OIDC_JWKS` is Keycloak's certs URL at
+  `http://keycloak:8080`, over the compose network. Both use compose's `${VAR:+...}`, so both stay empty without
+  `KEYCLOAK_URL`, and the server accepts dev tokens only, as before. The app has no `depends_on: keycloak`: 12g fetches
+  the keys at the first provider token, and the app must not stop with Keycloak.
+- **The realm.** `deploy/keycloak/staging/rts-realm.json` is the development realm without users, and with
+  `${RTS_ADMIN_WEB_URL}` in its redirect and logout URLs. Keycloak fills the placeholder from the container's
+  environment at import. `check-realms.sh` fails CI when the two files differ in anything else. `--import-realm`
+  creates a missing realm and skips an existing one, so the file seeds the first start, and later changes go to the
+  database through the admin console.
+- **Secrets.** `/srv/rts/.env` gains `KEYCLOAK_URL`, `ADMIN_WEB_URL`, `KC_DB_PASSWORD` and
+  `KC_BOOTSTRAP_ADMIN_PASSWORD`. The compose file reads them with `:-`, not `:?`: compose reads the whole file for
+  every command, and staging without Keycloak must still run. `deploy.sh` checks all four instead, and that
+  `KEYCLOAK_URL` has no path or trailing slash, because the server compares `iss` character by character. The
+  bootstrap admin is temporary. Step 6.7 replaces it with a permanent admin.
+- **Deploy.** When `KEYCLOAK_URL` is set, `deploy.sh` pulls Keycloak and runs `up --wait` on both services before the
+  migration, so a Keycloak that never gets ready stops the deploy before anything changed. Keycloak's tag is pinned
+  in compose, so a rollback leaves it alone. The workflow copies the realm file to `/srv/rts/keycloak/`, and skips the
+  copy for a commit from before 12h.
+- **The health check.** The image has bash but no curl, so the check sends one request to `/health/ready` on port 9000
+  over `/dev/tcp`, and reads the status line. The first version grepped the body for `"UP"`. A DOWN answer holds one
+  too, in its "Graceful Shutdown" check, so compose called Keycloak healthy while it still answered 503 during its
+  bootstrap. The local run caught it: four 503s from the token endpoint right after "Healthy". With the status line,
+  the token endpoint answered 200 at once.
+- **The image.** On `main`, the `Admin web image` job passes `VITE_OIDC_ISSUER` from the repository variable
+  `STAGING_OIDC_ISSUER`. Unset, or on a pull request, the image keeps the development login. The image now names its
+  issuer in `version.json` (`oidcIssuer`). `smoke-admin-web.sh --issuer <url>` then checks that the CSP allows the
+  issuer's origin and that the build logs in there. `deploy.sh` passes `--issuer`, so a dashboard built for another
+  Keycloak fails the deploy and rolls back. A build with the development login passes, because it sends nobody to a
+  wrong login page.
+  - The cost: an image is built for one issuer. Production needs its own build. A runtime `config.json`, filled when
+    the container starts, would let one image serve both. That changes how the app reads its configuration, so it is
+    left for later.
+- **Smoke tests.** The deploy job checks Keycloak's discovery document through port 8444 when `STAGING_OIDC_ISSUER`
+  is set, and fails when its `issuer` differs. The grant for `tag:ci` adds port 8444. TC-12-HOST-04
+  (`e2e/smoke/deployed.spec.ts`) logs in through Keycloak when `RTS_SMOKE_USERNAME` and `RTS_SMOKE_PASSWORD` are set,
+  from the environment secrets `STAGING_SMOKE_USERNAME` and `STAGING_SMOKE_PASSWORD`, and through the dev login
+  otherwise. Console errors count only on the dashboard's own pages, the login callback included, where a CSP block of
+  the token endpoint would show.
+- **Backups.** `backup.sh` also dumps `keycloak-db` when its container exists, into `keycloak-<date>.dump`, with the
+  same copy and 14 days. The realm, the staff accounts and their roles live only in that database. `kc.sh export`
+  was the alternative. It needs a second Keycloak process or a stopped server, and `pg_dump` reuses the tooling of the
+  app's backup. The guide's restore drill restores both.
+- **Tested on the Mac.** The staging `compose.yml` ran with a server image and an `admin-web` image built from this
+  branch, the latter with `VITE_OIDC_ISSUER=http://localhost:8180/realms/rts`. The host ports were moved by an override
+  file, because another local stack held 8080 and 8090. The variables came from the shell, not from a `.env` file.
+  - Keycloak became healthy in 17 s on a fresh volume. The imported client had `http://localhost:18090/auth/callback`
+    and the matching logout URL, PKCE S256, and the realm had no users.
+  - `smoke-admin-web.sh --issuer` passed, and failed with another issuer.
+  - TC-12-HOST-04 logged in through Keycloak as an `rts-operator` account and reached "Live" on the map, which needs
+    the server to accept the RS256 token for the WebSocket ticket. With a wrong password it failed.
+  - A `pg_dump` of `keycloak-db`, restored into a fresh Postgres, held the realm and the account.
+  - Without `KEYCLOAK_URL`, `compose config` gave empty `OIDC_ISSUER` and `OIDC_JWKS` and no warning.
+  - `deploy.sh` and `backup.sh` themselves did not run, because they read `/srv/rts`. HTTPS through `tailscale serve`
+    waits for the laptop.
+- **Steps left on the laptop.** Step 6.7 of the staging guide holds each one.
+  1. The grant for `tag:ci` to port 8444 (step 2.3).
+  2. The four `.env` lines, `tailscale serve --https=8444`, and a redeploy that starts Keycloak.
+  3. A permanent admin in place of `bootstrap-admin`, the staff accounts, and the `smoke` account with its two
+     environment secrets.
+  4. The repository variable `STAGING_OIDC_ISSUER`, and a CI re-run on `main` that builds the dashboard with the real
+     login.
+  5. Check that Keycloak accepts the requests from `tailscale serve` as HTTPS, without "HTTPS required". That depends
+     on `tailscale serve` sending `X-Forwarded-Proto`, which only the laptop can show. Record the result here.
+  6. The Keycloak half of the restore drill (step 8.4).
 
 ## Definition of Done
 

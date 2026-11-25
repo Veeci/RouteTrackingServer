@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Deploys one commit to staging. Runs on Laptop 2 as user deploy:  bash /srv/rts/deploy.sh <full-commit-sha>
 # RTS_DIR names another folder than /srv/rts, for a trial run on a development machine.
-# Order: pull, migrate, start the app, wait for readiness, start the admin dashboard (12f), smoke-test it. If either
-# never gets ready, start the previous versions of both again.
+# Order: pull, start Keycloak if configured, migrate, start the app, wait for readiness, start the admin dashboard
+# (12f), smoke-test it. If either never gets ready, start the previous versions of both again. Keycloak's version is
+# pinned in compose.yml, so a rollback leaves it running as it is.
 set -euo pipefail
 
 NEW_TAG="${1:?usage: deploy.sh <full-commit-sha>}"
@@ -35,7 +36,8 @@ wait_ready() {
 admin_web_ok() {
   for _ in $(seq 1 15); do
     if curl -fsS http://127.0.0.1:8090/healthz > /dev/null 2>&1; then
-      bash ./smoke-admin-web.sh http://127.0.0.1:8090 "${ADMIN_WEB_TAG}"
+      # With Keycloak configured, a dashboard built for another issuer would send operators to the wrong login.
+      bash ./smoke-admin-web.sh ${OIDC_ISSUER:+--issuer "${OIDC_ISSUER}"} http://127.0.0.1:8090 "${ADMIN_WEB_TAG}"
       return
     fi
     sleep 2
@@ -53,6 +55,27 @@ if ! compose pull admin-web; then
   echo "No admin-web image for ${NEW_TAG} (a commit before 12f?). Keeping dashboard ${PREV_ADMIN_TAG:-none}." >&2
   ADMIN_WEB_TAG="${PREV_ADMIN_TAG}"
 fi
+# The identity provider (12g), once /srv/rts/.env sets KEYCLOAK_URL. `up` changes nothing when the container already
+# runs this configuration. --wait blocks until /health/ready answers. A Keycloak that never gets ready stops the
+# deploy here, before anything else changed.
+OIDC_ISSUER=""
+if [ -n "${KEYCLOAK_URL:-}" ]; then
+  for name in KC_DB_PASSWORD KC_BOOTSTRAP_ADMIN_PASSWORD ADMIN_WEB_URL; do
+    if [ -z "${!name:-}" ]; then
+      echo "KEYCLOAK_URL is set, so /srv/rts/.env also needs ${name}" >&2
+      exit 1
+    fi
+  done
+  # compose.yml appends /realms/rts as it is, and the server compares `iss` character by character.
+  if [[ ! "${KEYCLOAK_URL}" =~ ^https?://[^/]+$ ]]; then
+    echo "KEYCLOAK_URL must be a scheme and host with an optional port, without a path or a trailing slash: ${KEYCLOAK_URL}" >&2
+    exit 1
+  fi
+  OIDC_ISSUER="${KEYCLOAK_URL}/realms/rts"
+  compose pull keycloak
+  compose up -d --wait --wait-timeout 300 keycloak-db keycloak
+fi
+
 # --wait blocks until the db healthcheck passes. migrate runs with --no-deps, so depends_on does not wait for it.
 compose up -d --wait db
 

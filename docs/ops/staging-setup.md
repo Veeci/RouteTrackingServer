@@ -5,7 +5,7 @@ no cost. Follow the parts in order. Each step ends with a check, and you should 
 
 | Machine | Hostname | Role |
 |---|---|---|
-| Laptop 2 (i5-4210H, 16 GB) | `rts-staging` | Runs the app and Postgres, serves the public URL |
+| Laptop 2 (i5-4210H, 16 GB) | `rts-staging` | Runs the app, Postgres, the admin dashboard and its Keycloak, serves the public URL |
 | Laptop 1 (16 GB) | `rts-backup` | Keeps nightly database dumps |
 | Your Mac | | Admin access over Tailscale, deploy key generation |
 
@@ -124,8 +124,9 @@ that give each machine only what it needs. Merge these sections into the policy 
   "grants": [
     // You and your own devices reach everything (SSH, metrics, psql through SSH).
     {"src": ["autogroup:member"], "dst": ["*"], "ip": ["*"]},
-    // GitHub Actions deploy jobs reach SSH on the staging laptop, and the dashboard's port 8443 for the smoke test.
-    {"src": ["tag:ci"], "dst": ["tag:staging"], "ip": ["22", "8443"]},
+    // GitHub Actions deploy jobs reach SSH on the staging laptop, the dashboard's port 8443 and Keycloak's port 8444
+    // (phase 12g) for the smoke tests.
+    {"src": ["tag:ci"], "dst": ["tag:staging"], "ip": ["22", "8443", "8444"]},
     // The staging laptop copies backups to the backup laptop over SSH.
     {"src": ["tag:staging"], "dst": ["tag:backup"], "ip": ["22"]},
   ],
@@ -224,7 +225,7 @@ Check: `sudo docker run --rm hello-world` prints "Hello from Docker!".
 ```bash
 sudo adduser --disabled-password --gecos "" deploy
 sudo usermod -aG docker deploy
-sudo mkdir -p /srv/rts/osm /srv/rts/backups
+sudo mkdir -p /srv/rts/osm /srv/rts/backups /srv/rts/keycloak
 sudo chown -R deploy:deploy /srv/rts
 ```
 
@@ -238,9 +239,11 @@ Layout:
 | `/srv/rts/.env` | Secrets, mode 600 |
 | `/srv/rts/compose.yml`, `deploy.sh`, `backup.sh` | Copied in by each deploy |
 | `/srv/rts/current-tag` | The SHA that is running now |
+| `/srv/rts/keycloak/rts-realm.json` | The staging realm, copied in by each deploy. Keycloak imports it once, on its first start |
+| Docker volume `rts-staging_keycloak-db-data` | Keycloak's database: the realm, the staff accounts and their roles |
 | `/srv/rts/osm/hanoi.osm` | The road graph, mounted read-only |
 | Docker volume `rts-staging_osm-cache` | The binary graph cache, `hanoi.graph`, mounted at `/app/data/osm/cache` |
-| `/srv/rts/backups/` | Local dumps, 14 days |
+| `/srv/rts/backups/` | Local dumps, 14 days: `rts-<date>.dump`, and `keycloak-<date>.dump` once Keycloak runs |
 
 ### 3.3 Write the secrets file
 
@@ -325,6 +328,8 @@ off with `sudo tailscale funnel --https=8443 off`: the dashboard must never be p
 
 Until the first deploy starts the `admin-web` container, `https://rts-staging.<tailnet>.ts.net:8443` answers 502.
 
+Keycloak, the staff login of the dashboard, gets a third entry on port 8444 later, in step 6.7.
+
 ### 3.6 Create the deploy key
 
 On your **Mac**, create a key used only by GitHub Actions:
@@ -356,10 +361,11 @@ These files are in the repository. Nothing to type in. Each deploy copies the fi
 
 | File | What it does |
 |---|---|
-| [`deploy/staging/compose.yml`](../../deploy/staging/compose.yml) | The stack: `db` (Postgres 16, no published port), `app` (the image `:<sha>`, public port `127.0.0.1:8080`, admin port `127.0.0.1:8081`, 2 GB limit, the road graph mounted read-only) and `admin-web` (the dashboard's nginx, `:<sha>` from the same commit, `127.0.0.1:8090`). One instance and no Redis: `REDIS_URL` is empty |
-| [`deploy/staging/deploy.sh`](../../deploy/staging/deploy.sh) | `bash /srv/rts/deploy.sh <full-sha>`: pull both images, run `/app/bin/migrate`, start the app, wait up to 180 s for `/health/ready`, start `admin-web` and smoke-test it. If either fails, start the previous tags of both again |
+| [`deploy/staging/compose.yml`](../../deploy/staging/compose.yml) | The stack: `db` (Postgres 16, no published port), `app` (the image `:<sha>`, public port `127.0.0.1:8080`, admin port `127.0.0.1:8081`, 2 GB limit, the road graph mounted read-only) `admin-web` (the dashboard's nginx, `:<sha>` from the same commit, `127.0.0.1:8090`), and `keycloak` with its own `keycloak-db` (phase 12g, pinned to 26.8.1, `127.0.0.1:8180`, started only once `.env` sets `KEYCLOAK_URL`). One instance and no Redis: `REDIS_URL` is empty |
+| [`deploy/staging/deploy.sh`](../../deploy/staging/deploy.sh) | `bash /srv/rts/deploy.sh <full-sha>`: pull both images, start Keycloak if `.env` sets `KEYCLOAK_URL` and wait for it, run `/app/bin/migrate`, start the app, wait up to 180 s for `/health/ready`, start `admin-web` and smoke-test it. If either fails, start the previous tags of both again |
 | [`deploy/staging/smoke-admin-web.sh`](../../deploy/staging/smoke-admin-web.sh) | `bash smoke-admin-web.sh <base-url> [sha]`: the dashboard's files, headers, the worker's MIME type, and a 401 from the admin port through the proxy. `deploy.sh`, the deploy job and CI run it |
-| [`deploy/staging/backup.sh`](../../deploy/staging/backup.sh) | Nightly `pg_dump`, copy to `rts-backup`, keep 14 days on both laptops |
+| [`deploy/staging/backup.sh`](../../deploy/staging/backup.sh) | Nightly `pg_dump` of the app's database, and of Keycloak's when it runs, copy to `rts-backup`, keep 14 days on both laptops |
+| [`deploy/keycloak/staging/rts-realm.json`](../../deploy/keycloak/staging/rts-realm.json) | The staging realm `rts`: the roles, the dashboard's client and the token lifetimes of the development realm, with no users. Its redirect URLs read `ADMIN_WEB_URL` from `.env`. Each deploy copies it to `/srv/rts/keycloak/`. CI's `check-realms.sh` keeps it in step with the development realm |
 | [`.github/workflows/deploy-staging.yml`](../../.github/workflows/deploy-staging.yml) | After CI succeeds on a push to `main`: join the tailnet, copy the files, run `deploy.sh`, smoke-test the dashboard through `tailscale serve` (and in a browser once `STAGING_ACCESS_TOKEN` is set), then a smoke test through Funnel from a second runner and a job summary. `workflow_dispatch` with `image_sha` redeploys any earlier image |
 | [`deploy/admin-web/`](../../deploy/admin-web/) | The dashboard's `Dockerfile` and `nginx.conf`. CI builds `ghcr.io/veeci/route-tracking-admin-web:<sha>` next to the server image |
 
@@ -381,7 +387,10 @@ Points worth knowing:
   show a skipped run.
 - `backup.sh` uses `docker exec rts-staging-db-1`, not `docker compose exec`, because compose would need
   `IMAGE_TAG` to read `compose.yml`.
-- CI runs `shellcheck` on the three scripts.
+- CI runs `shellcheck` on the three scripts and on `deploy/keycloak/check-realms.sh`.
+- Keycloak's version is pinned in `compose.yml`, not tied to the commit. A rollback of the app and the dashboard leaves
+  Keycloak as it is. To upgrade it, change the tag in a pull request and read Keycloak's upgrading guide first: the
+  database schema migrates on the first start of the new version, and only a restore goes back.
 
 A rollback with `workflow_dispatch` to a SHA older than these files fails at the copy step, because that commit has
 no `deploy/staging/` folder. Roll back only to commits after phase 1.5 merged.
@@ -415,6 +424,7 @@ In the repository, open **Settings**, then **Environments**, then **New environm
 | `STAGING_SSH_KEY` | The whole private key: `cat ~/.ssh/rts-staging-deploy` |
 | `STAGING_KNOWN_HOSTS` | `cat ~/rts-staging-known-hosts` |
 | `STAGING_ACCESS_TOKEN` | Optional: the same value as in `/srv/rts/.env`. With it, each deploy also logs in to the dashboard in a real browser (TC-12-HOST-04). Each run adds one OPERATOR user named "Staging smoke" |
+| `STAGING_SMOKE_USERNAME`, `STAGING_SMOKE_PASSWORD` | Only after step 6.7: the Keycloak account `smoke`. With them, the browser smoke test logs in through Keycloak instead of the dev login |
 
 3. Add the variable `STAGING_URL` = `https://rts-staging.<tailnet>.ts.net`, with no trailing slash, as a
    **repository variable**: **Settings**, then **Secrets and variables**, then **Actions**, then the **Variables**
@@ -445,7 +455,11 @@ Do the first deploy manually so that problems show up one at a time.
 On your **Mac**, from the repository root on an up-to-date `main` that includes phase 1.5:
 
 ```bash
-scp -i ~/.ssh/rts-staging-deploy deploy/staging/compose.yml deploy/staging/deploy.sh deploy/staging/backup.sh deploy@rts-staging:/srv/rts/
+scp -i ~/.ssh/rts-staging-deploy deploy/staging/compose.yml deploy/staging/deploy.sh deploy/staging/backup.sh deploy/staging/smoke-admin-web.sh deploy@rts-staging:/srv/rts/
+```
+
+```bash
+scp -i ~/.ssh/rts-staging-deploy deploy/keycloak/staging/rts-realm.json deploy@rts-staging:/srv/rts/keycloak/
 ```
 
 ```bash
@@ -560,6 +574,75 @@ with a note in the phase plan.
 To invite an operator, share the device or invite them to the tailnet (Tailscale admin console, **Users**). The free
 Personal plan limits the number of users, so check the current limit first.
 
+### 6.7 Turn on the staff login (Keycloak, phase 12g)
+
+Until now the dashboard has the development login: a display name, a role and the staging access token. This step
+starts Keycloak on the laptop and builds the dashboard with the real login. Keycloak is reachable from the tailnet
+only, on port 8444, like the dashboard on 8443. Do the steps in this order. Keycloak must run before a dashboard that
+sends operators to it is deployed.
+
+1. Add four lines to the secrets file on Laptop 2. Use your tailnet name, with no trailing slash:
+
+   ```bash
+   sudo -u deploy bash -c 'cat >> /srv/rts/.env' <<EOF
+   KEYCLOAK_URL=https://rts-staging.<tailnet>.ts.net:8444
+   ADMIN_WEB_URL=https://rts-staging.<tailnet>.ts.net:8443
+   KC_DB_PASSWORD=$(openssl rand -hex 24)
+   KC_BOOTSTRAP_ADMIN_PASSWORD=$(openssl rand -hex 24)
+   EOF
+   ```
+
+   `KEYCLOAK_URL` is the address browsers use. Keycloak writes it into every token as the issuer, and the app accepts
+   only tokens whose issuer is `KEYCLOAK_URL/realms/rts`, character for character. `ADMIN_WEB_URL` fills the realm's
+   redirect and logout URLs on the first start.
+
+2. Add Keycloak's tailnet-only entry:
+
+   ```bash
+   sudo tailscale serve --bg --https=8444 http://127.0.0.1:8180
+   tailscale serve status
+   ```
+
+   Check: port 8444 shows `proxy http://127.0.0.1:8180` and is tailnet only. If it says Funnel is on, run
+   `sudo tailscale funnel --https=8444 off`.
+
+3. Deploy the running commit again, with **Deploy staging**, then **Run workflow** and the SHA from
+   `/srv/rts/current-tag`. `deploy.sh` now starts `keycloak-db` and `keycloak` and waits up to 5 minutes for
+   Keycloak's readiness. The first start creates the database schema and imports the realm. The app gets
+   `OIDC_ISSUER`, and still accepts the dev tokens. The dashboard keeps the development login.
+
+   Check: `curl -s https://rts-staging.<tailnet>.ts.net:8444/realms/rts/.well-known/openid-configuration` from the
+   Mac prints JSON whose `issuer` is `KEYCLOAK_URL/realms/rts`.
+
+4. Replace the temporary admin. Open `https://rts-staging.<tailnet>.ts.net:8444/admin` and log in as
+   `bootstrap-admin` with `KC_BOOTSTRAP_ADMIN_PASSWORD`. In the realm **Keycloak master**, open **Users**, create
+   your own user, set a password under **Credentials**, and give it the role `admin` under **Role mapping**. Log out,
+   log in as that user, and delete `bootstrap-admin`. Save the new password in your password manager.
+
+5. Create the staff accounts. Switch to the realm **rts**. For each person: **Users**, then **Add user**, then
+   **Credentials** (a temporary password, so they choose their own), then **Role mapping**, then **Assign role**,
+   **Filter by realm roles**, and `rts-operator` or `rts-admin`. A user with neither role gets "No staff role" on
+   the dashboard.
+
+   Create one more user, `smoke`, with the role `rts-operator` and a long, not temporary password. Add it to the
+   `staging` environment as the secrets `STAGING_SMOKE_USERNAME` and `STAGING_SMOKE_PASSWORD` (step 5.2).
+
+6. Build the dashboard with the real login. Add the **repository variable** `STAGING_OIDC_ISSUER` =
+   `https://rts-staging.<tailnet>.ts.net:8444/realms/rts`, next to `STAGING_URL`. CI reads it when it builds the
+   `admin-web` image on `main`. Then open the last **CI** run on `main` and press **Re-run all jobs**. The rebuilt
+   image deploys when CI passes.
+
+   `deploy.sh` checks the new image: its `version.json` names the issuer it was built with, and the smoke test fails
+   the deploy, and rolls back, if that is not `KEYCLOAK_URL/realms/rts`. The deploy job also asks Keycloak for its
+   discovery document through port 8444.
+
+7. Check it. Open `https://rts-staging.<tailnet>.ts.net:8443`. The login page says "Log in with your staff
+   account". Press **Log in**, log in on Keycloak's page, and the dashboard opens with your name and role. From the
+   phone on mobile data, with Tailscale off, port 8444 does not answer.
+
+To turn the real login off again, delete the variable `STAGING_OIDC_ISSUER` and re-run CI on `main`. The next
+dashboard image has the development login. Keycloak keeps running, and the app keeps accepting both kinds of token.
+
 ---
 
 ## Part 7. Automatic deploys
@@ -635,7 +718,8 @@ On Laptop 2:
 sudo -u deploy bash /srv/rts/backup.sh
 ```
 
-Check: it prints `backup ok`, and `ls /srv/rts-backups` on Laptop 1 shows today's dump. Then schedule it:
+Check: it prints `backup ok`, and `ls /srv/rts-backups` on Laptop 1 shows today's dump. Once Keycloak runs (step
+6.7), it prints a second line for `keycloak-<date>.dump`. Then schedule it:
 
 ```bash
 echo '30 3 * * * /bin/bash /srv/rts/backup.sh >> /srv/rts/backup.log 2>&1' | sudo crontab -u deploy -
@@ -655,6 +739,19 @@ sudo docker exec rts-staging-db-1 dropdb -U rts rts_restore
 
 Check: the count matches the same query against `rts`.
 
+Once Keycloak runs, restore its dump the same way. The staff accounts must be in it:
+
+```bash
+sudo docker exec rts-staging-keycloak-db-1 createdb -U keycloak kc_restore
+sudo docker exec -i rts-staging-keycloak-db-1 pg_restore -U keycloak -d kc_restore --no-owner < /srv/rts/backups/keycloak-$(date +%F).dump
+sudo docker exec rts-staging-keycloak-db-1 psql -U keycloak -d kc_restore -c "select r.name, u.username from user_entity u join realm r on r.id = u.realm_id order by 1, 2"
+sudo docker exec rts-staging-keycloak-db-1 dropdb -U keycloak kc_restore
+```
+
+Check: the list shows your admin in `master` and the staff accounts and `smoke` in `rts`. To restore for real, stop
+`keycloak`, drop and recreate the `keycloak` database, restore into it, and start `keycloak` again. The realm file is
+not imported again, because the realm exists in the restored database.
+
 ---
 
 ## Day-to-day operations
@@ -671,8 +768,10 @@ All commands run on Laptop 2. Reach it with `ssh <your-user>@rts-staging` from a
 | Roll back | GitHub, then Actions, then **Deploy staging**, then **Run workflow** with an older SHA |
 | Restart the app | `sudo -u deploy IMAGE_TAG=$(cat /srv/rts/current-tag) docker compose -p rts-staging -f /srv/rts/compose.yml restart app` |
 | Follow dashboard logs | `sudo docker logs -f rts-staging-admin-web-1` |
+| Follow Keycloak logs | `sudo docker logs -f rts-staging-keycloak-1` |
+| Manage staff accounts | `https://rts-staging.<tailnet>.ts.net:8444/admin`, realm **rts** (step 6.7) |
 | Check the dashboard | `bash /srv/rts/smoke-admin-web.sh http://127.0.0.1:8090` |
-| Dashboard entry state | `tailscale serve status` (8443 must say tailnet only) |
+| Dashboard entry state | `tailscale serve status` (8443 and 8444 must say tailnet only) |
 | Funnel state | `tailscale funnel status` |
 | Pause public access | `sudo tailscale funnel reset`, then `sudo tailscale funnel --bg 8080` to restore |
 | Disk use | `df -h /` and `sudo docker system df` |
@@ -682,7 +781,8 @@ All commands run on Laptop 2. Reach it with `ssh <your-user>@rts-staging` from a
 
 1. Edit `/srv/rts/.env` as `deploy`.
 2. For `JWT_SECRET` or `STAGING_ACCESS_TOKEN`: restart the app. Every issued token stops working, so testers request new ones.
-3. For `DB_PASSWORD`: first change it in Postgres (`sudo docker exec -it rts-staging-db-1 psql -U rts -d rts -c "alter user rts password '<new>'"`), then edit `.env`, then restart the app. The `POSTGRES_PASSWORD` variable only applies when the volume is first created.
+3. For `KC_DB_PASSWORD`: first change it in Keycloak's Postgres (`sudo docker exec -it rts-staging-keycloak-db-1 psql -U keycloak -d keycloak -c "alter user keycloak password '<new>'"`), then edit `.env`, then run `deploy.sh` with the current tag, which recreates the `keycloak` container with the new value. `KC_BOOTSTRAP_ADMIN_PASSWORD` does nothing once `bootstrap-admin` is deleted (step 6.7).
+4. For `DB_PASSWORD`: first change it in Postgres (`sudo docker exec -it rts-staging-db-1 psql -U rts -d rts -c "alter user rts password '<new>'"`), then edit `.env`, then restart the app. The `POSTGRES_PASSWORD` variable only applies when the volume is first created.
 
 ## Troubleshooting
 
@@ -693,6 +793,12 @@ All commands run on Laptop 2. Reach it with `ssh <your-user>@rts-staging` from a
 | Dashboard answers 502 | `admin-web` not running, or the app is down (then `/healthz` works and `/api` fails) | `sudo docker ps`, then the app logs. `curl -s 127.0.0.1:8090/healthz` checks nginx alone |
 | Dashboard loads, but the map stays empty and the console says a module script has a wrong MIME type | An `admin-web` image whose nginx does not map `.mjs` | Run the smoke test. It names the worker file and its type |
 | Deploy job fails at "Admin web through tailscale serve" with a timeout | The `tailscale serve` entry is missing, or the grant for `tag:ci` lacks port 8443 | `tailscale serve status` on the laptop, and step 2.3 |
+| `deploy.sh` stops with "KEYCLOAK_URL is set, so /srv/rts/.env also needs ..." | Step 6.7 added only some of its lines | Add the missing line from step 6.7 |
+| `deploy.sh` times out waiting for `keycloak` | Keycloak's database is not reachable, or its password changed in `.env` only | `sudo docker logs --tail 50 rts-staging-keycloak-1` |
+| "Log in" opens Keycloak's page with "HTTPS required" | Keycloak did not get `X-Forwarded-Proto: https` from `tailscale serve`, so it took the request for plain HTTP from a non-private address (`100.x`) | Update Tailscale on the laptop (`tailscale version`) and check that the 8444 entry targets `http://127.0.0.1:8180`. If it persists, set **Require SSL** to "none" in the realm settings of `master` and `rts`. That is safe here: Keycloak listens only on loopback, and `tailscale serve` already encrypts the connection |
+| Keycloak's page says "Invalid parameter: redirect_uri" | `ADMIN_WEB_URL` was wrong on Keycloak's first start, and the realm kept it | Admin console, realm **rts**, **Clients**, `rts-admin-web`: fix **Valid redirect URIs** and **Valid post logout redirect URIs** |
+| Login works, then every API call answers 401 | The token's issuer is not `OIDC_ISSUER`: `KEYCLOAK_URL` and `STAGING_OIDC_ISSUER` differ | Compare the two. The deploy job's "Keycloak through tailscale serve" step prints the issuer Keycloak uses |
+| Login works, then the dashboard says "No staff role" | The account has neither `rts-operator` nor `rts-admin` | Assign a realm role (step 6.7, item 5) |
 | Public URL does not resolve | Public DNS not out yet, or Funnel off | Wait 10 minutes. Check `tailscale funnel status` |
 | `/health/ready` stays DOWN on `graph` | `hanoi.osm` missing, or a directory instead of a file | `ls -l /srv/rts/osm/`, redo step 3.4, restart the app |
 | Every start takes tens of seconds and logs "Could not write the road graph cache" | The `osm-cache` volume is not writable by the `app` user | Stop the app, `sudo docker volume rm rts-staging_osm-cache`, deploy again so the volume is created from the image |
