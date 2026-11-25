@@ -14,3 +14,10 @@ load-tests
 local.properties
 .env
 deploy/.env
+# admin-web: local installs and build output. The admin-web image installs and builds its own (12f).
+admin-web/node_modules
+admin-web/dist
+admin-web/generated
+admin-web/coverage
+admin-web/playwright-report
+admin-web/test-results

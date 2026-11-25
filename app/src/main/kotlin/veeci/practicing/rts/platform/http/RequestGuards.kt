@@ -36,7 +36,9 @@ fun Application.configureRequestGuards(config: HttpConfig) {
 
     // Behind a proxy on this machine every request comes from loopback. With the flag on, the address the proxy
     // writes into X-Forwarded-For becomes the client's, so the rate limit below counts each client on its own.
-    if (config.trustForwardedHeaders) install(XForwardedHeaders) { trustLoopbackProxiesOnly() }
+    // The admin port trusts its proxy without the flag (phase 12f): only the dashboard's nginx reaches it, from the
+    // compose network, which is not loopback.
+    if (config.trustForwardedHeaders || config.splitsAdminPort) install(XForwardedHeaders) { trustKnownProxiesOnly(config) }
 
     // A bucket of tokens per client IP, refilled every minute; a request costs one token.
     install(RateLimit) {
@@ -48,13 +50,20 @@ fun Application.configureRequestGuards(config: HttpConfig) {
 }
 
 /**
- * Uses the forwarded headers only when the peer is on loopback, that is, a proxy on this machine. A client that
- * connects directly could send any `X-Forwarded-For`, so its headers are ignored. Of a list such as `spoofed, client`,
- * the last entry wins: the trusted proxy appended it, and the entries before it came from the client.
+ * Uses the forwarded headers only from a known proxy. A client that connects directly could send any
+ * `X-Forwarded-For`, so its headers are ignored. Of a list such as `spoofed, client`, the last entry wins: the trusted
+ * proxy appended it, and the entries before it came from the client.
+ *
+ * Two kinds of proxy are known:
+ * - With [HttpConfig.trustForwardedHeaders], a peer on loopback, that is, a proxy on this machine (Funnel, T1b.4).
+ * - With an admin port, any peer that reached that port. Staging publishes it on loopback only, and on the compose
+ *   network only the dashboard's nginx calls it (phase 12f). nginx sends exactly one address, the operator's.
  */
-private fun XForwardedHeadersConfig.trustLoopbackProxiesOnly() {
+private fun XForwardedHeadersConfig.trustKnownProxiesOnly(config: HttpConfig) {
     extractEdgeProxy { origin, headers ->
-        if (isLoopback(origin.remoteAddress)) {
+        val viaAdminPort = config.splitsAdminPort && origin.localPort == config.adminPort
+        val viaLoopbackProxy = config.trustForwardedHeaders && isLoopback(origin.remoteAddress)
+        if (viaAdminPort || viaLoopbackProxy) {
             headers.forHeader.lastEntry()?.let { client ->
                 origin.remoteHost = client
                 origin.remoteAddress = client

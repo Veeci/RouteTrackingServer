@@ -31,7 +31,7 @@ jobs:
 
       # The staging deploy scripts (phase 1.5). shellcheck is preinstalled on GitHub's Ubuntu runners.
       - name: Shellcheck
-        run: shellcheck deploy/staging/deploy.sh deploy/staging/backup.sh
+        run: shellcheck deploy/staging/deploy.sh deploy/staging/backup.sh deploy/staging/smoke-admin-web.sh
 
       # Lint (spotless, detekt) + unit, integration (Testcontainers: runners have Docker) and e2e suites.
       - name: Check
@@ -226,3 +226,61 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # The admin dashboard's image (phase 12f): nginx with the built app. Every PR builds it and runs the static half of
+  # the smoke test against it, which catches a broken nginx config, a missing header and the .mjs MIME type. Pushes to
+  # main also push :<sha> and :main, next to the server image with the same SHA, for deploy.sh.
+  admin-web-image:
+    name: Admin web image
+    needs: admin-web
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write   # push to GHCR (only used on main)
+    env:
+      IMAGE: ghcr.io/veeci/route-tracking-admin-web
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=sha,prefix=,format=long
+            type=raw,value=main,enable={{is_default_branch}}
+
+      # load: the smoke test below runs the image before anything is pushed. The SHA goes into version.json, which the
+      # smoke tests compare.
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/admin-web/Dockerfile
+          build-args: GIT_SHA=${{ github.sha }}
+          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=admin-web
+          cache-to: type=gha,mode=max,scope=admin-web
+
+      - name: Smoke test the image
+        run: |
+          docker run -d --name admin-web -p 127.0.0.1:8090:8080 "$IMAGE:$GITHUB_SHA"
+          curl -fsS --retry 10 --retry-delay 1 --retry-all-errors http://127.0.0.1:8090/healthz
+          bash deploy/staging/smoke-admin-web.sh --static http://127.0.0.1:8090 "$GITHUB_SHA"
+
+      - name: Push
+        if: github.event_name == 'push'
+        run: docker push --all-tags "$IMAGE"

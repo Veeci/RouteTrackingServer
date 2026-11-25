@@ -39,6 +39,8 @@ jobs:
     timeout-minutes: 15
     env:
       SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.image_sha || github.event.workflow_run.head_sha }}
+      # The dashboard's tailnet-only entry (12f): `tailscale serve` on port 8443 of the same name as the Funnel URL.
+      ADMIN_URL: ${{ vars.STAGING_URL }}:8443
     steps:
       # The SHA ends up in a remote shell command, so only a full commit SHA is accepted.
       - name: Check the SHA
@@ -70,10 +72,54 @@ jobs:
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
 
       - name: Copy deploy files
-        run: scp deploy/staging/compose.yml deploy/staging/deploy.sh deploy/staging/backup.sh deploy@rts-staging:/srv/rts/
+        run: >-
+          scp deploy/staging/compose.yml deploy/staging/deploy.sh deploy/staging/backup.sh
+          deploy/staging/smoke-admin-web.sh deploy@rts-staging:/srv/rts/
 
+      # deploy.sh also smoke-tests the dashboard on the laptop, and rolls both images back if it fails.
       - name: Deploy
         run: ssh deploy@rts-staging "bash /srv/rts/deploy.sh $SHA"
+
+      # The same checks from this runner, which is in the tailnet as tag:ci: tailscale serve, its certificate and the
+      # access policy's grant to port 8443. No SHA: a manual deploy of a commit from before 12f keeps an older dashboard.
+      - name: Admin web through tailscale serve
+        run: bash deploy/staging/smoke-admin-web.sh "$ADMIN_URL"
+
+      # TC-12-HOST-04 in a real browser: login, the live map, its worker and the fleet socket. It needs the staging
+      # access token for the dev login, so it runs only once the secret STAGING_ACCESS_TOKEN exists in this environment.
+      - name: Check for the staging token
+        id: token
+        env:
+          STAGING_ACCESS_TOKEN: ${{ secrets.STAGING_ACCESS_TOKEN }}
+        run: echo "present=$([ -n "$STAGING_ACCESS_TOKEN" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v7
+        if: steps.token.outputs.present == 'true'
+        with:
+          node-version-file: admin-web/.nvmrc
+          cache: npm
+          cache-dependency-path: admin-web/package-lock.json
+
+      - name: Browser smoke test
+        if: steps.token.outputs.present == 'true'
+        working-directory: admin-web
+        env:
+          RTS_SMOKE_URL: ${{ env.ADMIN_URL }}
+          RTS_STAGING_TOKEN: ${{ secrets.STAGING_ACCESS_TOKEN }}
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+          npx playwright test
+
+      - name: Upload the browser report
+        if: failure() && steps.token.outputs.present == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: staging-smoke
+          path: |
+            admin-web/playwright-report/
+            admin-web/test-results/
+          retention-days: 7
 
   smoke:
     # A separate job on a fresh runner that is NOT in the tailnet, so the request takes the public Funnel path.
@@ -92,4 +138,6 @@ jobs:
         if: always()
         env:
           SMOKE: ${{ job.status }}
-        run: echo "Staging $STAGING_URL runs \`$SHA\` (smoke $SMOKE)" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          echo "Staging $STAGING_URL runs \`$SHA\` (smoke $SMOKE)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Dashboard (tailnet only): $STAGING_URL:8443" >> "$GITHUB_STEP_SUMMARY"

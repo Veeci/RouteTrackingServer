@@ -49,8 +49,23 @@ services:
       - osm-cache:/app/data/osm/cache
     ports:
       - "127.0.0.1:8080:8080"   # loopback only: Funnel is the one public entry
-      - "127.0.0.1:8081:8081"   # admin port, loopback only and never behind Funnel (12f adds the tailnet-only entry)
+      - "127.0.0.1:8081:8081"   # admin port, loopback only and never behind Funnel. Operators go through admin-web
     mem_limit: 2g               # MaxRAMPercentage=75 in the image gives a 1.5 GB heap
+
+  # The admin dashboard (phase 12f, decision D2/H1): nginx with the built app, proxying /api and /ws to app:8081.
+  # `tailscale serve --bg --https=8443 http://127.0.0.1:8090` makes it reachable from the tailnet only. Built from the
+  # same commit as the app, so deploy.sh moves both together.
+  admin-web:
+    image: ghcr.io/veeci/route-tracking-admin-web:${ADMIN_WEB_TAG:-${IMAGE_TAG:?deploy.sh sets IMAGE_TAG}}
+    restart: unless-stopped
+    # No depends_on: nginx resolves "app" per request, so it starts, and answers /healthz, while the app is down.
+    # The API then answers 502 until the app is up.
+    ports:
+      - "127.0.0.1:8090:8080"   # loopback only: tailscale serve is the one entry, and only for tailnet devices
+    read_only: true             # nginx writes only its pid and proxy buffers, both in /tmp
+    tmpfs:
+      - /tmp
+    mem_limit: 64m
 
 volumes:
   db-data:
