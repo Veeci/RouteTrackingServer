@@ -1,0 +1,63 @@
+{
+  "realm": "rts",
+  "displayName": "RouteTracking staff",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "rememberMe": false,
+  "bruteForceProtected": true,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "roles": {
+    "realm": [
+      {
+        "name": "rts-admin",
+        "description": "Maps to the server's ADMIN role"
+      },
+      {
+        "name": "rts-operator",
+        "description": "Maps to the server's OPERATOR role"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "rts-admin-web",
+      "name": "RouteTracking admin dashboard",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": true,
+      "redirectUris": [
+        "${RTS_ADMIN_WEB_URL}/auth/callback"
+      ],
+      "webOrigins": [
+        "+"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "${RTS_ADMIN_WEB_URL}/login"
+      },
+      "protocolMappers": [
+        {
+          "name": "rts-api audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "rts-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ]
+}

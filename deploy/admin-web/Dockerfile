@@ -14,7 +14,7 @@ RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
 
 # 12g: an issuer turns on the identity provider's login in the build, and csp.ts adds its origin to connect-src in the
 # headers of step 3. Both steps read these, so the page and its policy always agree. Empty, the default, keeps the
-# development login, which staging uses until it runs an identity provider.
+# development login. CI passes the repository variable STAGING_OIDC_ISSUER on main (docs/ops/staging-setup.md).
 ARG VITE_OIDC_ISSUER=
 ARG VITE_OIDC_CLIENT_ID=
 
@@ -26,13 +26,14 @@ RUN npm run generate && npm run build
 # 3) The security headers from csp.ts, the one source of the policy, as nginx lines.
 RUN mkdir -p /out && node csp.ts --nginx > /out/security-headers.conf
 
-# 4) version.json: which commit this is, and where MapLibre's worker landed. The smoke test reads both. The worker is
+# 4) version.json: which commit this is, where MapLibre's worker landed, and which identity provider the build logs in
+#    with (empty: the development login). The smoke test reads all three. The worker is
 #    the one .mjs file of the build, and the build fails here if it is missing or not alone.
 ARG GIT_SHA=dev
 RUN set -eu; \
     worker="$(cd dist && ls assets/*.mjs)"; \
     [ "$(printf '%s\n' "$worker" | wc -l)" -eq 1 ] || { echo "expected one .mjs file in dist/assets, got: $worker" >&2; exit 1; }; \
-    printf '{"sha":"%s","worker":"/%s"}\n' "$GIT_SHA" "$worker" > dist/version.json
+    printf '{"sha":"%s","worker":"/%s","oidcIssuer":"%s"}\n' "$GIT_SHA" "$worker" "$VITE_OIDC_ISSUER" > dist/version.json
 
 # ---- runtime stage ----------------------------------------------------------
 # Runs as user nginx (101) and listens on 8080, so the container needs no root and no privileged port.

@@ -72,9 +72,14 @@ jobs:
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
 
       - name: Copy deploy files
-        run: >-
-          scp deploy/staging/compose.yml deploy/staging/deploy.sh deploy/staging/backup.sh
-          deploy/staging/smoke-admin-web.sh deploy@rts-staging:/srv/rts/
+        run: |
+          scp deploy/staging/compose.yml deploy/staging/deploy.sh deploy/staging/backup.sh \
+            deploy/staging/smoke-admin-web.sh deploy@rts-staging:/srv/rts/
+          # The staging realm (12g), which Keycloak imports on its first start. A commit from before 12g has none.
+          if [ -f deploy/keycloak/staging/rts-realm.json ]; then
+            ssh deploy@rts-staging "mkdir -p /srv/rts/keycloak"
+            scp deploy/keycloak/staging/rts-realm.json deploy@rts-staging:/srv/rts/keycloak/
+          fi
 
       # deploy.sh also smoke-tests the dashboard on the laptop, and rolls both images back if it fails.
       - name: Deploy
@@ -83,15 +88,35 @@ jobs:
       # The same checks from this runner, which is in the tailnet as tag:ci: tailscale serve, its certificate and the
       # access policy's grant to port 8443. No SHA: a manual deploy of a commit from before 12f keeps an older dashboard.
       - name: Admin web through tailscale serve
-        run: bash deploy/staging/smoke-admin-web.sh "$ADMIN_URL"
+        env:
+          OIDC_ISSUER: ${{ vars.STAGING_OIDC_ISSUER }}
+        run: bash deploy/staging/smoke-admin-web.sh ${OIDC_ISSUER:+--issuer "$OIDC_ISSUER"} "$ADMIN_URL"
 
-      # TC-12-HOST-04 in a real browser: login, the live map, its worker and the fleet socket. It needs the staging
-      # access token for the dev login, so it runs only once the secret STAGING_ACCESS_TOKEN exists in this environment.
-      - name: Check for the staging token
+      # Keycloak through its own `tailscale serve` port (8444, 12g), from a tailnet device as browsers reach it. The
+      # discovery document must name the same issuer, or the server rejects every token (`iss` mismatch).
+      - name: Keycloak through tailscale serve
+        if: vars.STAGING_OIDC_ISSUER != ''
+        env:
+          OIDC_ISSUER: ${{ vars.STAGING_OIDC_ISSUER }}
+        run: |
+          got="$(curl -fsS --max-time 10 "$OIDC_ISSUER/.well-known/openid-configuration" | jq -r .issuer)"
+          if [ "$got" != "$OIDC_ISSUER" ]; then
+            echo "::error::Keycloak names the issuer '$got', expected '$OIDC_ISSUER' (check KEYCLOAK_URL in /srv/rts/.env)"
+            exit 1
+          fi
+          echo "Keycloak answers as $got"
+
+      # TC-12-HOST-04 in a real browser: login, the live map, its worker and the fleet socket. The login needs a
+      # credential: the staging access token for the dev login, or a Keycloak account (STAGING_SMOKE_USERNAME and
+      # STAGING_SMOKE_PASSWORD) for a dashboard built with the provider login (12g). It runs once one of them exists.
+      - name: Check for a login credential
         id: token
         env:
           STAGING_ACCESS_TOKEN: ${{ secrets.STAGING_ACCESS_TOKEN }}
-        run: echo "present=$([ -n "$STAGING_ACCESS_TOKEN" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          STAGING_SMOKE_PASSWORD: ${{ secrets.STAGING_SMOKE_PASSWORD }}
+        run: >-
+          echo "present=$([ -n "$STAGING_ACCESS_TOKEN$STAGING_SMOKE_PASSWORD" ] && echo true || echo false)"
+          >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@v7
         if: steps.token.outputs.present == 'true'
@@ -106,6 +131,8 @@ jobs:
         env:
           RTS_SMOKE_URL: ${{ env.ADMIN_URL }}
           RTS_STAGING_TOKEN: ${{ secrets.STAGING_ACCESS_TOKEN }}
+          RTS_SMOKE_USERNAME: ${{ secrets.STAGING_SMOKE_USERNAME }}
+          RTS_SMOKE_PASSWORD: ${{ secrets.STAGING_SMOKE_PASSWORD }}
         run: |
           npm ci --no-audit --no-fund
           npx playwright install --with-deps chromium

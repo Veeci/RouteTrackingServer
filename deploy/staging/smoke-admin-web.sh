@@ -2,17 +2,23 @@
 # Smoke test of the admin dashboard's nginx (phase 12f). Needs only bash and curl.
 #   smoke-admin-web.sh <base-url> [expected-sha]          the whole path: nginx, then the app's admin port
 #   smoke-admin-web.sh --static <base-url> [expected-sha]  nginx alone, for the CI image job (no app behind it)
+#   --issuer <url>  the identity provider staging runs (12g). A dashboard built with another issuer fails. One built
+#                   with none (the development login) passes, because it sends nobody to a wrong login page.
 # Examples:
 #   bash deploy/staging/smoke-admin-web.sh http://127.0.0.1:8090
 #   bash deploy/staging/smoke-admin-web.sh https://rts-staging.<tailnet>.ts.net:8443 "$SHA"
 set -euo pipefail
 
 STATIC=false
-if [ "${1:-}" = "--static" ]; then
-  STATIC=true
-  shift
-fi
-BASE="${1:?usage: smoke-admin-web.sh [--static] <base-url> [expected-sha]}"
+EXPECTED_ISSUER=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --static) STATIC=true; shift ;;
+    --issuer) EXPECTED_ISSUER="${2:?--issuer needs a URL}"; shift 2 ;;
+    *) break ;;
+  esac
+done
+BASE="${1:?usage: smoke-admin-web.sh [--static] [--issuer <url>] <base-url> [expected-sha]}"
 BASE="${BASE%/}"
 EXPECTED_SHA="${2:-}"
 
@@ -56,6 +62,17 @@ sha="$(sed -nE 's/.*"sha":"([^"]*)".*/\1/p' <<< "$version")"
 worker="$(sed -nE 's/.*"worker":"([^"]*)".*/\1/p' <<< "$version")"
 if [ -n "$EXPECTED_SHA" ]; then
   check "version.json names commit ${EXPECTED_SHA} (got '${sha}')" equals "$sha" "$EXPECTED_SHA"
+fi
+
+# 4b. The identity provider the build logs in with (12g). An empty or missing field means the development login.
+issuer="$(sed -nE 's/.*"oidcIssuer":"([^"]*)".*/\1/p' <<< "$version")"
+if [ -n "$issuer" ]; then
+  # csp.ts adds the issuer's origin to connect-src, or the browser blocks the token endpoint.
+  origin="$(sed -nE 's#^(https?://[^/]+).*#\1#p' <<< "$issuer")"
+  check "the CSP allows the identity provider ${origin}" contains "$csp" "$origin"
+  if [ -n "$EXPECTED_ISSUER" ]; then
+    check "the build logs in at ${EXPECTED_ISSUER} (got '${issuer}')" equals "$issuer" "$EXPECTED_ISSUER"
+  fi
 fi
 
 # 5. MapLibre's module worker. The browser refuses it with any MIME type but JavaScript, and the map stays blank.

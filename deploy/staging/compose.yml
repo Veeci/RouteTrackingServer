@@ -42,6 +42,12 @@ services:
       # The admin plane's own port (phase 12a): /api/v1/admin and /ws/v1/admin answer only here, and 8080 answers 404
       # for them, so Funnel never reaches the admin API. Health, dev tokens and the trip routes answer on both ports.
       HTTP_ADMINPORT: "8081"
+      # The admin dashboard's identity provider (12g, the keycloak service below). KEYCLOAK_URL is the URL browsers
+      # use, so it is also the `iss` of every token. Unset, both stay empty and the server accepts dev tokens only.
+      # The JWKS comes over the compose network: the keys are the same at any address, and this one needs no TLS.
+      # No depends_on: the server fetches the keys at the first provider token, and must not stop with Keycloak.
+      OIDC_ISSUER: ${KEYCLOAK_URL:+${KEYCLOAK_URL}/realms/rts}
+      OIDC_JWKS: ${KEYCLOAK_URL:+http://keycloak:8080/realms/rts/protocol/openid-connect/certs}
     volumes:
       - /srv/rts/osm/hanoi.osm:/app/data/osm/hanoi.osm:ro
       # The binary graph cache (slice 6d): a start whose hanoi.osm matches it skips the XML parse. The OSM file stays
@@ -67,6 +73,81 @@ services:
       - /tmp
     mem_limit: 64m
 
+  # The identity provider of the admin dashboard (12g, decision D7). deploy.sh starts these two only when /srv/rts/.env
+  # sets KEYCLOAK_URL. Its own Postgres, so the app's database and Keycloak upgrade apart. backup.sh dumps both.
+  keycloak-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      # ":-" and not ":?": compose reads the whole file for every command, and staging without Keycloak must still run.
+      # deploy.sh checks these secrets before it starts Keycloak.
+      POSTGRES_PASSWORD: ${KC_DB_PASSWORD:-}
+    volumes:
+      - keycloak-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U keycloak -d keycloak"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 256m
+    # No ports: only Keycloak reaches it.
+
+  # `tailscale serve --bg --https=8444 http://127.0.0.1:8180` makes it reachable from the tailnet only, like the
+  # dashboard on 8443 (D2/H1). The version is pinned here, not tied to the commit, so deploy.sh never rolls it back.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.1
+    restart: unless-stopped
+    # start, not start-dev: production mode, with the database below and strict hostname checks. Without
+    # --optimized, Keycloak rebuilds its configuration at each start (about 20 s), which spares us a custom image.
+    # --import-realm creates the realm `rts` on the first start and skips it once it exists. Later changes go through
+    # the admin console and live in the database.
+    command: ["start", "--import-realm"]
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KC_DB_PASSWORD:-}
+      # The URL browsers use. Keycloak writes it into every link and into the tokens' `iss`, whatever host a request
+      # names, so the server's own request to keycloak:8080 still gets the same keys.
+      KC_HOSTNAME: ${KEYCLOAK_URL:-}
+      # tailscale serve terminates TLS and forwards plain HTTP, with X-Forwarded-For and X-Forwarded-Proto. Only the
+      # laptop reaches 8180 (loopback), so trusting those headers is safe.
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      # /health/ready on the management port 9000, for the healthcheck. 9000 is not published.
+      KC_HEALTH_ENABLED: "true"
+      # The first admin of the master realm. Keycloak 26 marks it temporary: the staging guide replaces it with a
+      # permanent admin, after which these two values do nothing.
+      KC_BOOTSTRAP_ADMIN_USERNAME: bootstrap-admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:-}
+      # Read by the realm file's ${RTS_ADMIN_WEB_URL} placeholders: the dashboard's redirect and logout URLs.
+      RTS_ADMIN_WEB_URL: ${ADMIN_WEB_URL:-}
+    volumes:
+      - ./keycloak/rts-realm.json:/opt/keycloak/data/import/rts-realm.json:ro
+    healthcheck:
+      # The image has bash but no curl or wget. This sends one HTTP request over bash's /dev/tcp and reads the status
+      # line: 200 when ready, 503 while Keycloak still bootstraps. Not a grep for "UP" in the body: a DOWN answer
+      # holds one too, in its "Graceful Shutdown" check.
+      test:
+        - CMD-SHELL
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000 &&
+          printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          head -n 1 <&3 | grep -q ' 200 '
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 120s       # the configuration rebuild and the first realm import on this CPU
+    ports:
+      - "127.0.0.1:8180:8080"   # loopback only: tailscale serve on 8444 is the one entry, for tailnet devices
+    mem_limit: 1g               # Keycloak sizes its heap to 70 % of this
+
 volumes:
   db-data:
   osm-cache:
+  keycloak-db-data:
