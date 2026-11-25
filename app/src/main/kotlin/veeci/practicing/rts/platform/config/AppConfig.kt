@@ -162,6 +162,11 @@ data class FleetConfig(
     val maxMarkers: Int = 5_000,
     /** A socket that takes longer than this to accept one message is closed with 1013. */
     val sendTimeout: Duration = 5.seconds,
+    /**
+     * How often each instance writes when it last heard from its drivers (`fleet_drivers.heard_at`, fleet lag fix C):
+     * at most one write per driver per flush. "Online" can lag by this much, well inside `events.staleAfter`.
+     */
+    val heardFlush: Duration = 5.seconds,
 )
 
 /**

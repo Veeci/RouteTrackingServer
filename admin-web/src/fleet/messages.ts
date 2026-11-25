@@ -15,12 +15,15 @@ export const driverMarker = z.object({
   lng: z.number().min(-180).max(180),
   /** Degrees, 0 = north. Absent when the newest fix had no bearing. */
   bearingDeg: z.number().min(0).lt(360).optional(),
-  /** Heard from within the stale time (60 s). */
+  /** The server heard from the driver within the stale time (60 s), by the server's clock (`heardAt`). */
   online: z.boolean(),
   /** The stage of the driver's current trip. Absent when they are not on one. */
   tripStatus: z.string().optional(),
   batteryPct: z.int().min(0).max(100).optional(),
+  /** When the newest position or status was measured, by the phone's clock. Can be old while the driver is online. */
   lastSeenAt: instant,
+  /** When the server last heard from the driver, by the server's clock. Absent until it has. */
+  heardAt: instant.optional(),
 });
 
 /** One grid cell with drivers in it, drawn at the drivers' mean position. */

@@ -262,3 +262,32 @@ describe('TC-12-UI-04: CSV export', () => {
     expect(screen.queryByRole('button', { name: 'Export CSV' })).toBeNull();
   });
 });
+
+describe('fleet lag fix C: an online driver shows how old the position is', () => {
+  it('shows the age next to Online, none next to Offline, and "no position yet" without a position', async () => {
+    const noPosition = fleetDriver(3);
+    delete noPosition.position;
+    server.use(
+      http.get('/api/v1/admin/drivers', ({ response }) =>
+        response(200).json(
+          fleetPage([
+            // Online on the server's clock, with a position the phone measured 3 minutes before the page's `at`.
+            fleetDriver(1, { position: { lat: 21.03, lng: 105.85, at: '2026-11-20T08:27:00Z' } }),
+            fleetDriver(2, { online: false, position: { lat: 21.03, lng: 105.85, at: '2026-11-20T08:00:00Z' } }),
+            noPosition,
+          ]),
+        ),
+      ),
+    );
+    renderApp({ path: '/drivers', session: testSession('OPERATOR') });
+
+    const row = async (name: string) => {
+      const cells = (await screen.findByRole('link', { name })).closest('tr');
+      if (cells === null) throw new Error(`no row for ${name}`);
+      return within(cells);
+    };
+    expect((await row('Driver 1')).getByText('position 3 min old')).toBeInTheDocument();
+    expect((await row('Driver 2')).queryByText(/old$/)).toBeNull();
+    expect((await row('Driver 3')).getByText('no position yet')).toBeInTheDocument();
+  });
+});

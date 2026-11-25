@@ -31,7 +31,7 @@ internal object FleetConditions {
         onlineSince: Instant,
     ): Op<Boolean> =
         listOfNotNull(
-            filter.online?.let { if (it) table.lastSeenAt greater onlineSince else offline(onlineSince) },
+            filter.online?.let { if (it) table.heardAt greater onlineSince else offline(onlineSince) },
             filter.onTrip?.let { if (it) table.currentTripId.isNotNull() else table.currentTripId.isNull() },
             filter.q?.let(::search),
             filter.bbox?.let(::inside),
@@ -57,7 +57,8 @@ internal object FleetConditions {
         }
     }
 
-    private fun offline(onlineSince: Instant): Op<Boolean> = table.lastSeenAt.isNull() or (table.lastSeenAt lessEq onlineSince)
+    /** Online and offline split on the server time ingest last heard from the driver, not on the phone's clock. */
+    private fun offline(onlineSince: Instant): Op<Boolean> = table.heardAt.isNull() or (table.heardAt lessEq onlineSince)
 
     /** Part of the name in any case, with `%` and `_` taken literally; or the whole driver id. */
     private fun search(q: String): Op<Boolean> {

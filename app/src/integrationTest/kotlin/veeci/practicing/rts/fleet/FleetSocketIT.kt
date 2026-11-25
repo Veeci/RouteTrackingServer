@@ -4,6 +4,7 @@ import io.kotest.assertions.throwables.shouldThrowAny
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
@@ -25,6 +26,7 @@ import org.junit.jupiter.api.Test
 import org.koin.ktor.ext.get
 import org.testcontainers.junit.jupiter.Testcontainers
 import veeci.practicing.rts.fleet.FleetFixtures.driver
+import veeci.practicing.rts.fleet.FleetFixtures.flushPresence
 import veeci.practicing.rts.fleet.FleetFixtures.seed
 import veeci.practicing.rts.fleet.application.port.out.FleetRepository
 import veeci.practicing.rts.fleet.domain.FleetDriver
@@ -41,6 +43,7 @@ import veeci.practicing.rts.protocol.ProtocolJson
 import veeci.practicing.rts.protocol.ServerMessage
 import veeci.practicing.rts.protocol.WsCloseCodes
 import veeci.practicing.rts.protocol.WsErrorCodes
+import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.testing.SocketTestApp
 import veeci.practicing.rts.testing.TestTokens
 import veeci.practicing.rts.testing.WS_TICKETS
@@ -48,6 +51,7 @@ import veeci.practicing.rts.testing.plantTicket
 import veeci.practicing.rts.testing.shouldMatchContract
 import veeci.practicing.rts.testing.socketApp
 import veeci.practicing.rts.testing.ticket
+import veeci.practicing.rts.tracking.application.api.DriverHeard
 import java.util.UUID
 import kotlin.random.Random
 import kotlin.time.Clock
@@ -120,6 +124,28 @@ class FleetSocketIT {
                 receiveFleet().shouldBeInstanceOf<FleetSnapshot>().drivers.size shouldBe 1
 
                 nextChange().removes shouldContainExactly listOf(fading.driverId.toString())
+            }
+        }
+
+    @Test
+    fun `a silent driver comes back on an online-only map when ingest hears from them, with no new position`() =
+        socketApp {
+            // The relay is behind: the row's position is 2 minutes old, and so is the last time ingest heard them.
+            val silent = inArea(0.5, 0.5, ago = 2.minutes)
+            application.seed(silent)
+
+            fleet {
+                subscribe(online = true)
+                receiveFleet().shouldBeInstanceOf<FleetSnapshot>().drivers.shouldBeEmpty()
+
+                application.get<DriverHeard>().heard(UserId(silent.driverId), Clock.System.now())
+                application.flushPresence()
+
+                val back = nextChange().upserts.single()
+                back.driverId shouldBe silent.driverId.toString()
+                back.online shouldBe true
+                back.lastSeenAt shouldBe silent.lastSeenAt
+                back.heardAt.shouldNotBeNull()
             }
         }
 

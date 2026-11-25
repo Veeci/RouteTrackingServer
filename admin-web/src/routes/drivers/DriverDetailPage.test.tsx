@@ -445,3 +445,21 @@ describe('the command form (C2)', () => {
     expect(table.getByText('EXPIRED')).toBeInTheDocument();
   });
 });
+
+describe('fleet lag fix C: presence on the driver page', () => {
+  it('shows the position age next to Online, and when the server last heard from the driver', async () => {
+    const detail = driverDetail();
+    server.use(
+      http.get('/api/v1/admin/drivers/{driverId}', ({ response }) =>
+        response(200).json({
+          ...detail,
+          driver: { ...detail.driver, position: { lat: 21.03, lng: 105.85, at: '2026-11-20T08:28:00Z' } },
+        }),
+      ),
+    );
+    renderApp({ path: DETAIL_PATH, session: testSession('OPERATOR') });
+
+    expect(await screen.findByText('position 2 min old')).toBeInTheDocument();
+    expect(screen.getByText('Last heard')).toBeInTheDocument();
+  });
+});

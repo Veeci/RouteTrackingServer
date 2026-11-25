@@ -64,7 +64,7 @@ fun trackingModule(
             )
         }
         single<DeviceStatusSampleRepository> { ExposedDeviceStatusSampleRepository() }
-        single { TrackingService(get(), get(), get(), get(), get(), get(), config.maxFixesPerBatch, get()) }
+        single { TrackingService(get(), get(), get(), get(), get(), get(), config.maxFixesPerBatch, get(), get()) }
         // Presence, read by the trip context's stale-driver job.
         single<DriverPresence> { TrackingPresence(get(), get()) }
         // Where a driver drove, read by the trip context for summaries and history (phase 8).

@@ -9,7 +9,8 @@
       "online": true,
       "tripStatus": "IN_PROGRESS",
       "batteryPct": 64,
-      "lastSeenAt": "2026-09-30T02:15:04.120Z"
+      "lastSeenAt": "2026-09-30T02:15:04.120Z",
+      "heardAt": "2026-09-30T02:15:04.500Z"
     },
     {
       "driverId": "0f8fad5b-d9cb-469f-a165-70867728950e",

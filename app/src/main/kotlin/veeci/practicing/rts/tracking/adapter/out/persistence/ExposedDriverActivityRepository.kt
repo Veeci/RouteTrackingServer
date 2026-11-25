@@ -82,6 +82,17 @@ class ExposedDriverActivityRepository : DriverActivityRepository {
             )
         }
 
+    // tracking_sessions_driver_last_seen (V9) answers it with an index-only scan.
+    override suspend fun latestHeard(): Map<UUID, Instant> =
+        query(
+            """
+            SELECT driver_id, max(last_seen_at) AS heard_at
+            FROM tracking_sessions
+            WHERE driver_id IS NOT NULL
+            GROUP BY driver_id
+            """.trimIndent(),
+        ) { it.getObject("driver_id", UUID::class.java) to it.instant("heard_at") }.toMap()
+
     private fun <T> query(
         sql: String,
         read: (ResultSet) -> T,

@@ -131,5 +131,5 @@ private class SocketSink(
         }
 
     private fun FleetMarker.toMessage() =
-        DriverMarker(driverId.toString(), lat, lng, bearingDeg, online, tripStatus, batteryPct, lastSeenAt)
+        DriverMarker(driverId.toString(), lat, lng, bearingDeg, online, tripStatus, batteryPct, lastSeenAt, heardAt)
 }

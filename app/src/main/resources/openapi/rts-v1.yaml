@@ -706,9 +706,11 @@ paths:
       operationId: listFleetDrivers
       summary: The fleet's drivers, filtered and paged (OPERATOR, ADMIN)
       description: |
-        Every driver of the fleet read model (phase 11), newest seen first, drivers never seen last, then by driver
-        id. The filters combine. `online` is judged at `at`: heard from within the last 60 seconds. Paged by keyset,
-        so a driver who moves between pages is never listed twice on one walk through the pages.
+        Every driver of the fleet read model (phase 11), newest `lastSeenAt` first, drivers never seen last, then by
+        driver id. The filters combine. `online` is judged at `at` on the server's clock: `heardAt` within the last 60
+        seconds. A driver can be online with an old `lastSeenAt` (a slow phone clock, or positions still on their way),
+        so show its age. Paged by keyset, so a driver who moves between pages is never listed twice on one walk through
+        the pages.
       security: [{ bearerAuth: [] }]
       parameters:
         - { name: online, in: query, schema: { type: boolean } }
@@ -759,7 +761,9 @@ paths:
       summary: Every driver as CSV (ADMIN)
       description: |
         The whole driver list in list order, streamed, as RFC 4180 CSV with a header row. Decimals use `.`, an
-        unknown value is an empty cell, and a text cell that starts with `=`, `+`, `-` or `@` gets a leading `'`.
+        unknown value is an empty cell, and a text cell that starts with `=`, `+`, `-` or `@` gets a leading `'`. The
+        columns are driverId, displayName, enabled, online, lastSeenAt, heardAt, lat, lng, speedMps, bearingDeg,
+        batteryPct, isCharging, motion, currentTripId and tripStatus, as in `FleetDriver`.
       security: [{ bearerAuth: [] }]
       responses:
         '200':
@@ -1483,8 +1487,15 @@ components:
         driverId: { type: string, format: uuid }
         displayName: { type: string, description: Absent until the account is known. }
         enabled: { type: boolean }
-        online: { type: boolean, description: Heard from within the last 60 seconds. }
-        lastSeenAt: { type: string, format: date-time, description: The newer of the position and device times. }
+        online: { type: boolean, description: 'heardAt within the last 60 seconds, by the server''s clock.' }
+        lastSeenAt:
+          type: string
+          format: date-time
+          description: The newer of the position and device times, by the phone's clock. It says how old the data is, not whether the driver is online.
+        heardAt:
+          type: string
+          format: date-time
+          description: When the server last accepted data from the driver (a hello, a batch or a device status), by the server's clock. Absent until it has.
         position:
           type: object
           required: [lat, lng, at]
@@ -1570,7 +1581,7 @@ components:
       required: [onlineDrivers, driversOnTrip, activeTrips, disabledDrivers, computedAt]
       additionalProperties: false
       properties:
-        onlineDrivers: { type: integer }
+        onlineDrivers: { type: integer, description: Drivers whose heardAt is within the last 60 seconds. }
         driversOnTrip: { type: integer }
         activeTrips: { type: integer, description: 'Accepted, arrived or in progress.' }
         disabledDrivers: { type: integer }

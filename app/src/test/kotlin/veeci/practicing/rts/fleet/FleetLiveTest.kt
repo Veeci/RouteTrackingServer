@@ -35,6 +35,7 @@ import java.time.Clock
 import java.time.ZoneOffset
 import java.util.UUID
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 import kotlin.time.toJavaInstant
@@ -125,6 +126,53 @@ class FleetLiveTest {
         }
 
     @Test
+    fun `a silent driver comes back online when ingest hears from them, though the relay brought no new position`() =
+        runBlocking<Unit> {
+            val driver = driver(lat = 21.05, lng = 105.85)
+            table.write(driver)
+            val all = RecordingSink()
+            val onlineOnly = RecordingSink()
+            live.open(all).subscribe(MapView(area))
+            live.open(onlineOnly).subscribe(MapView(area, online = true))
+            now += 61.seconds
+            tick()
+            onlineOnly.lastDelta().removes shouldContainExactly listOf(driver.driverId)
+
+            now += 1.seconds
+            table.write(driver.heard())
+            tick()
+
+            val back = all.lastDelta().upserts.single()
+            back.online shouldBe true
+            back.lastSeenAt shouldBe driver.lastSeenAt
+            back.heardAt shouldBe now
+            onlineOnly
+                .lastDelta()
+                .upserts
+                .single()
+                .driverId shouldBe driver.driverId
+        }
+
+    @Test
+    fun `a driver whose phone clock is 2 minutes slow is on the map as online`() =
+        runBlocking<Unit> {
+            val driver = driver(lat = 21.05, lng = 105.85)
+            table.write(driver.copy(position = driver.position!!.copy(at = now - 2.minutes), device = null))
+            val sink = RecordingSink()
+
+            live.open(sink).subscribe(MapView(area, online = true))
+
+            val marker =
+                sink.updates
+                    .single()
+                    .shouldBeInstanceOf<FleetUpdate.Snapshot>()
+                    .markers
+                    .single()
+            marker.online shouldBe true
+            marker.lastSeenAt shouldBe now - 2.minutes
+        }
+
+    @Test
     fun `a crowded area is sent as clusters every tick, and as markers again when it empties`() =
         runBlocking<Unit> {
             live = live(maxMarkers = 2)
@@ -200,9 +248,13 @@ class FleetLiveTest {
         driverId = UUID.randomUUID(),
         position = DriverPosition(lat, lng, 8.0, 90.0, now),
         device = DeviceState(80, false, null, now),
+        heardAt = now,
     )
 
-    private fun FleetDriver.moved(lat: Double) = copy(position = position!!.copy(lat = lat, at = now))
+    private fun FleetDriver.moved(lat: Double) = copy(position = position!!.copy(lat = lat, at = now), heardAt = now)
+
+    /** Ingest heard from the driver now; the relay has not delivered a newer position. */
+    private fun FleetDriver.heard() = copy(heardAt = now)
 
     private class RecordingSink : FleetSink {
         val updates = mutableListOf<FleetUpdate>()
@@ -266,7 +318,7 @@ class FleetLiveTest {
                 throw CancellationException("query cancelled")
             }
             return rows.values
-                .filter { (driver, updatedAt) -> updatedAt > since || driver.lastSeenAt?.let { it in staleFrom..staleTo } == true }
+                .filter { (driver, updatedAt) -> updatedAt > since || driver.heardAt?.let { it in staleFrom..staleTo } == true }
                 .map { it.first }
         }
 

@@ -7,6 +7,7 @@ import veeci.practicing.rts.tracking.application.api.LatestStatus
 import veeci.practicing.rts.tracking.application.api.TelemetrySession
 import veeci.practicing.rts.tracking.application.port.out.DriverActivityRepository
 import java.util.UUID
+import kotlin.time.Instant
 
 class TrackingActivity(
     private val activity: DriverActivityRepository,
@@ -23,4 +24,6 @@ class TrackingActivity(
     override suspend fun latestPositions(): List<LatestPosition> = transactions.inTransaction { activity.latestPositions() }
 
     override suspend fun latestStatuses(): List<LatestStatus> = transactions.inTransaction { activity.latestStatuses() }
+
+    override suspend fun latestHeard(): Map<UUID, Instant> = transactions.inTransaction { activity.latestHeard() }
 }

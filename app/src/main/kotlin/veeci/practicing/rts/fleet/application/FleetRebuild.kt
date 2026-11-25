@@ -1,5 +1,6 @@
 package veeci.practicing.rts.fleet.application
 
+import veeci.practicing.rts.fleet.application.port.out.FleetPresenceRepository
 import veeci.practicing.rts.fleet.application.port.out.FleetRepository
 import veeci.practicing.rts.fleet.domain.DeviceState
 import veeci.practicing.rts.fleet.domain.DriverPosition
@@ -20,7 +21,8 @@ import kotlin.time.toKotlinInstant
  * context through its public API and applies the same newer-wins rules as the event handlers, so the result equals
  * what the events built (TC-11-PRJ-05). Accounts and trip stages go through the rules of [FleetDriver]. Positions and
  * statuses go through the same statements as the event handlers, [FleetRepository.savePositions] and
- * [FleetRepository.saveDevices], so their rule has one implementation. One transaction: the table is emptied and
+ * [FleetRepository.saveDevices], so their rule has one implementation. `heard_at` comes from the sessions' server-time
+ * last-seen through the presence flush's own statements (fleet lag fix C). One transaction: the table is emptied and
  * filled, and the audit row is written, together.
  *
  * The table is emptied first, before reading the sources. Emptying locks it, so an event handler waits until the
@@ -29,6 +31,7 @@ import kotlin.time.toKotlinInstant
  */
 class FleetRebuild(
     private val fleet: FleetRepository,
+    private val presence: FleetPresenceRepository,
     private val accounts: DriverAccounts,
     private val activity: DriverActivity,
     private val trips: DriverTrips,
@@ -74,7 +77,10 @@ class FleetRebuild(
             fleet.insertAll(drivers.values, now)
             fleet.savePositions(positions, now)
             fleet.saveDevices(devices, now)
-            val count = (drivers.keys + positions.keys + devices.keys).size
+            // The table is locked to this transaction, so no row is busy, and create() waits for nobody.
+            val heard = activity.latestHeard()
+            presence.saveHeard(heard, now).missing.forEach { (driver, at) -> presence.create(driver, at, now) }
+            val count = (drivers.keys + positions.keys + devices.keys + heard.keys).size
             audit.record(AuditEntry(actor, "FLEET_REBUILT", "FLEET", "fleet_drivers", details = mapOf("drivers" to count.toString())))
             count
         }

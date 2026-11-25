@@ -14,7 +14,10 @@ data class FleetMarker(
     /** The stage of the current trip; null when the driver is not on one. */
     val tripStatus: String?,
     val batteryPct: Int?,
+    /** When the newest position or status was measured, by the phone's clock. */
     val lastSeenAt: Instant,
+    /** When the server last heard from the driver; [online] is judged on it. Null until it has. */
+    val heardAt: Instant?,
 )
 
 /** A grid cell of the live map with [count] drivers; [lat] and [lng] are their mean position. */
@@ -57,6 +60,7 @@ data class MapView(
             tripStatus = driver.trip?.takeIf { driver.onTrip }?.status,
             batteryPct = driver.device?.batteryPct,
             lastSeenAt = driver.lastSeenAt ?: position.at,
+            heardAt = driver.heardAt,
         )
     }
 

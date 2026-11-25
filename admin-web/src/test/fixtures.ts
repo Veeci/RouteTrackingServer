@@ -37,6 +37,7 @@ export function fleetDriver(n: number, overrides: Partial<FleetDriver> = {}): Fl
     enabled: true,
     online: true,
     lastSeenAt: AT,
+    heardAt: AT,
     position: { lat: 21.03, lng: 105.85, at: AT },
     device: { batteryPct: 80, isCharging: false, at: AT },
     ...overrides,

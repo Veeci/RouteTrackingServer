@@ -149,6 +149,8 @@ batch period seen when idle is that pause with nearly empty batches.
 
 ## How "online" is judged
 
+This section describes the rule before fix C. [After fix C](#after-fix-c) gives the rule now.
+
 `FleetDriver.lastSeenAt` is the newer of the last position's `recordedAt` and the last device status time, both from
 the phone's clock (`FleetDriver.kt:48`). "Online" means `last_seen_at` is later than the server's now minus
 `events.staleAfter`, 60 s (`FleetConditions.kt:34`, `ExposedFleetRepository.kt:105`, `base.conf:38`). The relay
@@ -282,6 +284,69 @@ event here) and the Mac was busier, so compare only runs from the same day.
 
 Not measured: the 5 000-driver run and the 10 100-driver overlap. The work closed before them. T10.7 should measure
 the relay under load, with Postgres on another host, where each saved round trip counts more.
+
+## After fix C
+
+Fix C is on branch `fix/fleet-online-server-clock`, cut from fix A1. "Online" now reads the server's
+clock: `fleet_drivers.heard_at` (V23) within `events.staleAfter` (60 s) of the server's now.
+
+### What heard_at is and who writes it
+
+`heard_at` is the server time when ingest last accepted data from the driver: a hello, a stored batch or a
+device_status. These are the moments that move `tracking_sessions.last_seen_at`, so the admin side and the guest side
+(`DriverPresence`) now judge presence on the same times.
+
+- The tracking context publishes a port, `DriverHeard` (`tracking/application/api/DriverHeard.kt`). `TrackingService`
+  calls it with the same `now` that it writes into the session, inside the ingest transaction. The fleet context
+  implements it, so tracking never imports fleet. This follows the existing rule that another context is reached only
+  through its `application.api`.
+- `FleetPresence` (fleet) only records the newest time per driver in a `ConcurrentHashMap`. The ingest path therefore
+  gains no database write. A worker on every instance flushes the map every `fleet.heardFlush` (5 s): one transaction,
+  each driver written at most once per flush, however many batches it sent. "Online" can lag by up to 5 s.
+- The flush never waits for a row lock. It locks the rows with `FOR UPDATE SKIP LOCKED` and writes only those, then
+  keeps the skipped drivers for the next flush. The relay locks up to 100 rows per transaction in event order, so a
+  flush that waited while it held other rows could deadlock with it. Postgres would then roll back one of the two, and
+  a rolled-back relay batch counts as a failed attempt against its event.
+- A driver with no `fleet_drivers` row gets one from the flush, with only `heard_at` set, in a transaction of its own
+  that holds no other row. The other choice, staying invisible until the relay creates the row, would keep the 12d bug
+  for new drivers: a new simulator run's drivers have no rows, and during a backlog the relay creates those rows last.
+- The flush also moves `updated_at`. The live map's tick reads rows by `updated_at`, so a driver who comes back online
+  is sent again even when the relay brings no new position. Going offline still writes nothing: the tick finds those
+  drivers by `heard_at BETWEEN` the stale window. Both queries have an index (`fleet_drivers_updated`,
+  `fleet_drivers_heard`).
+- A rebuild empties the table, so it sets `heard_at` again from the sessions (`DriverActivity.latestHeard`) with the
+  flush's own statements. V23 does the same once for existing rows, so drivers online at deploy time stay online.
+
+### What stays on last_seen_at
+
+`last_seen_at` keeps the phone's time of the newest position or status. The driver list is still ordered and paged by
+it, with the same index and cursor. Ordering by `heard_at` would change the cursor format, need a second ordered
+index, and reshuffle every online driver every 5 s. The list order now means "freshest data first", which matches what
+each row shows.
+
+### What the fix changes for the three cases
+
+| Case | Before fix C | After fix C |
+|---|---|---|
+| Relay more than 60 s behind | Every driver offline | Online, with an old position |
+| Phone clock more than 60 s slow | That driver offline at all times | Online |
+| Phone uploads fixes queued during Doze | Offline until a fresh fix | Online from the first upload |
+
+A driver can now be online with a position minutes old, so admin-web shows the age next to "Online": "position 3 min
+old" in the list and on the driver page, and "last update 0 s old" in the map panel, whose marker carries only the
+newer of the position and status times. The age uses the server's `at` of the answer, so the browser's clock plays no
+part. With a slow phone clock the age includes the clock's error, which is the honest reading of what the server has.
+
+### Contracts
+
+`heardAt` is next to `lastSeenAt` in `FleetDriver` (driver list and driver detail), in the CSV after `lastSeenAt`, and
+in `DriverMarker` on the fleet socket. It is optional everywhere, so old readers ignore it.
+
+### Not fixed by C
+
+A relay backlog still delays the positions on the map, device commands and trip events, as described in
+[the backlog delays more than the map](#the-backlog-delays-more-than-the-map). C only stops the backlog from hiding
+drivers. A2 or B remain the options for the delay itself. No load run was repeated for C.
 
 ## Relation to the phase 10 capacity work (T10.7)
 

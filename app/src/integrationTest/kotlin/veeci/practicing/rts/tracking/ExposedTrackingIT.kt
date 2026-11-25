@@ -82,6 +82,7 @@ class ExposedTrackingIT : TrackingPersistenceContract() {
                     Clock.fixed((T0 + 1.minutes).toJavaInstant(), ZoneOffset.UTC),
                     maxFixesPerBatch = 100,
                     statusSamples,
+                    heard = { _, _ -> },
                 )
             service.openSession(OpenSession(session.id, session.deviceId, sdkVersion = "0.9.0", driverId = DRIVER))
 

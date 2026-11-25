@@ -1,6 +1,7 @@
 package veeci.practicing.rts.fleet
 
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.post
@@ -14,7 +15,9 @@ import org.junit.jupiter.api.Test
 import org.koin.ktor.ext.get
 import org.testcontainers.junit.jupiter.Testcontainers
 import veeci.practicing.rts.fleet.FleetFixtures.awaitOutboxDrained
+import veeci.practicing.rts.fleet.FleetFixtures.fleetRow
 import veeci.practicing.rts.fleet.FleetFixtures.fleetTable
+import veeci.practicing.rts.fleet.FleetFixtures.flushPresence
 import veeci.practicing.rts.shared.UserId
 import veeci.practicing.rts.testing.TestDatabase
 import veeci.practicing.rts.testing.TestTokens
@@ -34,8 +37,8 @@ import kotlin.time.Duration.Companion.seconds
 
 /**
  * TC-11-PRJ-05: the best single check of the event handlers. Drivers act through the real services (accounts,
- * sessions, fixes, device status, trips, a disable); the relay builds the read model from the events; then a rebuild
- * from the source data must give the same table, column by column.
+ * sessions, fixes, device status, trips, a disable); the relay builds the read model from the events and the presence
+ * flush writes `heard_at`; then a rebuild from the source data must give the same table, column by column.
  */
 @Testcontainers(disabledWithoutDocker = true)
 class FleetRebuildIT {
@@ -71,8 +74,11 @@ class FleetRebuildIT {
             trips.act(cancelled, "cancel", guest).status shouldBe HttpStatusCode.OK
 
             application.awaitOutboxDrained()
+            application.flushPresence()
             val fromEvents = application.fleetTable()
             fromEvents shouldHaveSize 4
+            // heard_at comes from ingest, and the account, trip and disable events after it kept it.
+            listOf(anh, binh).forEach { application.fleetRow(it)?.heardAt.shouldNotBeNull() }
 
             client.post("/api/v1/admin/fleet/rebuild") { bearerAuth(admin) }.bodyAsText() shouldBe """{"drivers":4}"""
 

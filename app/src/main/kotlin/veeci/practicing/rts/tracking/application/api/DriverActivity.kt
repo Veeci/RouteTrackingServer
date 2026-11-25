@@ -20,6 +20,12 @@ interface DriverActivity {
 
     /** The newest device_status sample of every driver that has one. */
     suspend fun latestStatuses(): List<LatestStatus>
+
+    /**
+     * When the server last heard from every driver that has a session: the latest last-seen time over their sessions,
+     * by the server's clock, as [DriverPresence] answers it. The times [DriverHeard] was told, so a rebuild matches.
+     */
+    suspend fun latestHeard(): Map<UUID, Instant>
 }
 
 /** A driver's newest accepted fix. Speed and bearing as stored (4-byte floats), so a rebuild matches the events. */

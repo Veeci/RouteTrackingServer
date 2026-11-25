@@ -15,6 +15,7 @@ import veeci.practicing.rts.fleet.domain.FleetCursor
 import veeci.practicing.rts.fleet.domain.FleetDriver
 import veeci.practicing.rts.platform.http.RequestInvalidException
 import java.util.UUID
+import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 
 /** The fleet's web adapter without a server: query parsing, cursors and CSV rows. */
@@ -68,13 +69,14 @@ class FleetWebTest {
                 displayName = "=HYPERLINK(\"x\"), evil",
                 position = DriverPosition(21.0000001, 105.8, 12.3, null, at),
                 device = DeviceState(80, true, "IN_VEHICLE", at),
+                heardAt = at + 1.seconds,
             )
 
         FleetCsv.header() shouldBe
-            "driverId,displayName,enabled,online,lastSeenAt,lat,lng,speedMps,bearingDeg," +
+            "driverId,displayName,enabled,online,lastSeenAt,heardAt,lat,lng,speedMps,bearingDeg," +
             "batteryPct,isCharging,motion,currentTripId,tripStatus\r\n"
         FleetCsv.row(FleetRow(driver, online = true)) shouldBe
-            "$id,\"'=HYPERLINK(\"\"x\"\"), evil\",true,true,2026-11-17T08:00:00.500Z," +
+            "$id,\"'=HYPERLINK(\"\"x\"\"), evil\",true,true,2026-11-17T08:00:00.500Z,2026-11-17T08:00:01.500Z," +
             "21.0000001,105.8,12.3,,80,true,IN_VEHICLE,,\r\n"
     }
 }
