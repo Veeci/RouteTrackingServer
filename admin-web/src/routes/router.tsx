@@ -43,6 +43,13 @@ const loginRoute = createRoute({
   component: lazyRouteComponent(() => import('./login/LoginPage'), 'LoginPage'),
 });
 
+/** Where the identity provider sends the browser back after a login (12g). Outside the login guard. */
+const callbackRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/auth/callback',
+  component: lazyRouteComponent(() => import('./login/CallbackPage'), 'CallbackPage'),
+});
+
 /** Every page behind the login. Without a session the user goes to the login page and comes back after it. */
 const appRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -112,6 +119,7 @@ const reportsRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
+  callbackRoute,
   appRoute.addChildren([
     overviewRoute,
     mapRoute,

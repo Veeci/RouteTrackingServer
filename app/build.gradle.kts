@@ -66,6 +66,8 @@ dependencies {
     // socketApp: WebSocket tests run on Netty and connect with CIO, as in production.
     testFixturesImplementation(ktorLibs.server.netty)
     testFixturesImplementation(ktorLibs.client.cio)
+    // TestProvider signs RS256 tokens like the identity provider (phase 12g). java-jwt comes with the Ktor JWT plugin.
+    testFixturesImplementation(ktorLibs.server.auth.jwt)
     testFixturesApi(libs.kotlinx.serialization.json)
     testFixturesApi(platform(libs.koin.bom))
     testFixturesApi(libs.koin.ktor)

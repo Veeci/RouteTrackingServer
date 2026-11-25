@@ -12,6 +12,12 @@ WORKDIR /workspace/admin-web
 COPY admin-web/package.json admin-web/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
 
+# 12g: an issuer turns on the identity provider's login in the build, and csp.ts adds its origin to connect-src in the
+# headers of step 3. Both steps read these, so the page and its policy always agree. Empty, the default, keeps the
+# development login, which staging uses until it runs an identity provider.
+ARG VITE_OIDC_ISSUER=
+ARG VITE_OIDC_CLIENT_ID=
+
 # 2) The contract and the sources, then the build. Tests, lint and the typecheck run in the `Admin web` CI job.
 COPY app/src/main/resources/openapi/rts-v1.yaml /workspace/app/src/main/resources/openapi/rts-v1.yaml
 COPY admin-web/ ./

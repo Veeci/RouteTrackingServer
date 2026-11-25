@@ -24,7 +24,8 @@ identified by the token; `deviceId` in `hello` only names the device.
 
 The admin sockets (fleet and trip) take no token. A browser cannot set headers on a WebSocket, and a token in a URL
 ends up in proxy and access logs. The dashboard trades its token for a ticket over REST instead. A ticket is valid 30 s,
-works once and opens either admin socket. Without a valid ticket the upgrade fails with HTTP 401. A ticket of a GUEST
+works once and opens either admin socket. The ticket route accepts both kinds of staff token: the server's own HS256
+token and, since 12g, the identity provider's RS256 token. Without a valid ticket the upgrade fails with HTTP 401. A ticket of a GUEST
 or DRIVER closes the socket with 4403.
 
 When the server has an admin port (`HTTP_ADMINPORT`, phase 12a), the admin sockets answer only there, and the public

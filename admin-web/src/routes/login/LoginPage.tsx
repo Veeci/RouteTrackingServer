@@ -6,6 +6,8 @@ import { api } from '../../api/client';
 import { ApiError } from '../../api/errors';
 import { describeError, type ErrorText } from '../../api/messages';
 import { type LoginInput, logIn } from '../../auth/devLogin';
+import { startLogin } from '../../auth/oidc/client';
+import { type OidcSettings, oidcSettings } from '../../auth/oidc/settings';
 import { safeRedirect } from '../../auth/redirect';
 import { STAFF_ROLES, type StaffRole } from '../../auth/roles';
 import { sessionStore } from '../../auth/session';
@@ -30,8 +32,52 @@ function loginErrorText(error: unknown): ErrorText {
   return describeError(error);
 }
 
-/** The development login (D3). 12g replaces it with an OpenID Connect login. */
+/** The login page: the identity provider's login when the build has one (12g), else the development login (D3). */
 export function LoginPage() {
+  return oidcSettings === null ? <DevLoginForm /> : <ProviderLogin settings={oidcSettings} />;
+}
+
+/**
+ * The real login (12g): one button that sends the browser to the identity provider. It does not go there by itself,
+ * so a user the provider keeps logging in, but the server keeps refusing, is not caught in a loop of redirects.
+ */
+function ProviderLogin({ settings }: { settings: OidcSettings }) {
+  const { redirect } = routeApi.useSearch();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+
+  const onLogIn = () => {
+    setPending(true);
+    setError(null);
+    // On success the browser leaves the page, so only a failure comes back here.
+    startLogin(settings, safeRedirect(redirect)).catch((failure: unknown) => {
+      setPending(false);
+      setError(failure);
+    });
+  };
+
+  return (
+    <Center mih="100vh" p="md">
+      <Paper withBorder shadow="sm" p="xl" w={420} maw="100%">
+        <Stack>
+          <Title order={1} size="h2">
+            Log in
+          </Title>
+          <Text size="sm" c="dimmed">
+            Log in with your staff account.
+          </Text>
+          {error !== null && <ErrorAlert error={error} />}
+          <Button onClick={onLogIn} loading={pending}>
+            Log in
+          </Button>
+        </Stack>
+      </Paper>
+    </Center>
+  );
+}
+
+/** The development login (D3), for a local server, the E2E tests and staging before 12g. */
+function DevLoginForm() {
   const { redirect } = routeApi.useSearch();
   const navigate = useNavigate();
   const [displayName, setDisplayName] = useState('');

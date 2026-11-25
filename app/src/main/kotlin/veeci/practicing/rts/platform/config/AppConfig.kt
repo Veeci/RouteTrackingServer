@@ -16,6 +16,7 @@ data class AppConfig(
     val db: DBConfig,
     val ws: WsConfig,
     val jwt: JwtConfig,
+    val oidc: OidcConfig = OidcConfig(),
     val tracking: TrackingConfig,
     val events: EventsConfig,
     val commands: CommandsConfig = CommandsConfig(),
@@ -97,6 +98,34 @@ data class JwtConfig(
     /** Clock difference between servers that is tolerated when `exp` and `iat` are checked. */
     val leeway: Duration,
 )
+
+/**
+ * The identity provider of the admin dashboard (phase 12g): its RS256 access tokens are accepted next to the server's
+ * own HS256 tokens. An empty [issuer], the default, turns them off. Staff then log in only with the dev login, which
+ * production does not mount. Hoplite maps `OIDC_ISSUER` to [issuer] and `OIDC_ROLECLAIM` to [roleClaim].
+ */
+data class OidcConfig(
+    /** The provider's issuer URL, exactly as it writes `iss`, for example `https://sso.example/realms/rts`. */
+    val issuer: String = "",
+    /** Required in `aud`. The provider must add it (in Keycloak, an audience mapper on the dashboard's client). */
+    val audience: String = "rts-api",
+    /**
+     * Where the server reads the provider's public keys. Empty: Keycloak's path under [issuer]. Set it when the server
+     * reaches the provider at another address than the browser does, for example `http://keycloak:8080/...` in compose.
+     */
+    val jwks: String = "",
+    /** The claim with the user's roles. Dots walk into objects: Keycloak's realm roles are in `realm_access.roles`. */
+    val roleClaim: String = "realm_access.roles",
+    /** The provider's role that maps to ADMIN. ADMIN wins when a user has both. */
+    val adminRole: String = "rts-admin",
+    /** The provider's role that maps to OPERATOR. */
+    val operatorRole: String = "rts-operator",
+) {
+    val enabled: Boolean get() = issuer.isNotBlank()
+
+    /** The JWKS URL the server uses. */
+    val jwksUrl: String get() = jwks.ifBlank { issuer.trimEnd('/') + "/protocol/openid-connect/certs" }
+}
 
 /** Delivery of the events in the outbox to the contexts that react to them. */
 data class EventsConfig(

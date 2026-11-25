@@ -122,6 +122,17 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
 
+      # The identity provider for the real login (12g): Keycloak in dev mode, with the realm, its client and three test
+      # users from deploy/keycloak/rts-realm.json. A step, not a service container, because a service cannot be given
+      # the `start-dev --import-realm` command. It starts while Gradle builds and is waited for before the server.
+      - name: Start Keycloak
+        run: |
+          docker run -d --name keycloak -p 8180:8080 \
+            -e KC_BOOTSTRAP_ADMIN_USERNAME=admin -e KC_BOOTSTRAP_ADMIN_PASSWORD="$(openssl rand -hex 16)" \
+            -e KC_HOSTNAME=http://localhost:8180 \
+            -v "$PWD/deploy/keycloak:/opt/keycloak/data/import:ro" \
+            quay.io/keycloak/keycloak:26.8.1 start-dev --import-realm
+
       - name: Build the server and the simulator
         run: ./gradlew :app:installDist :tools:simulator:installDist
 
@@ -141,7 +152,12 @@ jobs:
           HTTP_RATELIMITPERMINUTE: "3000"
           ROUTING_GRAPHPATH: app/src/testFixtures/resources/graphs/saigon_test_grid.osm
           ROUTING_GRAPHCACHEDIR: ""
+          # RS256 tokens from Keycloak next to the HS256 dev tokens. The dev login still works, so every other test is
+          # unchanged.
+          OIDC_ISSUER: http://localhost:8180/realms/rts
         run: |
+          curl -fsS --retry 60 --retry-delay 2 --retry-all-errors \
+            http://localhost:8180/realms/rts/.well-known/openid-configuration > /dev/null
           JWT_SECRET="$(openssl rand -hex 32)" nohup app/build/install/app/bin/app > server.log 2>&1 &
           curl -fsS --retry 30 --retry-delay 2 --retry-all-errors http://localhost:8080/health/ready
 
@@ -170,7 +186,14 @@ jobs:
       # test answers the tile host's requests itself, so the job never depends on OpenFreeMap.
       - name: E2E
         working-directory: admin-web
+        env:
+          # Turns on the `oidc` project: a second build with the real login, on port 4174 (12g).
+          RTS_E2E_OIDC_ISSUER: http://localhost:8180/realms/rts
         run: npm run e2e
+
+      - name: Keep Keycloak's log
+        if: failure()
+        run: docker logs keycloak > keycloak.log 2>&1 || true
 
       - name: Upload the report
         if: failure()
@@ -182,6 +205,7 @@ jobs:
             admin-web/test-results/
             server.log
             simulator.log
+            keycloak.log
           retention-days: 7
 
   image:

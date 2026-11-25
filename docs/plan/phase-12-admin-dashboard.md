@@ -1,7 +1,7 @@
 # Phase 12 — Admin Dashboard
 
 Branch: `feat/p12-admin-dashboard` · Depends on: 11 (admin API, fleet socket, tickets), 1.5 for the staging deploy only ·
-Status: **12a to 12d built** (2026-11-20), **12e built** (2026-11-21), **12f built** (2026-11-25, the laptop steps wait for T1b.1 and T1b.6), 12g planned. The decisions at the end were approved on 2026-11-20,
+Status: **12a to 12d built** (2026-11-20), **12e built** (2026-11-21), **12f built** (2026-11-25, the laptop steps wait for T1b.1 and T1b.6), **12g built** (2026-11-25). The decisions at the end were approved on 2026-11-20,
 all as recommended
 
 ## Goal
@@ -283,7 +283,7 @@ Phone with the SDK (anywhere)
 - [x] T12.8 (12f) `admin-web` image in CI, staging compose service, `tailscale serve` entry, deploy and rollback with
       the server, Playwright smoke test against staging, staging guide update. The repository half: the laptop steps
       wait for T1b.1 and T1b.6 (As built 12f).
-- [ ] T12.9 (12g) OpenID Connect login with PKCE; RS256 and JWKS verification on the server; role claim mapping.
+- [x] T12.9 (12g) OpenID Connect login with PKCE; RS256 and JWKS verification on the server; role claim mapping.
 
 ## Slices
 
@@ -310,6 +310,8 @@ Phone with the SDK (anywhere)
 | TC-12-API-02 | Component | A 401 on any query sends the user to login and back to the same page after login | P0 |
 | TC-12-AUTH-01 | Unit | The token is re-minted one minute before expiry with the same `userId` (fake timers) | P0 |
 | TC-12-AUTH-02 | Component | OPERATOR sees no ADMIN-only button; a 403 from the server shows "no permission" | P0 |
+| TC-12-AUTH-03 | API | 12g: a provider RS256 token with a staff role works; a wrong issuer or audience, an expired token or an unknown `kid` gets 401; a valid token without a staff role gets 403 `NO_STAFF_ROLE` | P0 |
+| TC-12-AUTH-04 | Unit | 12g: the PKCE login sends only the challenge, checks `state`, trades a code once, and refreshes with the refresh token | P0 |
 | TC-12-FL-01 | Unit | Store: snapshot replaces, delta upserts and removes, cluster clears markers, a new snapshot after cluster restores markers | P0 |
 | TC-12-FL-02 | Unit | Client: close then reconnect fetches a new ticket and resubscribes with the current area (fake timers, fake socket) | P0 |
 | TC-12-FL-03 | Unit | Close 4403 stops reconnecting; close 1013 reconnects at once | P1 |
@@ -323,6 +325,9 @@ Phone with the SDK (anywhere)
 | TC-12-E2E-02 | E2E | ADMIN disables a driver from the detail page; the audit page shows `DRIVER_DISABLED` with the reason | P0 |
 | TC-12-E2E-03 | E2E | ADMIN sends a command; its status reaches APPLIED while the simulated driver is connected | P1 |
 | TC-12-E2E-04 | E2E | OPERATOR cancels a trip; the trip shows CANCELLED and the live view ends | P1 |
+| TC-12-E2E-06 | E2E | 12g: OPERATOR logs in through Keycloak, the API and the live map work with the provider's token, logout ends the provider session | P0 |
+| TC-12-E2E-07 | E2E | 12g: ADMIN logs in through Keycloak and opens the audit page | P1 |
+| TC-12-E2E-08 | E2E | 12g: an account without a staff role is told so and not logged in | P1 |
 | TC-12-PERF-01 | Manual | 5 000 simulated drivers in view: the map stays above 30 frames a second on the Mac while deltas arrive | P1 |
 | TC-12-SEC-01 | E2E | Production build: the Content Security Policy blocks an inline script; no request goes to a host outside the allowed list | P1 |
 | TC-12-HOST-01 | Manual | From a device outside the tailnet, port 8443 does not answer, and the Funnel URL answers 404 for `/api/v1/admin/overview` | P0 |
@@ -811,8 +816,10 @@ the tests.
 - **One source for the security headers.** `node csp.ts --nginx` prints the headers of `securityHeaders` as nginx
   `add_header ... always` lines, and the image includes them in every static `location`. An `add_header` inside a
   location drops every one from outer levels, so the server block holds none. Proxied API responses get no headers
-  from nginx, so no header comes twice. When 12g adds the identity provider's origin to `connect-src` in `csp.ts`, the
-  next image sends it with no change here.
+  from nginx, so no header comes twice. The Dockerfile takes 12g's `VITE_OIDC_ISSUER` and `VITE_OIDC_CLIENT_ID` as
+  build args. The build and `node csp.ts --nginx` both read them, so the provider login and its origin in
+  `connect-src` come together. CI passes neither, so the staging image keeps the development login until staging
+  runs an identity provider (12g, "Not done here").
 - **nginx (`deploy/admin-web/nginx.conf`).**
   - `.mjs` is mapped to `application/javascript` in a second `types` block at http level. The stock `mime.types` of
     nginx 1.30.6 maps `.js` only, and the browser refuses a module worker of any other type. Without the mapping the
@@ -880,6 +887,85 @@ the tests.
   7. The Definition of Done's 500 simulated drivers on the staging map. That needs the simulator's `--admin-url`
      (As built 12a).
 
+## As built (12g)
+
+The user chose Keycloak for D7 on 2026-11-25. Keycloak is the only option that lets the E2E job test the real login
+without secrets, and it keeps the staff accounts inside the tailnet.
+
+- **The server accepts two kinds of token.** `ProviderTokens` (`platform/security/ProviderTokens.kt`) checks RS256
+  tokens against the provider's JWKS with `com.auth0:jwks-rsa`, which comes with `ktor-server-auth-jwt`. It checks
+  `iss`, `aud` (`rts-api`) and `exp` with the same 30 s leeway as the HS256 tokens. `configureAuthentication` picks the
+  verifier from the token's `alg` and `iss`. The chosen verifier then checks everything again with its own key and
+  algorithm. So an HS256 token that claims the provider's issuer meets the RS256 verifier and fails, and the reverse
+  fails the same way. A test covers the first case.
+- **Keys are cached.** Up to 10 keys are kept for 24 hours. An unknown `kid` costs one fetch of the JWKS, so a key
+  rotation needs no restart. Fetches are limited to 10 a minute, so forged `kid` values cannot make the server flood
+  the provider. A fetch times out after 2 s. A key the server cannot get is a failed signature check, so the answer
+  is 401.
+- **Role mapping.** `OIDC_ROLECLAIM` (default `realm_access.roles`) names the claim, and dots walk into objects.
+  `rts-admin` maps to ADMIN and `rts-operator` to OPERATOR. ADMIN wins when a user has both. A valid token without
+  either role gets **403 `NO_STAFF_ROLE`, not 401**. A 401 would send the dashboard to the login page, the provider's
+  live session would log the user straight back in, and the browser would loop. The challenge reads a call attribute
+  that `validate` sets, so Ktor's one challenge function answers both cases.
+- **User ids.** A provider's `sub` need not be a UUID, so the server's `UserId` is a version 5 UUID of
+  `issuer#subject`. The same person gets the same id on every login, with no lookup table. The audit log stores only
+  ids, so nothing else changed. A test pins the value against Python's `uuid.uuid5`.
+- **Config.** `OidcConfig` with `OIDC_ISSUER` (empty turns RS256 off), `OIDC_AUDIENCE`, `OIDC_JWKS` (empty means
+  Keycloak's path under the issuer), `OIDC_ROLECLAIM`, `OIDC_ADMINROLE` and `OIDC_OPERATORROLE`. `OIDC_JWKS` exists
+  for compose, where the server reaches Keycloak at another address than the browser.
+- **The tickets needed no change.** `POST /api/v1/admin/ws-tickets` reads the `Actor`, and a provider token gives the
+  same `Actor`. A test gets a ticket with a provider token and opens the fleet socket with it.
+- **No dev route in production.** `Application.kt` already mounts `/api/v1/dev/tokens` only in dev, test and staging.
+  `StagingGateIT` "TC-1b-GATE-03 in prod the route does not exist" pins it.
+- **The browser flow is written out, not taken from a library** (`src/auth/oidc/client.ts`). It is four exchanges:
+  discovery, the redirect to `/authorize`, the code exchange, and the refresh. Each is short and tested. A library such
+  as `oidc-client-ts` would add a dependency and its own storage rules for little gain here.
+  - `startLogin` keeps `state`, the PKCE verifier and the redirect target in `sessionStorage` and sends only the S256
+    challenge. `finishLogin` reads and removes them, so a callback works once, and a `state` from another tab fails.
+  - The tokens stay in memory, like the dev login's. A reload means pressing "Log in" again, and Keycloak's session
+    cookie usually completes it without the password. The login page never redirects on its own, so a user the server
+    refuses cannot loop.
+  - The re-mint loop of 12b now calls `refreshSession` in a provider build. Keycloak rotates the refresh token, so each
+    refresh stores the new one. `invalid_grant` becomes a 401, which opens the login page. A network error becomes
+    status 0, which retries after 15 s.
+  - The callback page keeps one exchange per URL in a module map. StrictMode runs effects twice in development, and a
+    second exchange of the same code would fail with `invalid_grant`. A test renders under StrictMode, and it fails
+    without the map.
+  - "Log out" also ends Keycloak's session through `end_session_endpoint` with `id_token_hint`. Without that, the next
+    "Log in" would sign the same person in again at once.
+  - The app reads name and role from the access token without checking the signature. The server checks it. The role
+    names are constants that match the server's defaults.
+- **Which login a build has.** `VITE_OIDC_ISSUER` (and `VITE_OIDC_CLIENT_ID`, default `rts-admin-web`) at build time
+  turns on the provider login. Without it the build keeps the dev login, which local development and the other E2E
+  tests use. Staging and production are separate builds.
+- **CSP.** `csp.ts` adds the issuer's origin to `connect-src` when `VITE_OIDC_ISSUER` is set, because the app fetches
+  the discovery document and the token endpoint. The login and logout pages are navigations, which `connect-src` does
+  not govern. 12f's nginx image prints the policy with `node csp.ts --nginx`, and its Dockerfile passes the same
+  build arg to both steps (As built 12f).
+- **Keycloak.** `deploy/keycloak/rts-realm.json` holds the realm `rts`, the two roles, the public client
+  `rts-admin-web` (PKCE S256 required, an audience mapper for `rts-api`), 5-minute access tokens, and three test users.
+  `deploy/keycloak/README.md` lists what a staging realm must change first. Keycloak is pinned to 26.8.1.
+- **Tests.**
+
+  | Case | Where |
+  |---|---|
+  | TC-12-AUTH-03 | `ProviderTokenIT`: valid, ADMIN-only route, wrong issuer, wrong audience, expired, unknown `kid` with a second JWKS fetch, a forged signature under a known `kid`, no staff role (403), HS256 with the provider's issuer, HS256 dev tokens still work, the ticket and the fleet socket, no provider without `OIDC_ISSUER`. `TestProvider` serves a JWKS on a local port |
+  | Role mapping and ids | `ProviderTokensTest` |
+  | TC-12-AUTH-04 | `src/auth/oidc/client.test.ts`, with RFC 7636's S256 example |
+  | Login, callback, logout pages | `src/routes/login/providerLogin.test.tsx` |
+  | TC-12-E2E-06 to 08 | `e2e/oidc.spec.ts`, in the `oidc` Playwright project |
+
+- **The E2E job** starts Keycloak with `docker run` before the build, because a service container cannot take the
+  `start-dev --import-realm` command. The server gets `OIDC_ISSUER`, and `RTS_E2E_OIDC_ISSUER` turns on the `oidc`
+  project. That project builds the app a second time with `VITE_OIDC_ISSUER` into `dist-oidc` and serves it on port
+  4174, so the dev-login tests keep their own build. All three `oidc` tests passed locally against Keycloak 26.8.1, a
+  server with `OIDC_ISSUER` set and 10 simulated drivers.
+- **Not done here.**
+  - A staging Keycloak service in compose, behind `tailscale serve`, with real accounts. It belongs with 12f's deploy
+    files.
+  - A silent login on reload (`prompt=none`), which would skip the "Log in" press when the provider session is live.
+  - The users table gets no row for provider users. The audit log shows their ids, and the names live in Keycloak.
+
 ## Definition of Done
 
 - An operator in the tailnet opens the staging dashboard, logs in, and sees 500 simulated drivers moving on the map.
@@ -900,5 +986,5 @@ the tests.
 | D4 | Component library | Mantine | shadcn/ui with Tailwind |
 | D5 | Router | TanStack Router (typed search params) | React Router |
 | D6 | Map tiles | OpenFreeMap (free, no key) | Protomaps tiles of Hanoi, served by the same nginx: no third party, but a build step for the tile file |
-| D7 | Identity provider for 12g | Decide at 12g. Keycloak on the laptop keeps everything self-hosted | A hosted provider (Auth0, Clerk or Zitadel): no server to run, but a third party holds the staff accounts |
+| D7 | Identity provider for 12g | Keycloak, self-hosted (chosen 2026-11-25 at 12g) | A hosted provider (Auth0, Clerk or Zitadel): no server to run, but a third party holds the staff accounts |
 | D8 | Live trip view for staff | A new `/ws/v1/admin/trip` socket with tickets | Let staff use `/ws/v1/guest`, which would need tickets there too and mixes two audiences on one socket |

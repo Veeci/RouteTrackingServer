@@ -10,6 +10,10 @@ export interface Session {
   displayName: string;
   /** Epoch milliseconds. */
   expiresAt: number;
+  /** The identity provider's refresh token (12g). The dev login has none: it re-mints with the staging token. */
+  refreshToken?: string;
+  /** The provider's ID token, sent back on logout so the provider knows whose session to end (12g). */
+  idToken?: string;
 }
 
 export interface SessionState {

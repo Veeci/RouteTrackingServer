@@ -1,0 +1,85 @@
+{
+  "realm": "rts",
+  "displayName": "RouteTracking staff",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "rememberMe": false,
+  "bruteForceProtected": true,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "roles": {
+    "realm": [
+      { "name": "rts-admin", "description": "Maps to the server's ADMIN role" },
+      { "name": "rts-operator", "description": "Maps to the server's OPERATOR role" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "rts-admin-web",
+      "name": "RouteTracking admin dashboard",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": true,
+      "redirectUris": ["http://localhost:5173/auth/callback", "http://localhost:4174/auth/callback"],
+      "webOrigins": ["+"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:5173/login##http://localhost:4174/login"
+      },
+      "protocolMappers": [
+        {
+          "name": "rts-api audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "rts-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "operator",
+      "firstName": "Olive",
+      "lastName": "Operator",
+      "email": "operator@rts.test",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "operator-dev-only", "temporary": false }],
+      "realmRoles": ["default-roles-rts", "rts-operator"]
+    },
+    {
+      "username": "admin",
+      "firstName": "Ada",
+      "lastName": "Admin",
+      "email": "admin@rts.test",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "admin-dev-only", "temporary": false }],
+      "realmRoles": ["default-roles-rts", "rts-admin"]
+    },
+    {
+      "username": "nobody",
+      "firstName": "Nora",
+      "lastName": "Nobody",
+      "email": "nobody@rts.test",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "nobody-dev-only", "temporary": false }],
+      "realmRoles": ["default-roles-rts"]
+    }
+  ]
+}

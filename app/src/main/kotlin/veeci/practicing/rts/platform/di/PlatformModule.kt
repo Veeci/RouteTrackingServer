@@ -31,6 +31,7 @@ import veeci.practicing.rts.platform.observability.HealthRegistry
 import veeci.practicing.rts.platform.redis.RedisConnections
 import veeci.practicing.rts.platform.redis.RedisHealthIndicator
 import veeci.practicing.rts.platform.security.AccessTokens
+import veeci.practicing.rts.platform.security.ProviderTokens
 import veeci.practicing.rts.platform.security.WsTickets
 import veeci.practicing.rts.platform.ws.WsSessionRegistry
 import veeci.practicing.rts.platform.ws.WsSessionRunner
@@ -88,6 +89,8 @@ fun platformModule(
 
         // Built at startup, so a missing or short JWT_SECRET stops the app before it serves anything.
         single(createdAtStart = true) { AccessTokens(config.jwt, get()) }
+        // The identity provider's RS256 tokens (phase 12g), only when OIDC_ISSUER is set. Keys load on first use.
+        if (config.oidc.enabled) single { ProviderTokens(config.oidc, get(), config.jwt.leeway) }
         // Single-use tickets for the admin fleet socket (phase 11c).
         single { WsTickets(get(), get()) }
 
