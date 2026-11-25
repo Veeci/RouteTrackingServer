@@ -87,14 +87,16 @@ private fun verifierFor(
     tokens: AccessTokens,
     provider: ProviderTokens?,
 ): JWTVerifier {
-    if (provider == null || header !is HttpAuthHeader.Single) return tokens.verifier
     val decoded =
-        try {
-            JWT.decode(header.blob)
-        } catch (_: JWTDecodeException) {
-            return tokens.verifier
+        (header as? HttpAuthHeader.Single)?.let {
+            try {
+                JWT.decode(it.blob)
+            } catch (_: JWTDecodeException) {
+                null
+            }
         }
-    return if (decoded.algorithm == "RS256" && decoded.issuer == provider.issuer) provider.verifier else tokens.verifier
+    val fromProvider = provider != null && decoded?.algorithm == "RS256" && decoded.issuer == provider.issuer
+    return if (fromProvider) checkNotNull(provider).verifier else tokens.verifier
 }
 
 /**

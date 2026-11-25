@@ -98,7 +98,9 @@
 
 ## Security
 
-- JWT (HS256 in dev, RS256/JWKS-ready interface): verify `iss`, `aud`, `exp` with 30 s leeway; roles from claims.
+- JWT: the server's own HS256 tokens, and since phase 12g the identity provider's RS256 tokens, checked against its
+  JWKS (`ProviderTokens`). Both verify `iss`, `aud`, `exp` with 30 s leeway; roles from claims. A provider token
+  without a staff role gets 403 `NO_STAFF_ROLE`.
 - Least privilege per endpoint; an **authorization matrix test** covers every route × role.
 - Input limits: body size limit, WS frame limit, batch size limit, rate limits per principal.
 - No secrets in logs; tokens redacted; coordinates logged only at DEBUG (location is personal data).

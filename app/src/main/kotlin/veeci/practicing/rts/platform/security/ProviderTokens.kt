@@ -55,15 +55,15 @@ class ProviderTokens(
 
     /** The caller a verified token speaks for, or null when it has no staff role (or no subject). */
     fun actorOf(token: Payload): Actor? {
-        val subject = token.subject?.takeIf { it.isNotBlank() } ?: return null
+        val subject = token.subject?.takeIf { it.isNotBlank() }
         val roles = rolesIn(token)
         val role =
             when {
                 config.adminRole in roles -> Role.ADMIN
                 config.operatorRole in roles -> Role.OPERATOR
-                else -> return null
+                else -> null
             }
-        return Actor(userIdOf(subject), role)
+        return if (subject != null && role != null) Actor(userIdOf(subject), role) else null
     }
 
     /**
@@ -110,19 +110,25 @@ class ProviderTokens(
                 .timeouts(TIMEOUT_MS, TIMEOUT_MS)
                 .build()
 
+        // The version sits in bits 12 to 15 of the high half, the variant in the two top bits of the low half.
+        private const val VERSION_BITS = 0xF000L
+        private const val VERSION_5 = 0x5000L
+        private const val VARIANT_BITS = -0x4000000000000000L // the two top bits: 0xC000...
+        private const val VARIANT_RFC_4122 = Long.MIN_VALUE // the top bits 10: 0x8000...
+
         /** A version 5 UUID (SHA-1, RFC 4122 section 4.3). The JDK only makes version 3 (MD5). */
         internal fun uuidV5(name: String): UUID {
             val namespace =
                 ByteBuffer
-                    .allocate(16)
+                    .allocate(Long.SIZE_BYTES * 2)
                     .putLong(URL_NAMESPACE.mostSignificantBits)
                     .putLong(URL_NAMESPACE.leastSignificantBits)
                     .array()
-            val hash = MessageDigest.getInstance("SHA-1").digest(namespace + name.toByteArray(Charsets.UTF_8))
-            hash[6] = (hash[6].toInt() and 0x0f or 0x50).toByte()
-            hash[8] = (hash[8].toInt() and 0x3f or 0x80).toByte()
-            val buffer = ByteBuffer.wrap(hash, 0, 16)
-            return UUID(buffer.long, buffer.long)
+            // SHA-1 gives 20 bytes; a UUID takes the first 16.
+            val hash = ByteBuffer.wrap(MessageDigest.getInstance("SHA-1").digest(namespace + name.toByteArray(Charsets.UTF_8)))
+            val high = (hash.long and VERSION_BITS.inv()) or VERSION_5
+            val low = (hash.long and VARIANT_BITS.inv()) or VARIANT_RFC_4122
+            return UUID(high, low)
         }
     }
 }

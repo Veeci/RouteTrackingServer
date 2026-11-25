@@ -5,6 +5,8 @@ import { useEffect } from 'react';
 import { api } from './api/client';
 import { createQueryClient } from './api/queryClient';
 import { remintSession } from './auth/devLogin';
+import { refreshSession } from './auth/oidc/client';
+import { oidcSettings } from './auth/oidc/settings';
 import { startRemint } from './auth/remint';
 import { sessionStore } from './auth/session';
 import { type AppRouter, createAppRouter } from './routes/router';
@@ -51,7 +53,9 @@ export function App({ router, queryClient }: AppParts) {
     () =>
       startRemint({
         store: sessionStore,
-        mint: (session) => remintSession(api, session),
+        // The provider's refresh token with a real login (12g), the dev-token route with the dev login.
+        mint: (session) =>
+          oidcSettings === null ? remintSession(api, session) : refreshSession(oidcSettings, session),
         onUnauthorized: () => {
           sendToLogin(router);
         },

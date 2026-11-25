@@ -90,7 +90,13 @@ class TestProvider : AutoCloseable {
     private fun jwks(): String {
         val key = keys.public as RSAPublicKey
         val encoder = Base64.getUrlEncoder().withoutPadding()
-        val n = encoder.encodeToString(key.modulus.toByteArray().dropWhile { it == 0.toByte() }.toByteArray())
+        val n =
+            encoder.encodeToString(
+                key.modulus
+                    .toByteArray()
+                    .dropWhile { it == 0.toByte() }
+                    .toByteArray(),
+            )
         val e = encoder.encodeToString(key.publicExponent.toByteArray())
         return """{"keys":[{"kty":"RSA","use":"sig","alg":"RS256","kid":"$KEY_ID","n":"$n","e":"$e"}]}"""
     }
