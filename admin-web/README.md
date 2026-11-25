@@ -26,6 +26,20 @@ npm run dev
 Open http://localhost:5173 and log in with any display name and a role. Leave the staging token empty for a local
 server.
 
+## Log in through Keycloak (12g)
+
+A build with `VITE_OIDC_ISSUER` logs in through the identity provider instead of the dev login. Start Keycloak with the
+realm in [`deploy/keycloak`](../deploy/keycloak/README.md), start the server with
+`OIDC_ISSUER=http://localhost:8180/realms/rts`, then run the dev server with the same issuer:
+
+```bash
+VITE_OIDC_ISSUER=http://localhost:8180/realms/rts npm run dev
+```
+
+Log in as `operator`, `admin` or `nobody` (no staff role). The passwords are in the realm file.
+`VITE_OIDC_CLIENT_ID` defaults to `rts-admin-web`. `node csp.ts` prints the policy with the issuer's origin in
+`connect-src` when `VITE_OIDC_ISSUER` is set, so set it there too when you build the nginx image.
+
 - `npm run generate` writes `generated/rts-v1.ts` from `../app/src/main/resources/openapi/rts-v1.yaml`. Run it again
   after the spec changes. The folder is not in git.
 - The dev server forwards `/api` and `/ws` to `http://localhost:8080`. Set `RTS_API_URL` to use another server, for
@@ -151,7 +165,7 @@ it with `npx playwright show-trace <file>`.
 | Path              | Contents                                                                                                            |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `src/api/`        | The `openapi-fetch` client, `ApiError` and Problem Details parsing, the query client, error texts, the CSV download |
-| `src/auth/`       | The dev login, the session store, re-minting, the redirect check, roles                                             |
+| `src/auth/`       | The dev login, the session store, re-minting, the redirect check, roles. `oidc/` is the real login (12g)            |
 | `src/fleet/`      | The fleet socket client, the backoff, the zod schemas, the marker store and its GeoJSON, the ticket request         |
 | `src/map/`        | The MapLibre map, its layers and colours, the view in the URL                                                       |
 | `src/routes/`     | The router, one folder per page, the cursor paging, the search param, flag and day helpers                          |

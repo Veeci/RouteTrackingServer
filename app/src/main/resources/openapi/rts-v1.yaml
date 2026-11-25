@@ -990,7 +990,7 @@ components:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
     Forbidden:
-      description: The caller may not do this (TRIP_ACTION_FORBIDDEN, COMMAND_FORBIDDEN, SESSION_HEALTH_FORBIDDEN, ACCOUNT_ACTION_FORBIDDEN, AUDIT_FORBIDDEN, FLEET_FORBIDDEN, TICKET_FORBIDDEN), e.g. a guest accepting a trip.
+      description: The caller may not do this (TRIP_ACTION_FORBIDDEN, COMMAND_FORBIDDEN, SESSION_HEALTH_FORBIDDEN, ACCOUNT_ACTION_FORBIDDEN, AUDIT_FORBIDDEN, FLEET_FORBIDDEN, TICKET_FORBIDDEN, NO_STAFF_ROLE), e.g. a guest accepting a trip. NO_STAFF_ROLE means a valid identity provider token whose account has neither the operator nor the admin role.
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
