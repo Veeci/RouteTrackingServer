@@ -1,5 +1,6 @@
 // The Content Security Policy of the built app, in one place. `vite preview` sends it (vite.config.ts), and the
-// 12f nginx image must send the same value. Print it with: node csp.ts
+// nginx image sends the same headers (12f): its build runs `node csp.ts --nginx`, which prints them as nginx
+// `add_header` lines. Print the policy alone with: node csp.ts
 //
 // - Scripts come only from the app's own origin: no inline script, no eval, no third-party script.
 // - Styles allow 'unsafe-inline' because Mantine writes its CSS variables in a <style> tag and sets inline style
@@ -51,6 +52,16 @@ export const securityHeaders: Record<string, string> = {
   'Referrer-Policy': 'no-referrer',
 };
 
+/**
+ * The headers as nginx lines, for deploy/admin-web/nginx.conf. `always` sends them on error pages too. No value holds
+ * a double quote, so wrapping each one in double quotes is safe.
+ */
+export function nginxHeaders(): string {
+  return Object.entries(securityHeaders)
+    .map(([name, value]) => `add_header ${name} "${value}" always;`)
+    .join('\n');
+}
+
 if (import.meta.url === `file://${process.argv[1] ?? ''}`) {
-  console.log(contentSecurityPolicy);
+  console.log(process.argv.includes('--nginx') ? nginxHeaders() : contentSecurityPolicy);
 }

@@ -1,7 +1,7 @@
 # Phase 12 — Admin Dashboard
 
 Branch: `feat/p12-admin-dashboard` · Depends on: 11 (admin API, fleet socket, tickets), 1.5 for the staging deploy only ·
-Status: **12a to 12d built** (2026-11-20), **12e built** (2026-11-21), **12g built** (2026-11-25), 12f planned. The decisions at the end were approved on 2026-11-20,
+Status: **12a to 12d built** (2026-11-20), **12e built** (2026-11-21), **12f built** (2026-11-25, the laptop steps wait for T1b.1 and T1b.6), **12g built** (2026-11-25). The decisions at the end were approved on 2026-11-20,
 all as recommended
 
 ## Goal
@@ -280,8 +280,9 @@ Phone with the SDK (anywhere)
       Reports pages.
 - [x] T12.6 (12d) Live map: fleet client, marker and cluster layers, filters, side panel, hidden-tab pause.
 - [x] T12.7 (12e) Trips list and detail with the track on a map, exports, cancel, live trip view.
-- [ ] T12.8 (12f) `admin-web` image in CI, staging compose service, `tailscale serve` entry, deploy and rollback with
-      the server, Playwright smoke test against staging, staging guide update.
+- [x] T12.8 (12f) `admin-web` image in CI, staging compose service, `tailscale serve` entry, deploy and rollback with
+      the server, Playwright smoke test against staging, staging guide update. The repository half: the laptop steps
+      wait for T1b.1 and T1b.6 (As built 12f).
 - [x] T12.9 (12g) OpenID Connect login with PKCE; RS256 and JWKS verification on the server; role claim mapping.
 
 ## Slices
@@ -331,6 +332,8 @@ Phone with the SDK (anywhere)
 | TC-12-SEC-01 | E2E | Production build: the Content Security Policy blocks an inline script; no request goes to a host outside the allowed list | P1 |
 | TC-12-HOST-01 | Manual | From a device outside the tailnet, port 8443 does not answer, and the Funnel URL answers 404 for `/api/v1/admin/overview` | P0 |
 | TC-12-HOST-02 | CD | A merge to `main` deploys the matching `admin-web` image; a rollback restores both images | P0 |
+| TC-12-HOST-03 | API | On the admin port each forwarded operator has a rate limit of their own; the public port still ignores `X-Forwarded-For` without the flag | P1 |
+| TC-12-HOST-04 | CD | After a staging deploy, a browser logs in through `tailscale serve`, and the live map connects with no console error | P0 |
 | TC-12-CON-01 | CI | `npm run generate` from the current `rts-v1.yaml` then `tsc --noEmit` passes; a removed field breaks the build | P0 |
 
 ## Test implementation notes
@@ -798,6 +801,92 @@ the tests.
   - The replay draws the trip's planned route from `GET /api/v1/trips/{id}`, not every route version in the timeline.
   - The timeline has no `cancelledBy`, so the replay cannot say who cancelled. The live event list can.
 
+## As built (12f)
+
+12f is the repository half of the hosting (decision D2, option H1). The laptop steps wait for the staging setup
+(T1b.1 and T1b.6), and the `Deploy staging` runs skip themselves until then. Everything was tested on the Mac with
+`docker compose`. The list of steps left is at the end of this section.
+
+- **The image.** `deploy/admin-web/Dockerfile` builds from the repo root, because `npm run generate` reads
+  `app/src/main/resources/openapi/rts-v1.yaml`. The build stage is Node 24.22.3 and runs `npm ci`, `generate` and
+  `build`. Tests, lint and the typecheck stay in the `Admin web` job. The runtime stage is
+  `nginxinc/nginx-unprivileged:1.30.6-alpine`: user 101, port 8080, and `nginx -t` at build time. The build writes
+  `version.json` with the commit and the path of MapLibre's worker. It fails if the build has no `.mjs` file, or more
+  than one.
+- **One source for the security headers.** `node csp.ts --nginx` prints the headers of `securityHeaders` as nginx
+  `add_header ... always` lines, and the image includes them in every static `location`. An `add_header` inside a
+  location drops every one from outer levels, so the server block holds none. Proxied API responses get no headers
+  from nginx, so no header comes twice. The Dockerfile takes 12g's `VITE_OIDC_ISSUER` and `VITE_OIDC_CLIENT_ID` as
+  build args. The build and `node csp.ts --nginx` both read them, so the provider login and its origin in
+  `connect-src` come together. CI passes neither, so the staging image keeps the development login until staging
+  runs an identity provider (12g, "Not done here").
+- **nginx (`deploy/admin-web/nginx.conf`).**
+  - `.mjs` is mapped to `application/javascript` in a second `types` block at http level. The stock `mime.types` of
+    nginx 1.30.6 maps `.js` only, and the browser refuses a module worker of any other type. Without the mapping the
+    map page still shows "Live", and only the console says "Worker failed to load". That error is what the browser
+    smoke test catches (checked by removing the mapping).
+  - `proxy_pass` takes a variable, with `resolver 127.0.0.11 valid=10s`. nginx then looks up `app` per request. A
+    literal host is looked up once, at start: nginx would refuse to start while the app is down, and keep a stale
+    address after a deploy recreates the app container.
+  - `/healthz` answers from nginx alone. Unknown paths get `index.html`, `/assets/` gets
+    `public, max-age=31536000, immutable`, and everything else gets `no-cache`.
+  - `/ws/` sends the Upgrade headers, with a 120 s read timeout against the server's 15 s ping.
+- **The client address for the rate limit (the choice 12a left open).** The admin port trusts `X-Forwarded-For`
+  without `HTTP_TRUSTFORWARDEDHEADERS`, and the public port keeps the old rule. `trustKnownProxiesOnly` in
+  `RequestGuards.kt` trusts a peer that reached `http.adminPort`, or a loopback peer when the flag is on. Only nginx
+  and the laptop itself reach 8081: it is published on loopback, and only nginx calls it on the compose network.
+  nginx sends exactly one address. Its `real_ip` module trusts `X-Forwarded-For` from private peers only (the Docker
+  bridge, where `tailscale serve`'s connection arrives) and keeps the last address that no trusted peer added. A
+  spoofed first entry is dropped.
+  - Why not the alternatives: a higher limit on the admin port still puts all operators in one bucket and needs a
+    per-port limiter. Keeping one shared bucket of 300 a minute works for two or three operators, but all their
+    requests look alike in the logs.
+  - If `tailscale serve` sends no usable header, every operator arrives as the bridge address, which is the shared
+    bucket again. Step 6.6 of the staging guide checks this on the laptop.
+  - TC-12-HOST-03 (`RequestGuardsIT`) fails with the admin-port rule removed. On the Mac, with a limit of 2 a minute,
+    a third request as `100.64.0.1` through nginx got 429 while `100.64.0.2` got 401. On 8080 the forwarded address
+    changed nothing.
+- **Compose.** The `admin-web` service publishes `127.0.0.1:8090:8080`, runs `read_only` with a `tmpfs` on `/tmp`
+  and a 64 MB limit. It has no `depends_on`: with the app stopped, `/healthz` answers 200 and `/api` answers 502. Its
+  image tag is `ADMIN_WEB_TAG`, which defaults to `IMAGE_TAG`.
+- **Deploy and rollback (`deploy.sh`).** It pulls both images, migrates, waits for the app, then starts `admin-web`
+  and runs `smoke-admin-web.sh` on `127.0.0.1:8090` with the expected SHA. It writes `current-tag` and
+  `current-admin-web-tag` only when both pass, and otherwise starts the previous tag of each again. A commit from
+  before 12f has no dashboard image. `deploy.sh` then keeps the running dashboard and says so. Otherwise a manual
+  rollback past 12f would fail at the pull. `RTS_DIR` points it at another folder than `/srv/rts`, for a trial run.
+- **Smoke tests.**
+  - `deploy/staging/smoke-admin-web.sh <url> [sha]` needs bash and curl only. It checks `/healthz`, the CSP and
+    `nosniff` on `/`, `no-cache`, a deep link, the SHA in `version.json`, the worker's JavaScript type and `immutable`.
+    Last, it expects **401** from `/api/v1/admin/overview` and from a WebSocket handshake on `/ws/v1/admin/fleet`
+    without credentials. Only the admin port answers 401 there. The public port answers 404, so a proxy pointed at
+    8080 fails. `--static` skips the last two, for CI, where no app runs behind the image.
+  - TC-12-HOST-04 is `e2e/smoke/deployed.spec.ts`. It runs only with `RTS_SMOKE_URL`, which also drops the
+    `vite preview` web server and limits the run to `e2e/smoke`. The normal E2E run ignores that folder. It logs in
+    with `RTS_STAGING_TOKEN`, opens the map, waits for "Live" (the fleet socket through nginx) and expects no console
+    error. The tile host is answered in the test, as in TC-12-E2E-01. It failed, as it should, with a wrong token and
+    with the `.mjs` mapping removed.
+- **CI.** The new `Admin web image` job runs after `Admin web`. It builds the image with `load: true`, runs it, and
+  runs the static smoke test, on every PR. On `main` it pushes `:<sha>` and `:main` to
+  `ghcr.io/veeci/route-tracking-admin-web`. The `Build & test` job's `shellcheck` covers the new script.
+  `Deploy staging` copies the script, runs it from the runner over the tailnet against `$STAGING_URL:8443`, and runs
+  the browser smoke test when the environment secret `STAGING_ACCESS_TOKEN` exists.
+- **Tested on the Mac.** The server image from this branch and the `admin-web` image ran in the staging
+  `compose.yml`, with the test grid in place of `hanoi.osm`. The smoke script and TC-12-HOST-04 passed against
+  `http://127.0.0.1:8090`. `deploy.sh` itself did not run on the Mac, because it reads `/srv/rts/.env`. Its rollback
+  paths wait for the laptop, with T1b.8.
+- **Steps left on the laptop.** The staging guide holds each one.
+  1. T1b.1 and T1b.6, the laptop and GitHub setup.
+  2. Step 2.3: the grant for `tag:ci` to port 8443.
+  3. Step 3.5: `sudo tailscale serve --bg --https=8443 http://127.0.0.1:8090`. Check with `tailscale serve status`
+     that 8443 is tailnet only.
+  4. Step 5.2, optional: the secret `STAGING_ACCESS_TOKEN` for the browser smoke test.
+  5. Step 6.6: open the dashboard, check TC-12-HOST-01 from a phone, and check in the nginx log that the operator's
+     tailnet address arrives. Record the result here.
+  6. T1b.8 with the dashboard (TC-12-HOST-02): a deploy, a failed `admin-web` smoke that rolls both back, and a
+     `workflow_dispatch` rollback.
+  7. The Definition of Done's 500 simulated drivers on the staging map. That needs the simulator's `--admin-url`
+     (As built 12a).
+
 ## As built (12g)
 
 The user chose Keycloak for D7 on 2026-11-25. Keycloak is the only option that lets the E2E job test the real login
@@ -851,8 +940,8 @@ without secrets, and it keeps the staff accounts inside the tailnet.
   tests use. Staging and production are separate builds.
 - **CSP.** `csp.ts` adds the issuer's origin to `connect-src` when `VITE_OIDC_ISSUER` is set, because the app fetches
   the discovery document and the token endpoint. The login and logout pages are navigations, which `connect-src` does
-  not govern. 12f's nginx image prints the policy with `node csp.ts`, so it must set the variable there too. This PR
-  does not touch 12f's deploy files.
+  not govern. 12f's nginx image prints the policy with `node csp.ts --nginx`, and its Dockerfile passes the same
+  build arg to both steps (As built 12f).
 - **Keycloak.** `deploy/keycloak/rts-realm.json` holds the realm `rts`, the two roles, the public client
   `rts-admin-web` (PKCE S256 required, an audience mapper for `rts-api`), 5-minute access tokens, and three test users.
   `deploy/keycloak/README.md` lists what a staging realm must change first. Keycloak is pinned to 26.8.1.

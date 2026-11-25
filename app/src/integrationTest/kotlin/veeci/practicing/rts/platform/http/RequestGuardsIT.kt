@@ -20,6 +20,7 @@ import kotlinx.serialization.Serializable
 import org.junit.jupiter.api.Test
 import org.testcontainers.junit.jupiter.Testcontainers
 import veeci.practicing.rts.testing.problem
+import veeci.practicing.rts.testing.socketApp
 import veeci.practicing.rts.testing.testApp
 
 @Testcontainers(disabledWithoutDocker = true)
@@ -126,6 +127,19 @@ class RequestGuardsIT {
     @Test
     fun `T1b-4 without the flag the forwarded headers are ignored`() =
         testApp(env = mapOf("HTTP_RATELIMITPERMINUTE" to "1")) {
+            client.get("/health/live") { header(X_FORWARDED_FOR, "203.0.113.1") }.status shouldBe HttpStatusCode.OK
+            client.get("/health/live") { header(X_FORWARDED_FOR, "203.0.113.2") }.status shouldBe HttpStatusCode.TooManyRequests
+        }
+
+    @Test
+    fun `TC-12-HOST-03 the admin port counts each forwarded operator on its own, the public port does not`() =
+        socketApp(env = mapOf("HTTP_RATELIMITPERMINUTE" to "1"), adminPort = true) {
+            // The flag stays off, as in staging: only the admin port trusts its proxy (12f).
+            for (operator in listOf("100.64.0.1", "100.64.0.2", "100.64.0.3")) {
+                adminClient.get("/health/live") { header(X_FORWARDED_FOR, operator) }.status shouldBe HttpStatusCode.OK
+            }
+            adminClient.get("/health/live") { header(X_FORWARDED_FOR, "100.64.0.1") }.status shouldBe HttpStatusCode.TooManyRequests
+
             client.get("/health/live") { header(X_FORWARDED_FOR, "203.0.113.1") }.status shouldBe HttpStatusCode.OK
             client.get("/health/live") { header(X_FORWARDED_FOR, "203.0.113.2") }.status shouldBe HttpStatusCode.TooManyRequests
         }

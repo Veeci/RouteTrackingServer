@@ -124,8 +124,8 @@ that give each machine only what it needs. Merge these sections into the policy 
   "grants": [
     // You and your own devices reach everything (SSH, metrics, psql through SSH).
     {"src": ["autogroup:member"], "dst": ["*"], "ip": ["*"]},
-    // GitHub Actions deploy jobs reach only SSH on the staging laptop.
-    {"src": ["tag:ci"], "dst": ["tag:staging"], "ip": ["22"]},
+    // GitHub Actions deploy jobs reach SSH on the staging laptop, and the dashboard's port 8443 for the smoke test.
+    {"src": ["tag:ci"], "dst": ["tag:staging"], "ip": ["22", "8443"]},
     // The staging laptop copies backups to the backup laptop over SSH.
     {"src": ["tag:staging"], "dst": ["tag:backup"], "ip": ["22"]},
   ],
@@ -311,6 +311,20 @@ Funnel points at 8080 only. The app's admin port, 8081 (phase 12a), must never b
 
 Until the app runs, the URL answers 502. That is expected.
 
+Then add the admin dashboard's entry (phase 12f). `tailscale serve` is the tailnet-only sibling of Funnel: the same
+name and certificate, but only devices in your tailnet can connect.
+
+```bash
+sudo tailscale serve --bg --https=8443 http://127.0.0.1:8090
+tailscale serve status
+```
+
+Check: `tailscale serve status` lists both entries. Port 443 shows `proxy http://127.0.0.1:8080` and "(Funnel on)".
+Port 8443 shows `proxy http://127.0.0.1:8090` and is tailnet only. If the 8443 entry also says Funnel is on, turn it
+off with `sudo tailscale funnel --https=8443 off`: the dashboard must never be public.
+
+Until the first deploy starts the `admin-web` container, `https://rts-staging.<tailnet>.ts.net:8443` answers 502.
+
 ### 3.6 Create the deploy key
 
 On your **Mac**, create a key used only by GitHub Actions:
@@ -338,14 +352,16 @@ Check: `ssh -i ~/.ssh/rts-staging-deploy deploy@rts-staging docker ps` lists no 
 
 ## Part 4. The deploy files in the repository (tasks T1b.5 and T1b.7)
 
-These files are in the repository. Nothing to type in. Each deploy copies the first three to `/srv/rts/`.
+These files are in the repository. Nothing to type in. Each deploy copies the first four to `/srv/rts/`.
 
 | File | What it does |
 |---|---|
-| [`deploy/staging/compose.yml`](../../deploy/staging/compose.yml) | The stack: `db` (Postgres 16, no published port) and `app` (the image `:<sha>`, public port `127.0.0.1:8080`, admin port `127.0.0.1:8081`, 2 GB limit, the road graph mounted read-only). One instance and no Redis: `REDIS_URL` is empty |
-| [`deploy/staging/deploy.sh`](../../deploy/staging/deploy.sh) | `bash /srv/rts/deploy.sh <full-sha>`: pull, run `/app/bin/migrate`, start the app, wait up to 180 s for `/health/ready`, and start the previous tag again if the new one never gets ready |
+| [`deploy/staging/compose.yml`](../../deploy/staging/compose.yml) | The stack: `db` (Postgres 16, no published port), `app` (the image `:<sha>`, public port `127.0.0.1:8080`, admin port `127.0.0.1:8081`, 2 GB limit, the road graph mounted read-only) and `admin-web` (the dashboard's nginx, `:<sha>` from the same commit, `127.0.0.1:8090`). One instance and no Redis: `REDIS_URL` is empty |
+| [`deploy/staging/deploy.sh`](../../deploy/staging/deploy.sh) | `bash /srv/rts/deploy.sh <full-sha>`: pull both images, run `/app/bin/migrate`, start the app, wait up to 180 s for `/health/ready`, start `admin-web` and smoke-test it. If either fails, start the previous tags of both again |
+| [`deploy/staging/smoke-admin-web.sh`](../../deploy/staging/smoke-admin-web.sh) | `bash smoke-admin-web.sh <base-url> [sha]`: the dashboard's files, headers, the worker's MIME type, and a 401 from the admin port through the proxy. `deploy.sh`, the deploy job and CI run it |
 | [`deploy/staging/backup.sh`](../../deploy/staging/backup.sh) | Nightly `pg_dump`, copy to `rts-backup`, keep 14 days on both laptops |
-| [`.github/workflows/deploy-staging.yml`](../../.github/workflows/deploy-staging.yml) | After CI succeeds on a push to `main`: join the tailnet, copy the files, run `deploy.sh`, then a smoke test through Funnel from a second runner and a job summary. `workflow_dispatch` with `image_sha` redeploys any earlier image |
+| [`.github/workflows/deploy-staging.yml`](../../.github/workflows/deploy-staging.yml) | After CI succeeds on a push to `main`: join the tailnet, copy the files, run `deploy.sh`, smoke-test the dashboard through `tailscale serve` (and in a browser once `STAGING_ACCESS_TOKEN` is set), then a smoke test through Funnel from a second runner and a job summary. `workflow_dispatch` with `image_sha` redeploys any earlier image |
+| [`deploy/admin-web/`](../../deploy/admin-web/) | The dashboard's `Dockerfile` and `nginx.conf`. CI builds `ghcr.io/veeci/route-tracking-admin-web:<sha>` next to the server image |
 
 Points worth knowing:
 
@@ -354,7 +370,10 @@ Points worth knowing:
 - The app listens on two ports (phase 12a). 8080 is the public port behind Funnel: drivers, guests, trips, routes, dev
   tokens, health and metrics. 8081 is the admin port (`HTTP_ADMINPORT`). The `/api/v1/admin` routes and the
   `/ws/v1/admin` sockets answer only there, and the routes of 8080 answer there too. Both are on loopback. The admin
-  dashboard reaches 8081 through the tailnet only, which slice 12f sets up.
+  dashboard reaches 8081 through its nginx (`admin-web`, 8090), and operators reach nginx through `tailscale serve`
+  on port 8443 (phase 12f).
+- `admin-web` keeps its own tag in `/srv/rts/current-admin-web-tag`. A manual deploy of a commit from before 12f has
+  no dashboard image, so `deploy.sh` keeps the running dashboard and says so.
 - `deploy.sh` runs the migrations with `docker compose run --rm --no-deps --entrypoint /app/bin/migrate app`. The
   `--entrypoint` flag matters, because the image's `ENTRYPOINT` is `/app/bin/app`. If a migration fails, the script
   stops and the old version keeps serving.
@@ -362,7 +381,7 @@ Points worth knowing:
   show a skipped run.
 - `backup.sh` uses `docker exec rts-staging-db-1`, not `docker compose exec`, because compose would need
   `IMAGE_TAG` to read `compose.yml`.
-- CI runs `shellcheck` on both scripts.
+- CI runs `shellcheck` on the three scripts.
 
 A rollback with `workflow_dispatch` to a SHA older than these files fails at the copy step, because that commit has
 no `deploy/staging/` folder. Roll back only to commits after phase 1.5 merged.
@@ -395,6 +414,7 @@ In the repository, open **Settings**, then **Environments**, then **New environm
 | `TS_OAUTH_SECRET` | From step 5.1 |
 | `STAGING_SSH_KEY` | The whole private key: `cat ~/.ssh/rts-staging-deploy` |
 | `STAGING_KNOWN_HOSTS` | `cat ~/rts-staging-known-hosts` |
+| `STAGING_ACCESS_TOKEN` | Optional: the same value as in `/srv/rts/.env`. With it, each deploy also logs in to the dashboard in a real browser (TC-12-HOST-04). Each run adds one OPERATOR user named "Staging smoke" |
 
 3. Add the variable `STAGING_URL` = `https://rts-staging.<tailnet>.ts.net`, with no trailing slash, as a
    **repository variable**: **Settings**, then **Secrets and variables**, then **Actions**, then the **Variables**
@@ -518,6 +538,28 @@ instead. If it does, the app still counts all testers as one client, and the tru
 If Funnel sends no usable header, keep the flag off and raise `HTTP_RATELIMITPERMINUTE` for staging in `.env`,
 with a note in the phase plan.
 
+### 6.6 Open the admin dashboard (phase 12f)
+
+1. On the Mac (in the tailnet), open `https://rts-staging.<tailnet>.ts.net:8443`. Log in with a display name, a role
+   and the staging access token from `/srv/rts/.env`. The live map shows the drivers that are online.
+2. From the Mac, run the smoke test:
+
+   ```bash
+   bash deploy/staging/smoke-admin-web.sh https://rts-staging.<tailnet>.ts.net:8443
+   ```
+
+3. Check TC-12-HOST-01 from the phone on mobile data, with Tailscale off: port 8443 does not answer, and
+   `https://rts-staging.<tailnet>.ts.net/api/v1/admin/overview` answers 404.
+4. Check that each operator gets their own rate limit. The app's admin port trusts the address nginx sends, and nginx
+   takes it from the `X-Forwarded-For` that `tailscale serve` writes. On Laptop 2, run
+   `sudo docker logs --tail 5 rts-staging-admin-web-1` after a page load from the Mac. The first field of each line
+   must be the Mac's tailnet address (`100.x.y.z`), not a `172.x` Docker address. If it is a `172.x` address,
+   `tailscale serve` sent no usable header. All operators then share one limit of 300 requests a minute, which is
+   enough for a few. Record what you saw in the phase 12 plan, under "As built (12f)".
+
+To invite an operator, share the device or invite them to the tailnet (Tailscale admin console, **Users**). The free
+Personal plan limits the number of users, so check the current limit first.
+
 ---
 
 ## Part 7. Automatic deploys
@@ -621,13 +663,16 @@ All commands run on Laptop 2. Reach it with `ssh <your-user>@rts-staging` from a
 
 | Task | Command |
 |---|---|
-| See what runs | `cat /srv/rts/current-tag` |
+| See what runs | `cat /srv/rts/current-tag /srv/rts/current-admin-web-tag` |
 | Follow app logs | `sudo -u deploy IMAGE_TAG=$(cat /srv/rts/current-tag) docker compose -p rts-staging -f /srv/rts/compose.yml logs -f app` |
 | Open `psql` | `sudo docker exec -it rts-staging-db-1 psql -U rts -d rts` |
 | Read metrics | `curl -s 127.0.0.1:8080/metrics` |
 | Call the admin API on the laptop | `curl -s -H "Authorization: Bearer <staff token>" 127.0.0.1:8081/api/v1/admin/overview` (port 8080 answers 404) |
 | Roll back | GitHub, then Actions, then **Deploy staging**, then **Run workflow** with an older SHA |
 | Restart the app | `sudo -u deploy IMAGE_TAG=$(cat /srv/rts/current-tag) docker compose -p rts-staging -f /srv/rts/compose.yml restart app` |
+| Follow dashboard logs | `sudo docker logs -f rts-staging-admin-web-1` |
+| Check the dashboard | `bash /srv/rts/smoke-admin-web.sh http://127.0.0.1:8090` |
+| Dashboard entry state | `tailscale serve status` (8443 must say tailnet only) |
 | Funnel state | `tailscale funnel status` |
 | Pause public access | `sudo tailscale funnel reset`, then `sudo tailscale funnel --bg 8080` to restore |
 | Disk use | `df -h /` and `sudo docker system df` |
@@ -645,6 +690,9 @@ All commands run on Laptop 2. Reach it with `ssh <your-user>@rts-staging` from a
 |---|---|---|
 | Public URL answers 502 | App not running or not on `127.0.0.1:8080` | Check `docker ps` and the app logs |
 | An admin route answers 404 | It was called on 8080 or through Funnel. Admin routes answer only on the admin port | Call `127.0.0.1:8081` on the laptop |
+| Dashboard answers 502 | `admin-web` not running, or the app is down (then `/healthz` works and `/api` fails) | `sudo docker ps`, then the app logs. `curl -s 127.0.0.1:8090/healthz` checks nginx alone |
+| Dashboard loads, but the map stays empty and the console says a module script has a wrong MIME type | An `admin-web` image whose nginx does not map `.mjs` | Run the smoke test. It names the worker file and its type |
+| Deploy job fails at "Admin web through tailscale serve" with a timeout | The `tailscale serve` entry is missing, or the grant for `tag:ci` lacks port 8443 | `tailscale serve status` on the laptop, and step 2.3 |
 | Public URL does not resolve | Public DNS not out yet, or Funnel off | Wait 10 minutes. Check `tailscale funnel status` |
 | `/health/ready` stays DOWN on `graph` | `hanoi.osm` missing, or a directory instead of a file | `ls -l /srv/rts/osm/`, redo step 3.4, restart the app |
 | Every start takes tens of seconds and logs "Could not write the road graph cache" | The `osm-cache` volume is not writable by the `app` user | Stop the app, `sudo docker volume rm rts-staging_osm-cache`, deploy again so the volume is created from the image |
