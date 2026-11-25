@@ -28,7 +28,8 @@ export default defineConfig({
   },
   projects: [
     { name: 'chromium', testIgnore: /oidc\.spec\.ts/, use: { ...devices['Desktop Chrome'] } },
-    ...(oidcIssuer === undefined
+    // The smoke test runs against a deployed dashboard only, so the 12g provider build is left out there.
+    ...(oidcIssuer === undefined || SMOKE_URL !== undefined
       ? []
       : [
           {
