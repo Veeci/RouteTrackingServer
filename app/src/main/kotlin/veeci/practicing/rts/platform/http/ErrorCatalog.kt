@@ -30,6 +30,9 @@ enum class PlatformError(
     MALFORMED_REQUEST(HttpStatusCode.BadRequest),
     VALIDATION_FAILED(HttpStatusCode.BadRequest),
     UNAUTHORIZED(HttpStatusCode.Unauthorized),
+
+    /** A valid identity provider token whose account has no operator or admin role (phase 12g). */
+    NO_STAFF_ROLE(HttpStatusCode.Forbidden),
     NOT_FOUND(HttpStatusCode.NotFound),
     PAYLOAD_TOO_LARGE(HttpStatusCode.PayloadTooLarge),
     UNSUPPORTED_MEDIA_TYPE(HttpStatusCode.UnsupportedMediaType),

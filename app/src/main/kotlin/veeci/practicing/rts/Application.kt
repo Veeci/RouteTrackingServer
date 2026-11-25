@@ -53,6 +53,7 @@ import veeci.practicing.rts.platform.observability.configureRequestLogging
 import veeci.practicing.rts.platform.observability.healthRoutes
 import veeci.practicing.rts.platform.security.AUTH_JWT
 import veeci.practicing.rts.platform.security.AUTH_TICKET
+import veeci.practicing.rts.platform.security.ProviderTokens
 import veeci.practicing.rts.platform.security.configureAuthentication
 import veeci.practicing.rts.platform.security.stagingGate
 import veeci.practicing.rts.platform.security.wsTicketRoutes
@@ -127,7 +128,7 @@ fun Application.module(
     configureRequestGuards(config.http)
     configureErrorHandling()
     configureSecurityHeaders()
-    configureAuthentication(get(), get())
+    configureAuthentication(get(), get(), getKoin().getOrNull<ProviderTokens>())
     configureWebSockets(config.ws)
 
     routing {
